@@ -1,0 +1,31 @@
+//@version=5
+indicator(title="RSI Fisher Transform", shorttitle="RIFT", format=format.price, precision=2, timeframe="", timeframe_gaps=true)
+
+len = input.int(9, minval=1, title="Length", group="Settings")
+advMode = input.bool(false, title="Advanced Mode", group="Settings")
+
+up = ta.rma(math.max(ta.change(close), 0), 14)
+down = ta.rma(-math.min(ta.change(close), 0), 14)
+rsi = down == 0 ? 100 : up == 0 ? 0 : 100 - (100 / (1 + up / down))
+rsiMA = ta.ema(rsi, 14)
+
+high_ = ta.highest(hl2, len)
+low_ = ta.lowest(hl2, len)
+round_(val) => val > .99 ? .999 : val < -.99 ? -.999 : val
+value = 0.0
+value := round_(.66 * ((hl2 - low_) / (high_ - low_) - .5) + .67 * nz(value[1]))
+fish1 = 0.0
+fish1 := .5 * math.log((1 + value) / (1 - value)) + .5 * nz(fish1[1])
+fish2 = fish1[1]
+
+hline(1.5, "1.5", color=#b33660)
+hline(0, "0", color=#aba6a8)
+hline(-1.5, "-1.5", color=#a82c55)
+
+plot(fish1, color=#269950, title="Fisher", linewidth=3)
+plot(advMode ? na : fish2, color=#a82b2b, title="Trigger", linewidth=3)
+
+plot((rsi / 10) - 4.9, "RSI", color=#7E57C2, linewidth=3)
+plot(advMode ? na : (rsiMA / 10) - 4.9, "EMA", color=color.rgb(119, 145, 190))
+
+

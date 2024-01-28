@@ -1,0 +1,75 @@
+//@version=4
+study("BullRush v1.2", overlay = true, format=format.price, precision=2, resolution="")
+
+iAvgType = input("SMMA", title="Moving Average Type", options=["EMA","HMA","SMA","SMMA","WMA"])
+iEMAMain = input(50, "Main EMA Length", minval=1, tooltip="Normally 50.  64 is an alternative")
+bRSI = input(true, title="Enable RSI Verification")
+
+up = rma(max(change(close), 0), 14)
+down = rma(-min(change(close), 0), 14)
+rsi = down == 0 ? 100 : up == 0 ? 0 : 100 - (100 / (1 + up / down))
+rsiMA = ema(rsi, 14)
+
+var isLong = false
+var isShort = false
+
+bMAUp = false
+bMADown = false
+b9over21 = false
+b9under21 = false
+
+if (iAvgType == "HMA")
+    bMAUp := close > wma(2*wma(close, iEMAMain/2)-wma(close, iEMAMain), floor(sqrt(iEMAMain)))
+    bMADown := close < wma(2*wma(close, iEMAMain/2)-wma(close, iEMAMain), floor(sqrt(iEMAMain)))
+    b9over21 := wma(2*wma(close, 9/2)-wma(close, 9), floor(sqrt(9))) > wma(2*wma(close, 21/2)-wma(close, 21), floor(sqrt(21)))
+    b9under21 := wma(2*wma(close, 9/2)-wma(close, 9), floor(sqrt(9))) < wma(2*wma(close, 21/2)-wma(close, 21), floor(sqrt(21)))
+
+if (iAvgType == "WMA")
+    bMAUp := close > wma(close, iEMAMain) // and open > sma(close, iEMAMain)
+    bMADown := close < wma(close, iEMAMain) // and open < sma(close, iEMAMain)
+    b9over21 := wma(close, 9) > wma(close, 21)
+    b9under21 := wma(close, 9) < wma(close, 21)
+
+if (iAvgType == "SMA")
+    bMAUp := close > sma(close, iEMAMain) // and open > sma(close, iEMAMain)
+    bMADown := close < sma(close, iEMAMain) // and open < sma(close, iEMAMain)
+    b9over21 := sma(close, 9) > sma(close, 21)
+    b9under21 := sma(close, 9) < sma(close, 21)
+
+if (iAvgType == "EMA")
+    bMAUp := close > ema(close, iEMAMain) // and open > ema(close, iEMAMain)
+    bMADown := close < ema(close, iEMAMain) // and open < ema(close, iEMAMain)
+    b9over21 := ema(close, 9) > ema(close, 21)
+    b9under21 := ema(close, 9) < ema(close, 21)
+
+if (iAvgType == "SMMA")
+    smma = 0.0
+    smma := na(smma[1]) ? sma(close, iEMAMain) : (smma[1] * (iEMAMain - 1) + close) / iEMAMain
+    bMAUp := close > smma // and open > smma
+    bMADown := close < smma // and open < smma
+    b9over21 := ema(close, 9) > ema(close, 21)
+    b9under21 := ema(close, 9) < ema(close, 21)
+
+rsiUp = true
+rsiDown = true
+if (bRSI)
+    rsiUp = rsi > 50 and rsi > rsiMA
+    rsiDown = rsi < 50 and rsi < rsiMA
+
+upwards = not isLong and bMAUp and close > open and rsiUp and b9over21 // and ema(close, 9) > ema(close, 21)
+downwards = not isShort and bMADown and open > close and rsiDown and b9under21 // and ema(close, 9) < ema(close, 21)
+
+showUp = upwards and not upwards[1] 
+showDown = downwards and not downwards[1] 
+
+plotshape(showUp ? hl2 : na, title="BR", text="BR", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.green, textcolor=color.white)
+plotshape(showDown ? hl2 : na, title="BR", text="BR", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.red, textcolor=color.white)
+
+if showUp
+    isLong := true
+    isShort := false
+
+if showDown
+    isLong := false
+    isShort := true
+

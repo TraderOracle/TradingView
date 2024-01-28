@@ -1,0 +1,247 @@
+//@version=5
+
+indicator("The Defibrillator", "The Defibrillator v1.6", true, max_bars_back=1000, max_lines_count=500)
+
+openHour = input.session("0830-0930", title="Market open - one hour after opening", tooltip="0830-0930 for CST, 0930-1030 for EST, etc")
+sessionTimes = input.session("0930-1500", title="One hour after open to end of session")
+lWidth = input.int(1, "Line Width")
+lStyle = input.string(title="Line Style", options=["Solid", "Cross", "Circles"], defval="Solid")
+sStyle = lStyle=="Circles" ? plot.style_circles : lStyle=="Cross" ? plot.style_cross : plot.style_linebr
+
+var highest = 10e-10
+var lowest = 10e10
+timeIsAllowed = time(timeframe.period, openHour)
+if timeIsAllowed
+    if not timeIsAllowed[1]
+        highest := high
+        lowest := low
+    else
+        highest := math.max(high, highest)
+        lowest := math.min(low, lowest)
+
+InSession(sessionTimes) =>
+    not na(time(timeframe.period, sessionTimes))
+bool iss = InSession(sessionTimes)
+
+cRed = color.red
+cYellow = color.yellow
+cPurple = color.purple
+cGray = color.gray
+cGreen = color.green
+cBlue = color.blue
+
+var float M050 = na
+var float B150 = na
+var float A113 = na
+var float B113 = na
+var float B100 = na
+var float M618 = na
+var float A1618 = na
+var float B1618 = na
+var float F1272 = na
+var float B200 = na
+var float B213 = na
+var float A213 = na
+var float F0272 = na
+var float F272 = na
+var float M236 = na
+var float F2272 = na
+var float B2618 = na
+var float A2618 = na
+var float A300 = na
+var float B300 = na
+var float A150 = na
+var float A100 = na
+var float A200 = na
+var float M786 = na
+var float A250 = na
+var float B250 = na
+
+fibrange = highest - lowest
+r = math.abs(fibrange)
+
+if iss
+    A300 := lowest + 3 * r
+    A2618 := lowest + 2.618 * r
+    A250 := lowest + 2.5 * r
+    A213 := lowest + 2.13 * r
+    A200 := lowest + 2 * r
+    A1618 := lowest + 1.618 * r
+    A150 := lowest + 1.5 * r
+    A113 := lowest + 1.13 * r
+    A100 := lowest + r
+
+    M236 := highest - 0.236 * r
+    M050 := highest - 0.5 * r
+    M618 := highest - 0.618 * r
+    M786 := highest - 0.786 * r
+
+    B100 := highest - r
+    B113 := highest - 1.13 * r
+    B150 := highest - 1.5 * r
+    B1618 := highest - 1.618 * r
+    B200 := highest - 2 * r
+    B213 := highest - 2.13 * r
+    B250 := highest - 2.5 * r
+    B2618 := highest - 2.618 * r
+    B300 := highest - 3 * r
+ 
+label l_A100 = na
+label l_A113 = na
+label l_A300 = na
+label l_A2618 = na
+label l_A250 = na
+label l_A213 = na
+label l_A200 = na
+label l_A1618 = na
+label l_A150 = na
+label l_M236 = na
+label l_M050 = na
+label l_M618 = na
+label l_M786 = na
+label l_B100 = na
+label l_B113 = na
+label l_B150 = na
+label l_B1618 = na
+label l_B200 = na
+label l_B213 = na
+label l_B250 = na
+label l_B2618 = na
+label l_B300 = na
+
+r_A300 = plot(high >= A2618 and iss ? A300 : na, title='3', color=cPurple, style=sStyle, offset=0, linewidth=lWidth)
+if (high >= A2618 and iss)
+    l_A300 := label.new(bar_index - 2, A300, "3", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+    label.set_x(l_A300, bar_index + 3)
+label.delete(l_A300[1])
+
+r_A2618 = plot(high >= A250 and iss ? A2618 : na, title='2.618', color=cGreen, style=sStyle, offset=0, linewidth=lWidth)
+if (high >= A250 and iss)
+    l_A2618 := label.new(bar_index - 2, A2618, "2.618", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+    label.set_x(l_A2618, bar_index + 3)
+label.delete(l_A2618[1])
+
+r_A250 = plot(high >= A200 and iss ? A250 : na, title='2.5', color=cBlue, style=sStyle, offset=0, linewidth=lWidth)
+if (high >= A200 and iss)
+    l_A250 := label.new(bar_index - 2, A250, "2.5", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+    label.set_x(l_A250, bar_index + 3)
+label.delete(l_A250[1])
+
+r_A213 = plot(high >= A200 and iss ? A213 : na, title='2.5', color=cBlue, style=sStyle, offset=0, linewidth=lWidth)
+if (high >= A200 and iss)
+    l_A213 := label.new(bar_index - 2, A213, "2.13", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+    label.set_x(l_A213, bar_index + 3)
+label.delete(l_A213[1])
+
+r_A200 = plot(high >= A1618 and iss ? A200 : na, title='2', color=cRed, style=sStyle, offset=0, linewidth=lWidth)
+if (high >= A1618 and iss)
+    l_A200 := label.new(bar_index - 2, A200, "2", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+    label.set_x(l_A200, bar_index + 3)
+label.delete(l_A200[1])
+
+r_A1618 = plot(high >= A150 and iss ? A1618 : na, title='1.618', color=cGreen, style=sStyle, offset=0, linewidth=lWidth)
+if (high >= A113 and iss)
+    l_A1618 := label.new(bar_index - 2, A1618, "1.618", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+    label.set_x(l_A1618, bar_index + 3)
+label.delete(l_A1618[1])
+
+r_A150 = plot(high >= A113 and iss ? A150 : na, title='1.5', color=cBlue, style=sStyle, offset=0, linewidth=lWidth)
+if (high >= A113 and iss)
+    l_A150 := label.new(bar_index - 2, A150, "1.5", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+    label.set_x(l_A150, bar_index + 3)
+label.delete(l_A150[1])
+
+r_A113 = plot(high >= A100 and iss ? A113 : na, title='1.13', color=cBlue, style=sStyle, offset=0, linewidth=lWidth)
+if (high >= A100 and iss)
+    l_A113 := label.new(bar_index - 2, A113, "1.13", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+    label.set_x(l_A113, bar_index + 3)
+label.delete(l_A113[1])
+
+r_A100 = plot(iss ? A100 : na, title='1', color=cGray, style=sStyle, offset=0, linewidth=lWidth)
+if (iss)
+    l_A100 := label.new(bar_index - 2, A100, "1", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+    label.set_x(l_A100, bar_index + 3)
+label.delete(l_A100[1])
+
+// ----------------------------------------------------------------------------------------
+
+r_M236 = plot(low <= A100 and iss ? M236 : na, title='.05', color=cGray, style=sStyle, offset=0, linewidth=lWidth)
+if (low <= A100 and iss)
+    l_M236 := label.new(bar_index - 2, M236, ".236", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+    label.set_x(l_M236, bar_index + 3)
+label.delete(l_M236[1])
+
+r_M050 = plot(low <= M236 and iss ? M050 : na, title='.05', color=cBlue, style=sStyle, offset=0, linewidth=lWidth)
+if (low <= M236 and iss)
+    l_M050 := label.new(bar_index - 2, M050, "0.5", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+    label.set_x(l_M050, bar_index + 3)
+label.delete(l_M050[1])
+
+r_M618 = plot(low <= M050 and iss ? M618 : na, title='.618', color=cGreen, style=sStyle, offset=0, linewidth=lWidth)
+if (low <= M050 and iss)
+    l_M618 := label.new(bar_index - 2, M618, "0.618", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+    label.set_x(l_M618, bar_index + 3)
+label.delete(l_M618[1])
+
+r_M786 = plot(low <= M618 and iss ? M786 : na, title='.786', color=cGreen, style=sStyle, offset=0, linewidth=lWidth)
+if (low <= M618 and iss)
+    l_M786 := label.new(bar_index - 2, M786, "0.786", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+    label.set_x(l_M786, bar_index + 3)
+label.delete(l_M786[1])
+
+// -------------------------------------------------------
+
+r_B100 = plot(low <= M786 and iss ? B100 : na, title='1', color=cGray, style=sStyle, offset=0, linewidth=lWidth)
+if (low <= M786 and iss)
+    l_B100 := label.new(bar_index - 2, B100, "1", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+    label.set_x(l_B100, bar_index + 3)
+label.delete(l_B100[1])
+
+r_B113 = plot(low <= B100 and iss ? B113 : na, title='1.13', color=cBlue, style=sStyle, offset=0, linewidth=lWidth)
+if (low <= B100 and iss)
+    l_B113 := label.new(bar_index - 2, B113, "1.13", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+    label.set_x(l_B113, bar_index + 3)
+label.delete(l_B113[1])
+
+r_B150 = plot(low <= B100 and iss ? B150 : na, title='1.5', color=cBlue, style=sStyle, offset=0, linewidth=lWidth)
+if (low <= B100 and iss)
+    l_B150 := label.new(bar_index - 2, B150, "1.5", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+    label.set_x(l_B150, bar_index + 3)
+label.delete(l_B150[1])
+
+r_B1618 = plot(low <= B150 and iss ? B1618 : na, title='1.618', color=cGreen, style=sStyle, offset=0, linewidth=lWidth)
+if (low <= B150 and iss)
+    l_B1618 := label.new(bar_index - 2, B1618, "1.618", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+    label.set_x(l_B1618, bar_index + 3)
+label.delete(l_B1618[1])
+
+r_B200 = plot(low <= B1618 and iss ? B200 : na, title='2', color=cRed, style=sStyle, offset=0, linewidth=lWidth)
+if (low <= B1618 and iss)
+    l_B200 := label.new(bar_index - 2, B200, "2", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+    label.set_x(l_B200, bar_index + 3)
+label.delete(l_B200[1])
+
+r_B213 = plot(low <= B200 and iss ? B213 : na, title='2.13', color=cRed, style=sStyle, offset=0, linewidth=lWidth)
+if (low <= B200 and iss)
+    l_B213 := label.new(bar_index - 2, B213, "2.13", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+    label.set_x(l_B213, bar_index + 3)
+label.delete(l_B213[1])
+
+r_B250 = plot(low <= B200 and iss ? B250 : na, title='2.5', color=cRed, style=sStyle, offset=0, linewidth=lWidth)
+if (low <= B200 and iss)
+    l_B250 := label.new(bar_index - 2, B250, "2.5", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+    label.set_x(l_B250, bar_index + 3)
+label.delete(l_B250[1])
+
+r_B2618 = plot(low <= B250 and iss ? B2618 : na, title='2.618', color=cGreen, style=sStyle, offset=0, linewidth=lWidth)
+if (low <= B250 and iss)
+    l_B2618 := label.new(bar_index - 2, B2618, "2.618", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+    label.set_x(l_B2618, bar_index + 3)
+label.delete(l_B2618[1])
+
+r_B300 = plot(low <= B2618 and iss ? B300 : na, title='3', color=cPurple, style=sStyle, offset=0, linewidth=lWidth)
+if (low <= B2618 and iss)
+    l_B300 := label.new(bar_index - 2, B300, "3", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+    label.set_x(l_B300, bar_index + 3)
+label.delete(l_B300[1])
+

@@ -1,0 +1,170 @@
+//@version=5
+indicator(title="Nebula", shorttitle="Nebula v1.2", overlay=true)
+
+// ==========================   Bixord: FantailVMA   ================================
+
+bShowCandles = input.bool(true, "Show colored candles", group="Basic Settings")
+bShowCloud = input.bool(true, "Show the Cloud", group="Basic Settings")
+cloudType = input.string(title="Cloud Type", options=["Relative Strength", "Money Flow", "Commodity Channel"], defval="Relative Strength", group="Basic Settings")
+Theme = input.string(title="Color Theme", options=["Standard", "Pinky and the Brain", "Color Blind", "Eye Popper"], defval="Standard", group="Basic Settings")
+
+iTopBody = input.int(100, title="Top WAE Body Value", group="Advanced")
+iTopBorder = input.int(33, title="Top WAE Border Value", group="Advanced")
+
+ADX_Length = input.int(2, title="ADX_Length", group="Fantail VMA")
+Weighting = input.float(10.0, title="Weighting", group="Fantail VMA")
+MA_Length = input.int(6, minval=1, title="MA_Length", group="Fantail VMA")
+
+colorBigGreen = Theme == "Standard" ? color.new(#66ff00, 0) : Theme == "Pinky and the Brain" ? color.new(#00f5f1, 0) : Theme == "Color Blind" ? color.new(#03fcf4, 0) : Theme == "Eye Popper" ? color.new(#f8fc03, 0) : na
+colorBigRed = Theme == "Standard" ? color.new(#ff0000, 0) : Theme == "Pinky and the Brain" ? color.new(#fc03f8, 0) : Theme == "Color Blind" ? color.new(#fca903, 0) : Theme == "Eye Popper" ? color.new(#df03fc, 0) : na
+
+float iSource = 0.0
+float MIN_CLOUD = 0.0
+float MID_CLOUD = 0.0
+float MAX_CLOUD = 0.0
+
+rsi = ta.rsi(close, 14)
+mfi = ta.mfi(hlc3, 14)
+maCCI = ta.sma(hlc3, 20)
+cci = (hlc3 - maCCI) / (0.015 * ta.dev(hlc3, 20))
+
+if cloudType=="Relative Strength"
+    iSource := rsi
+    MIN_CLOUD := 20
+    MID_CLOUD := 50
+    MAX_CLOUD := 80
+
+if cloudType=="Money Flow"
+    iSource := mfi
+    MIN_CLOUD := 20
+    MID_CLOUD := 50
+    MAX_CLOUD := 80
+
+if cloudType=="Commodity Channel"
+    iSource := cci
+    MIN_CLOUD := 20
+    MID_CLOUD := -100
+    MAX_CLOUD := 100
+
+VMA=close  
+VarMA=close
+MA=close
+STR = high-low
+sPDI = 0.0
+sMDI = 0.0
+ADX=0.0
+ADXR=0.0
+Hi  = high
+Hi1 = high[1]
+Lo  = low
+Lo1 = low[1]
+Close1= close[1]
+
+Bulls1 = 0.5*(math.abs(Hi-Hi1)+(Hi-Hi1))
+Bears1 = 0.5*(math.abs(Lo1-Lo)+(Lo1-Lo))
+Bears = Bulls1 > Bears1 ? 0 : (Bulls1 == Bears1 ? 0 : Bears1)
+Bulls = Bulls1 < Bears1 ? 0 : (Bulls1 == Bears1 ? 0 : Bulls1)
+
+if (bar_index > 0)
+    sPDI := (Weighting*sPDI[1] + Bulls)/(Weighting+1)
+    sMDI := (Weighting*sMDI[1] + Bears)/(Weighting+1)
+
+TR = math.max(Hi-Lo,Hi-Close1)
+if (bar_index > 0)
+    STR  := (Weighting*STR[1] + TR)/(Weighting+1)
+
+PDI = STR > 0 ? sPDI/STR : 0
+MDI = STR > 0 ? sMDI/STR: 0
+DX = (PDI + MDI) > 0 ? math.abs(PDI - MDI)/(PDI + MDI) : 0 
+if (bar_index > 0)
+    ADX := (Weighting*ADX[1] + DX)/(Weighting+1)
+vADX = ADX
+
+adxlow = ta.lowest(ADX, ADX_Length)
+adxmax = ta.highest(ADX, ADX_Length)
+ADXmin = math.min(1000000.0, adxlow)
+ADXmax = math.max(-1.0, adxmax)
+Diff = ADXmax - ADXmin
+Const = Diff > 0 ? (vADX- ADXmin)/Diff : 0
+
+if (bar_index > 0)
+    VarMA:=((2-Const)*VarMA[1]+Const*close)/2
+
+FanVMA = ta.sma(VarMA,MA_Length)
+
+
+// ==========================   McGinley Dynamic   ================================
+mg = 0.0
+mg := na(mg[1]) ? ta.ema(close, 14) : mg[1] + (close - mg[1]) / (14 * math.pow(close/mg[1], 4))
+
+
+// ==========================   Waddah Attar Explosion v1 by LazyBear   ================================
+sensitivity = input.int(150, title="Sensitivity", group="WAE")
+fastLength = input.int(20, title="FastEMA Length", group="WAE")
+slowLength = input.int(40, title="SlowEMA Length", group="WAE")
+channelLength = input.int(20, title="BB Channel Length", group="WAE")
+multWAE = input.float(2.0, title="BB Stdev Multiplier", group="WAE")
+
+calc_macd(source, fastLength, slowLength) =>
+    fastMA = ta.ema(source, fastLength)
+    slowMA = ta.ema(source, slowLength)
+    fastMA - slowMA
+
+calc_BBUpper(source, length, mult) => 
+    basis = ta.sma(source, length)
+    dev = mult * ta.stdev(source, length)
+    basis + dev
+
+calc_BBLower(source, length, mult) => 
+    basis = ta.sma(source, length)
+    dev = mult * ta.stdev(source, length)
+    basis - dev
+
+upper = calc_BBUpper(close, channelLength, multWAE)
+lower = calc_BBLower(close, channelLength, multWAE)
+
+t1 = (calc_macd(close, fastLength, slowLength) - calc_macd(close[1], fastLength, slowLength))*sensitivity
+e1 = (upper - lower)
+
+trendUpWAE = (t1 >= 0) ? t1 : 0
+trendDownWAE = (t1 < 0) ? (-1*t1) : 0
+
+cBodyColor = color.white
+cBorderColor = color.white
+cWickColor = color.white
+
+if (trendUpWAE > e1 and trendUpWAE > 0)
+    cBodyColor := color.from_gradient(math.abs(trendUpWAE - e1), 1, iTopBody, color.new(colorBigGreen, 70), color.new(colorBigGreen, 0))
+    cBorderColor := color.from_gradient(math.abs(trendUpWAE - e1), 1, iTopBorder, color.new(colorBigGreen, 70), color.new(colorBigGreen, 0))
+    cWickColor := color.new(colorBigGreen, 0)
+
+if (trendUpWAE < e1 and trendUpWAE > 0)
+    cBodyColor := color.new(colorBigGreen, 90)
+    cBorderColor := color.from_gradient(math.abs(e1 - trendUpWAE), 1, iTopBody, color.new(colorBigGreen, 70), color.new(colorBigGreen, 0))
+    cWickColor := color.new(colorBigGreen, 30)
+
+if (trendDownWAE > e1 and trendDownWAE > 0)
+    cBodyColor := color.from_gradient(math.abs(trendDownWAE - e1), 1, iTopBody, color.new(colorBigRed, 50), color.new(colorBigRed, 0))
+    cBorderColor := color.from_gradient(math.abs(trendDownWAE - e1), 1, iTopBorder, color.new(colorBigRed, 50), color.new(colorBigRed, 0))
+    cWickColor := color.new(colorBigRed, 0)
+
+if (trendDownWAE < e1 and trendDownWAE > 0)
+    cBodyColor := color.new(colorBigRed, 90)
+    cBorderColor := color.from_gradient(math.abs(e1 - trendDownWAE), 1, iTopBody, color.new(colorBigRed, 50), color.new(colorBigRed, 0))
+    cWickColor := color.new(colorBigRed, 30)
+
+plotcandle(bShowCandles ? open : na, high, low, close, "", color=cBodyColor, wickcolor=cWickColor, bordercolor=cBorderColor)
+
+
+// ==========================   PLOTS  ================================
+
+transparencyValue= math.abs(FanVMA - mg)
+cColor = if FanVMA > mg 
+    color.from_gradient(iSource, MID_CLOUD, MAX_CLOUD, color.new(colorBigGreen, 80), color.new(colorBigGreen, 50))
+else 
+    color.from_gradient(iSource, MIN_CLOUD, MID_CLOUD, color.new(colorBigRed, 50), color.new(colorBigRed, 80))
+
+lineMD = plot(bShowCloud ? mg : na, title="", color=color.new(color.blue, 100))
+FVMA = plot(bShowCloud ? FanVMA : na, color=color.new(color.white, 100), title="Bixord FVMA")
+fill(FVMA, lineMD, color=cColor, title="Cloud")
+

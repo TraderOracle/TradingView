@@ -1,0 +1,1246 @@
+ // @version=5
+indicator(title="TraderOracle Method", shorttitle="TO Method v2.0", overlay=true, max_bars_back=1000, max_lines_count=500, max_labels_count=500, max_boxes_count=500)
+ 
+bShowCloud = input.bool(true, "Show Resistance Cloud", group="Basic Settings", tooltip="Resistance/support cloud")
+bShowSqueeze = input.bool(true, "Show Squeeze Relaxer Dots", group="Basic Settings", tooltip="Reversal indicator, based upon the TTM Squeeze")
+bShowShark = input.bool(false, "Show Shark Icons", group="Basic Settings")
+bShowEMA = input.bool(true, "Show 200 EMA and VWAP", group="Basic Settings")
+bShowTramp = input.bool(true, "Show Trampoline", group="Basic Settings", tooltip="Reversal indicator")
+bShowPivotPoints = input.bool(false, title="Show Pivot Points", group="Basic Settings", tooltip="Previous day's high/low, frequently bounced off of")
+bShowVodka = input.bool(true, title="Show VodkaShot", group="Basic Settings", tooltip="Trend indicator")
+bShowEarlyReversal = input.bool(false, title="Show Early Reversal", group="Basic Settings", tooltip="Shows rejection of a higher/lower zone")
+BnoShw = input.bool(false, title="Show LuxAlgo reversal signals", group="Basic Settings")
+bDSR = input.bool(false, title="Show Dead Simple Reversal signals", group="Basic Settings", tooltip="This is my conversion of Dead Simple Reversal inside of Tradovate")
+bUseBB = input.bool(false, "Show when bollinger bands are wicked", group="Basic Settings")
+bUseRSI = input.bool(false, "Show wick candles when RSI is OB/OS", group="Basic Settings")
+I_Like_Big_Butts_And_I_Cannot_Lie = input.bool(false, title="NOTE: Set your candle body/wick/border OPACITY to ZERO candle choices", group="Dropdowns")
+sCandleType = input.string(title="Candle Type", options=["Default","Vector","Wave","Waddah","Squeeze"], defval="Default", tooltip="If you choose VECTOR, please ensure your candle bodies are BLANK under TradingView settings", group="Dropdowns")
+Theme = input.string(title="Color Theme", options=["Standard", "Pinky and the Brain", "Color Blind", "Eye Popper"], defval="Standard", group="Dropdowns")
+
+NearTicks = input.int(3000, "How many ticks near the VWAP/EMA before it appears", group="Advanced Settings")
+cloud_opacity = input.int(80, title="Cloud opacity (100 = invisible, 0 = full color)", group="Advanced Settings")
+line_width = input.int(1, title="Pivot Point Line Width", group="Advanced Settings")
+pivot_opacity = input.int(50, title="Pivot Point opacity (100 = invisible, 0 = full color)", group="Advanced Settings")
+iTopBody = input.int(100, title="Top WAE Body Value", group="Advanced Settings")
+iTopBorder = input.int(33, title="Top WAE Border Value", group="Advanced Settings")
+iLookback = input.int(title="Label Lookback", defval=400, minval=1, maxval=400, group="Advanced Settings")
+rsiLowerW = input.int(30, "Lower Limit of RSI wicking detection", minval = 1, maxval = 500, group="Advanced Settings")
+rsiUpperW = input.int(70, "Upper Limit of RSI wicking detection", minval = 1, maxval = 500, group="Advanced Settings")
+
+bTrackBar = input.bool(false, "Track bar gaps (volume imbalance)", group="Wave Settings")
+iBarExtend = input.int(250, "Number of bars to extend line", maxval=500, minval=10, group="Wave Settings")
+lWidth = input.int(3, "Line Width", group="Wave Settings")
+lStyle = input.string(title="Line Style", options=["Solid", "Dotted", "Dashed"], defval="Dotted", group="Wave Settings")
+
+
+// END OF OPTIONS
+
+colorMildGreen = Theme == "Standard" ? color.new(#66ff00, 40) : Theme == "Pinky and the Brain" ? color.new(#00f5f1, 40) : Theme == "Color Blind" ? color.new(#03fcf4, 40) : Theme == "Eye Popper" ? color.new(#f8fc03, 40) : na
+colorBigGreen = Theme == "Standard" ? color.new(#66ff00, 0) : Theme == "Pinky and the Brain" ? color.new(#00f5f1, 0) : Theme == "Color Blind" ? color.new(#03fcf4, 0) : Theme == "Eye Popper" ? color.new(#f8fc03, 0) : na
+
+colorMildRed = Theme == "Standard" ? color.new(#ff0000, 40) : Theme == "Pinky and the Brain" ? color.new(#fc03f8, 40) : Theme == "Color Blind" ? color.new(#fca903, 40) : Theme == "Eye Popper" ? color.new(#df03fc, 40) : na
+colorBigRed = Theme == "Standard" ? color.new(#ff0000, 0) : Theme == "Pinky and the Brain" ? color.new(#fc03f8, 0) : Theme == "Color Blind" ? color.new(#fca903, 0) : Theme == "Eye Popper" ? color.new(#df03fc, 0) : na
+
+// Determine wick size (that's what SHE said)
+upWickPercentLarger = close > open and math.abs(high - close) > math.abs(low - open) // math.abs(open - close)
+downWickPercentLarger = close < open and math.abs(low - close) > math.abs(open - high) // math.abs(open - close)
+
+//lenG = input.int(175, "Length", minval=1, group="VWMA Settings")
+//srcG = input(close, "Source", group="VWMA Settings")
+//maG = ta.vwma(srcG, lenG)
+//offset = input.int(0, "Offset", minval = -500, maxval = 500)
+//plot(bShowWVMA ? maG : na, title="VWMA", color=#6d29ff, offset = offset, linewidth = 2)
+
+// ===========================   LABEL ARRAYS CAUSE WE HIT THE PLOT LIMITS   ================================
+
+var arLabel = array.new_label(0)
+var arLine = array.new_line(0)
+
+f_AddCharStd(BarIndex, UpDown, Color, Style, Ticks) => 
+    if (UpDown=="Up")
+        array.push(arLabel, label.new(x=bar_index, y=na, color=Color, style=Style, size=size.tiny, yloc=yloc.belowbar))
+    else
+        array.push(arLabel, label.new(x=bar_index, y=na, color=Color, style=Style, size=size.tiny, yloc=yloc.abovebar))
+    if array.size(arLabel) > iLookback
+        ln = array.shift(arLabel)
+        label.delete(ln)
+
+f_AddChar(BarIndex, UpDown, Color, Char, Ticks, Size) => 
+    if (UpDown=="Up")
+        array.push(arLabel, label.new(x=bar_index, y=na, style=label.style_none, color=color.new(color.black, 100), textcolor=Color, text=Char, size=Size, yloc=yloc.belowbar))
+    else
+        array.push(arLabel, label.new(x=bar_index, y=na, style=label.style_none, color=color.new(color.black, 100), textcolor=Color, text=Char, size=Size, yloc=yloc.abovebar))
+    if array.size(arLabel) > iLookback
+        ln = array.shift(arLabel)
+        label.delete(ln)
+
+
+f_AddLabel(BarIndex, UpDown, Char) => 
+    if (UpDown=="Up")
+        array.push(arLabel, label.new(x=bar_index, y=na, text=Char, color=colorMildGreen, textcolor=color.white, style=label.style_label_up, yloc=yloc.belowbar))
+    else
+        array.push(arLabel, label.new(x=bar_index, y=na, text=Char, color=colorMildRed, textcolor=color.white, style=label.style_label_down, yloc=yloc.abovebar))
+    if array.size(arLabel) > iLookback
+        ln = array.shift(arLabel)
+        label.delete(ln)
+
+f_AddLine(BarIndex, yIndex, Color, Width) => 
+    //array.push(arLine, line.new(BarIndex, yIndex, color=Color, style=line.style_solid, width=Width))
+    if array.size(arLine) > iLookback
+        ln = array.shift(arLine)
+        line.delete(ln)
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=   Dead Simple Reversal   =-=-=-=-=-=-=-=-=-=-=-=-=-= //
+c1 = close[1] < open[1] and close > open
+c2 = close > open[1]
+c3 = ta.lowest(low,3) < ta.lowest(low,50)[1] or ta.lowest(low,3) < ta.lowest(low,50)[2] or ta.lowest(low,3) < ta.lowest(low,50)[3]
+buyDSR = c1 and c2 and c3
+
+c4 = close[1] > open[1] and close < open
+c5 = close < open[1]
+c6 = ta.highest(high,3) > ta.highest(high,50)[1] or ta.highest(high,3) > ta.highest(high,50)[2] or ta.highest(high,3) > ta.highest(high,50)[3]
+sellDSR = c4 and c5 and c6
+
+if (buyDSR == 1) and bDSR and barstate.isconfirmed
+    f_AddCharStd(bar_index, "Up", color.blue, label.style_arrowup, 2)
+if (sellDSR == 1) and bDSR and barstate.isconfirmed
+    f_AddCharStd(bar_index, "Down", color.blue, label.style_arrowdown, 2)
+
+//plotshape(plotBuyDSR, location=location.belowbar, style=shape.square, size=size.tiny)
+//plotshape(plotSellDSR, location=location.abovebar, style=shape.square, size=size.tiny)
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=  Reversal Signals [LuxAlgo]  =-=-=-=-=-=-=-=-=-=-=-=-=-= //
+bSh  = 'Completed'
+ptLT = 'Step Line w/ Diamonds'
+ptSR = 'Circles'
+eSh  = 'Completed'
+
+Bcmpltd    = bSh == 'Completed' 
+
+var noShw = false
+cmpltd    = eSh == 'Completed' 
+noShw    := eSh == 'None' ? false : true
+
+type bar
+    float o = open
+    float h = high
+    float l = low
+    float c = close
+    int   i = bar_index
+
+type trb 
+    int   bSC
+    float bSH
+    float bSL
+
+    int   sSC
+    float sSH
+    float sSL
+
+type tre 
+    int   bCC
+    float bC8
+    float bCHt
+    float bCH
+    float bCL
+    float bCLt
+    float bCD
+
+    int   sCC
+    float sC8
+    float sCHt
+    float sCH
+    float sCL
+    float sCLt
+    float sCT
+
+bar b = bar.new()
+var trb S = trb.new()
+var tre C = tre.new()
+
+noC  = #00000000
+rdC  = #f23645
+gnC  = #089981
+whC  = #ffffff
+blC  = #2962ff
+grC  = #787b86
+bgC  = #00bcd4
+
+shpD = shape.labeldown
+shpU = shape.labelup
+locA = location.abovebar
+locB = location.belowbar
+dspN = false
+pltL = plot.style_circles
+pltS = size.tiny
+
+f_xLX(_p, _l) =>
+    (_l > _p and _l < _p[1]) or (_l < _p and _l > _p[1])
+
+f_lnS(_s) =>
+    s = switch _s
+        'Circles'               => plot.style_circles
+        'Step Line'             => plot.style_steplinebr
+        'Step Line w/ Diamonds' => plot.style_steplinebr
+
+ptLB = f_lnS(ptLT)
+ptRS = f_lnS(ptSR)
+con = b.c < b.c[4]
+
+if con
+    S.bSC := S.bSC == 9 ? 1 : S.bSC + 1
+    S.sSC := 0
+else
+    S.sSC := S.sSC == 9 ? 1 : S.sSC + 1
+    S.bSC := 0
+
+pbS = (b.l <= b.l[3] and b.l <= b.l[2]) or (b.l[1] <= b.l[3] and b.l[1] <= b.l[2])
+
+if (S.bSC == 9 and not pbS) or (S.bSC == 9 and pbS) or (S.bSC[1] == 8 and S.sSC == 1) and BnoShw and barstate.isconfirmed
+    f_AddCharStd(bar_index, "Up", colorBigGreen, label.style_xcross, 2)
+
+//plotshape(BnoShw and S.bSC == 9 and not pbS and barstate.isconfirmed ? 1 : na, title="Reversal Approaching", style=shape.xcross, location=location.belowbar, color=color.rgb(0, 255, 132), size=size.tiny)
+//plotshape(BnoShw and S.bSC == 9 and     pbS and barstate.isconfirmed ? 1 : na, title="Reversal Approaching", style=shape.xcross, location=location.belowbar, color=color.rgb(0, 255, 132), size=size.tiny)
+//plotshape(BnoShw and S.bSC[1] == 8 and S.sSC == 1 and barstate.isconfirmed ? 1 : na, title="Reversal Approaching", style=shape.xcross, location=location.belowbar, color=color.rgb(0, 255, 132), size=size.tiny)
+
+bC8  = S.bSC[1] == 8 and S.sSC == 1
+sR   = ta.highest(9)
+bSR  = 0.0
+bSR := S.bSC == 9 or bC8 ? sR : b.c > bSR[1] ? 0 : bSR[1]
+
+if S.bSC == 1
+    S.bSL := b.l
+
+if S.bSC > 0
+    S.bSL := math.min(b.l, S.bSL)
+
+    if b.l == S.bSL
+        S.bSH := b.h
+
+bSD  = 0.0
+bSD := S.bSC == 9 ? 2 * S.bSL - S.bSH : b.c < bSD[1] or S.sSC == 9 ? 0 : bSD[1]
+psS = (b.h >= b.h[3] and b.h >= b.h[2]) or (b.h[1] >= b.h[3] and b.h[1] >= b.h[2])
+
+if (S.sSC == 9 and not psS) or (S.sSC == 9 and psS) or (S.sSC[1] == 8 and S.bSC == 1) and BnoShw and barstate.isconfirmed
+    f_AddCharStd(bar_index, "Down", colorBigRed, label.style_xcross, 2)
+
+//plotshape(BnoShw and S.sSC == 9 and not psS and barstate.isconfirmed ? 1 : na, title="Reversal Approaching", style=shape.xcross, location=location.abovebar, color=color.rgb(255, 0, 0), size=size.tiny)
+//plotshape(BnoShw and S.sSC == 9 and     psS and barstate.isconfirmed ? 1 : na, title="Reversal Approaching", style=shape.xcross, location=location.abovebar, color=color.rgb(255, 0, 0), size=size.tiny)
+//plotshape(BnoShw and S.sSC[1] == 8 and S.bSC == 1 and barstate.isconfirmed ? 1 : na, title="Reversal Approaching", style=shape.xcross, location=location.abovebar, color=color.rgb(255, 0, 0), size=size.tiny)
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=  WAVE CANDLES  =-=-=-=-=-=-=-=-=-=-=-=-=-= //
+sStyle = lStyle=="Solid" ? line.style_solid : lStyle=="Dashed" ? line.style_dashed : line.style_dotted
+bExtend = lWidth==500 ? extend.right : extend.none
+
+const int upTrend = 1
+const int downTrend = 2
+
+var int waveState = na
+var line[] ll = array.new_line()
+
+redCandle = close < open
+greenCandle = close > open
+brightGreen = false
+brightRed = false
+noOverlapRed = false
+noOverlapGreen = false
+
+gapGreen = false
+gapRed = false
+bNewGap = false
+
+for [index, line] in ll
+    if (high > line.get_y1(line) and low < line.get_y1(line))
+        line.delete(array.get(ll, index))
+
+if (redCandle and barstate.isconfirmed)
+    if (redCandle[1] and open < close[1])
+        waveState := downTrend
+        gapRed := true
+        if bTrackBar
+            array.push(ll, line.new(bar_index, open, bar_index + iBarExtend, open, color=color.new(color.red, 50), width=lWidth, style=sStyle, extend=bExtend))
+            bNewGap := true
+
+if (greenCandle and barstate.isconfirmed)
+    if (greenCandle[1] and open > close[1])
+        waveState := upTrend
+        gapGreen := true
+        if bTrackBar
+            array.push(ll, line.new(bar_index, open, bar_index + iBarExtend, open, color=color.new(color.lime, 50), width=lWidth, style=sStyle, extend=bExtend))
+            bNewGap := true
+
+if (greenCandle and open > close[1] and greenCandle[1])
+    noOverlapGreen := true
+    waveState := upTrend
+
+if (redCandle and open > close[1] and redCandle[1])
+    noOverlapRed := true
+    waveState := downTrend
+
+if greenCandle
+    for i = 1 to 200
+        if (brightRed[i]) // if bright red candle, stop
+            break
+        else if (waveState==upTrend and redCandle[i]) // if we're in a uptrend, and the candle is red, stop
+            break
+        else if (waveState==downTrend and open >= close[i] and greenCandle[i])
+            noOverlapGreen := true
+            waveState := upTrend
+            break
+
+if redCandle
+    for i = 1 to 200
+        if (brightGreen[i]) // if bright green candle, stop
+            break
+        else if (waveState==downTrend and greenCandle[i]) // if we're in a downtrend, and the candle is green, stop
+            break
+        else if (waveState==upTrend and open <= close[i] and redCandle[i])
+            noOverlapRed := true
+            waveState := downTrend
+            break
+
+cCanColor = greenCandle ? color.new(colorMildGreen, 60) : color.new(colorMildRed, 60)
+
+if (noOverlapGreen or gapGreen) // and waveState == downTrend
+    cCanColor := colorBigGreen
+    brightGreen := true
+
+if (noOverlapRed or gapRed) // and waveState == upTrend
+    cCanColor := colorBigRed
+    brightRed := true
+
+plotcandle(sCandleType=="Wave" ? open : na, high, low, close, color=cCanColor, wickcolor=cCanColor, bordercolor=cCanColor)
+
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=  LuxAlgo - Market Structure (Fractal)  =-=-=-=-=-=-=-=-=-=-=-=-=-= //
+var float upOpen = na
+var float upClose = na
+var float downOpen = na
+var float downClose = na
+
+bGreenSignal = false
+bRedSignal = false
+
+length = 5 // default, min 3
+
+type fractal
+    float value
+    int loc
+    bool iscrossed
+
+var pT = int(length / 2)
+n = bar_index
+dhT = math.sum(math.sign(high - high[1]), pT)
+dlT = math.sum(math.sign(low - low[1]), pT)
+bullf = dhT == -pT and dhT[pT] == pT and high[pT] == ta.highest(length)
+bearf = dlT == pT and dlT[pT] == -pT and low[pT] == ta.lowest(length)
+bullf_count = ta.cum(bullf ? 1 : 0)
+bearf_count = ta.cum(bearf ? 1 : 0)
+
+// CHoCH upwards
+var upperT = fractal.new()
+var line lower_lvl = na
+var label ms_lbl = na
+var bull_ms_count = 0
+var broken_sup = false
+var os = 0
+
+if bullf
+    upperT.value := high[pT]
+    upperT.loc := n-pT
+    upperT.iscrossed := false
+
+if ta.crossover(close, upperT.value) and not upperT.iscrossed
+    upOpen := open
+    upClose := close
+else if not broken_sup
+    lower_lvl.set_x2(n)
+    if close < lower_lvl.get_y2()
+        broken_sup := true
+
+// CHoCH downwards
+var lowerT = fractal.new()
+var line upper_lvl = na
+var broken_res = false
+var bear_ms_count = 0
+
+if bearf
+    lowerT.value := low[pT]
+    lowerT.loc := n-pT
+    lowerT.iscrossed := false
+
+if ta.crossunder(close, lowerT.value) and not lowerT.iscrossed
+    downOpen := open
+    downClose := close
+else if not broken_res
+    upper_lvl.set_x2(n)
+    if close > upper_lvl.get_y2()
+        broken_res := true
+
+
+// =-=-=-=-=-=-=  Nadaraya-Watson: Envelope (Non-Repainting) © jdehorty  =-=-=-=-=-=-=-=-= //
+import jdehorty/KernelFunctions/2 as kernels 
+
+getBounds(_atr, _nearFactor, _farFactor, _yhat) => 
+    _upper_far = _yhat + _farFactor*_atr
+    _upper_near = _yhat + _nearFactor*_atr
+    _lower_near = _yhat - _nearFactor*_atr
+    _lower_far = _yhat - _farFactor*_atr
+    _upper_avg = (_upper_far + _upper_near) / 2
+    _lower_avg = (_lower_far + _lower_near) / 2 
+    [_upper_near, _upper_far, _upper_avg, _lower_near, _lower_far, _lower_avg]
+
+kernel_atr(length, _high, _low, _close) =>
+    trueRange = na(_high[1])? _high-_low : math.max(math.max(_high - _low, math.abs(_high - _close[1])), math.abs(_low - _close[1]))
+    ta.rma(trueRange, length)
+
+h = input.int(256, 'Lookback Window', tooltip='The number of bars used for the estimation. This is a sliding value that represents the most recent historical bars. Recommended range: 3-50', group='Cloud Settings')
+alpha = input.float(3.5, 'Relative Weighting', step=0.25, tooltip='Relative weighting of time frames. As this value approaches zero, the longer time frames will exert more influence on the estimation. As this value approaches infinity, the behavior of the Rational Quadratic Kernel will become identical to the Gaussian kernel. Recommended range: 0.25-25', group='Cloud Settings')
+x_0 = input.int(30, "Start Regression at Bar", tooltip='Bar index on which to start regression. The first bars of a chart are often highly volatile, and omission of these initial bars often leads to a better overall fit. Recommended range: 5-25', group='Cloud Settings')
+
+yhat_close = kernels.rationalQuadratic(close, h, alpha, x_0)
+yhat_high = kernels.rationalQuadratic(high, h, alpha, x_0)
+yhat_low = kernels.rationalQuadratic(low, h, alpha, x_0)
+yhat = yhat_close
+atr_length = input.int(66, 'ATR Length', minval=1, tooltip='The number of bars associated with the Average True Range (ATR).', group='Cloud Settings')
+ktr = kernel_atr(atr_length, yhat_high, yhat_low, yhat_close)
+nearFactor = input.float(1.95, 'Near ATR Factor', minval=0.5, step=0.25, tooltip='The factor by which to multiply the ATR to calculate the near bound of the envelope. Recommended range: 0.5-2.0', group='Cloud Settings')
+farFactor = input.float(7, 'Far ATR Factor', minval=1.0, step=0.25, tooltip='The factor by which to multiply the ATR to calculate the far bound of the envelope. Recommended range: 6.0-8.0', group='Cloud Settings')
+[upper_near, upper_far, upper_avg, lower_near, lower_far, lower_avg] = getBounds(ktr, nearFactor, farFactor, yhat_close)
+
+p_upper_avg = plot(bShowCloud ? upper_avg : na, color=color.new(colorMildRed, 100),title='Upper Boundary: Average')
+p_upper_near = plot(bShowCloud ? upper_near : na, color=color.new(colorMildRed, 100), title='Upper Boundary: Near') 
+p_lower_near = plot(bShowCloud ? lower_near : na, color=color.new(colorMildGreen, 100), title='Lower Boundary: Near')
+p_lower_avg = plot(bShowCloud ? lower_avg : na, color=color.new(colorMildGreen, 100), title='Lower Boundary: Average') 
+
+fill(p_upper_near, p_upper_avg, color=color.new(colorMildRed, cloud_opacity), title='Upper Boundary: Nearmost Region')
+fill(p_lower_near, p_lower_avg, color=color.new(colorMildGreen, cloud_opacity), title='Lower Boundary: Nearmost Region')
+
+bBrokeUp = high > upper_near
+bBrokeDown = low < lower_near
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=   TRAMPOLINE  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+// Idea from "Serious Backtester" - https://www.youtube.com/watch?v=2hX7qTamOAQ
+// Defaults are optimized for 30 min candles
+
+// CONFIG
+iBBThreshold = input.float(0.0015, minval=0.0, title="Bollinger Lower Threshold", tooltip="0.003 for daily, 0.0015 for 30 min candles", group="TRAMPOLINE Settings")
+RSIThreshold = input.int(25, minval=1, title="RSI Lower Threshold", tooltip="Normally 25", group="TRAMPOLINE Settings")
+RSIDown = input.int(72, minval=1, title="RSI Upper Threshold", tooltip="Normally 75", group="TRAMPOLINE Settings")
+
+rsiLengthInput = input.int(14, minval=1, title="RSI Length", group="TRAMPOLINE Settings")
+rsiSourceInput = input(close, "RSI Source", group="TRAMPOLINE Settings")
+lengthBB = input.int(20, minval=1, group="TRAMPOLINE Bollinger Bands")
+srcBB = input(close, title="Source", group="TRAMPOLINE Bollinger Bands")
+multBB = input.float(2.0, minval=0.001, maxval=50, title="StdDev", group="TRAMPOLINE Bollinger Bands")
+offsetBB = input.int(0, "Offset", minval = -500, maxval = 500, group="TRAMPOLINE Bollinger Bands")
+
+isRed = close < open
+isGreen = close > open
+
+// STANDARD BOLLINGER BANDS
+basisBB = ta.sma(srcBB, lengthBB)
+devBB = multBB * ta.stdev(srcBB, lengthBB)
+upperBB = basisBB + devBB
+lowerBB = basisBB - devBB
+downBB = low < lowerBB or high < lowerBB
+upBB = low > upperBB or high > upperBB
+bbw = (upperBB - lowerBB) / basisBB
+
+// RSI
+up = ta.rma(math.max(ta.change(rsiSourceInput), 0), rsiLengthInput)
+down = ta.rma(-math.min(ta.change(rsiSourceInput), 0), rsiLengthInput)
+rsiM = down == 0 ? 100 : up == 0 ? 0 : 100 - (100 / (1 + up / down))
+
+back1 = isRed[1] and rsiM[1] <= RSIThreshold and close[1] < lowerBB[1] and bbw[1] > iBBThreshold
+back2 = isRed[2] and rsiM[2] <= RSIThreshold and close[2] < lowerBB[2] and bbw[2] > iBBThreshold
+back3 = isRed[3] and rsiM[3] <= RSIThreshold and close[3] < lowerBB[3] and bbw[3] > iBBThreshold
+back4 = isRed[4] and rsiM[4] <= RSIThreshold and close[4] < lowerBB[4] and bbw[4] > iBBThreshold
+back5 = isRed[5] and rsiM[5] <= RSIThreshold and close[5] < lowerBB[5] and bbw[5] > iBBThreshold
+
+for1 = isGreen[1] and rsiM[1] >= RSIDown and close[1] > upperBB[1] and bbw[1] > iBBThreshold
+for2 = isGreen[2] and rsiM[2] >= RSIDown and close[2] > upperBB[2] and bbw[2] > iBBThreshold
+for3 = isGreen[3] and rsiM[3] >= RSIDown and close[3] > upperBB[3] and bbw[3] > iBBThreshold
+for4 = isGreen[4] and rsiM[4] >= RSIDown and close[4] > upperBB[4] and bbw[4] > iBBThreshold
+for5 = isGreen[5] and rsiM[5] >= RSIDown and close[5] > upperBB[5] and bbw[5] > iBBThreshold
+
+weGoUp = isGreen and (back1 or back2 or back3 or back4 or back5) and (high > high[1]) and barstate.isconfirmed
+upThrust = weGoUp and not weGoUp[1] and not weGoUp[2] and not weGoUp[3] and not weGoUp[4]
+weGoDown = isRed and (for1 or for2 or for3 or for4 or for5) and (low < low[1]) and barstate.isconfirmed
+downThrust = weGoDown and not weGoDown[1] and not weGoDown[2] and not weGoDown[3] and not weGoDown[4]
+
+//pBuyTramp = bShowTramp and upThrust ? hl2 : na
+//bSellTramp = bShowTramp and downThrust ? hl2 : na
+
+if (bShowTramp and upThrust)
+    f_AddLabel(bar_index, "Up", "T")
+if (bShowTramp and downThrust)
+    f_AddLabel(bar_index, "Down", "T")
+
+// PLOT THE THINGS
+//plotshape(pBuyTramp, title="Trampoline", text="T", location=location.belowbar, style=shape.labelup, size=size.tiny, color=colorMildGreen, textcolor=color.white)
+//plotshape(bSellTramp, title="Trampoline", text="T", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=colorMildRed, textcolor=color.white)
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=   Squeeze Relaxer version 2.1  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+// Average Directional Index
+sqTolerance = input.int(2, title="Squeeze Tolerance (lower = more sensitive)", group="Relaxing Settings", tooltip="How many bars to look back on the squeeze indicator")
+adxSqueeze = input.int(21, title="ADX Threshold for TTM Squeeze", group="Relaxing Settings", tooltip="Anything over 19 filters out low volume periods. Set to 11 as a default, feel free to increase to get less noise")
+
+adxlen = input(14, title="ADX Smoothing", group="ADX")
+dilen = input(14, title="DI Length", group="ADX")
+dirmov(len) =>
+	up5 = ta.change(high)
+	down5 = -ta.change(low)
+	plusDM = na(up5) ? na : (up5 > down5 and up5 > 0 ? up5 : 0)
+	minusDM = na(down5) ? na : (down > up5 and down5 > 0 ? down5 : 0)
+	truerange = ta.rma(ta.tr, len)
+	plus = fixnan(100 * ta.rma(plusDM, len) / truerange)
+	minus = fixnan(100 * ta.rma(minusDM, len) / truerange)
+	[plus, minus]
+adx(dilen, adxlen) =>
+	[plus, minus] = dirmov(dilen)
+	sum = plus + minus
+	adx = 100 * ta.rma(math.abs(plus - minus) / (sum == 0 ? 1 : sum), adxlen)
+adxValue = adx(dilen, adxlen)
+sigabove19 = adxValue > adxSqueeze
+
+var cGreen = 0
+var cRed = 0
+var pos = false 
+var neg = false 
+
+sqlength = 20
+multQ = 2.0
+lengthKC = 20
+multKC = 1.5
+
+useTrueRange = true
+source = close
+basis = ta.sma(source, sqlength)
+dev1 = multKC * ta.stdev(source, sqlength)
+upperBBsq = basis + dev1
+lowerBBsq = basis - dev1
+ma = ta.sma(source, lengthKC)
+rangeQ = high - low
+rangema = ta.sma(rangeQ, lengthKC)
+upperKC = ma + rangema * multKC
+lowerKC = ma - rangema * multKC
+sqzOn  = (lowerBBsq > lowerKC) and (upperBBsq < upperKC)
+sqzOff = (lowerBBsq < lowerKC) and (upperBBsq > upperKC)
+noSqz  = (sqzOn == false) and (sqzOff == false)
+
+avg1 = math.avg(ta.highest(high, lengthKC), ta.lowest(low, lengthKC))
+avg2 = math.avg(avg1, ta.sma(close, lengthKC))
+val = ta.linreg(close - avg2, lengthKC, 0)
+
+cSQColor = color.white
+cSQBorder = color.white
+cSQWick = color.white
+
+if val > 0
+    if val > nz(val[1])
+        cSQColor := color.from_gradient(math.abs(val), 0, 30, color.new(colorBigGreen, 50), color.new(colorBigGreen, 0))
+        cSQBorder := colorBigGreen
+        cSQWick := cSQColor
+    if val < nz(val[1])
+        cSQColor := color.new(colorMildGreen, 50)
+        cSQBorder := color.new(color.black, 100)
+        cSQWick := colorMildGreen
+else
+    if val < nz(val[1])
+        cSQColor := color.from_gradient(math.abs(val), 0, 30, color.new(colorBigRed, 50), color.new(colorBigRed, 0))
+        cSQBorder := colorBigRed
+        cSQWick := cSQColor
+    if val > nz(val[1])
+        cSQColor := color.new(colorMildRed, 50)
+        cSQBorder := color.new(color.black, 100)
+        cSQWick := colorMildRed
+
+plotcandle(sCandleType=="Squeeze" ? open : na, high, low, close, color=cSQColor, wickcolor=cSQWick, bordercolor=cSQBorder)
+
+pos := false
+neg := false
+
+// if squeeze is bright RED, increment by one
+if (val < nz(val[1]) and val < 5 and not sqzOn)
+    cRed := cRed + 1   
+
+// if squeeze is bright GREEN, increment by one
+if (val > nz(val[1]) and val > 5 and not sqzOn)
+    cGreen := cGreen + 1   
+
+// if bright RED squeeze is now dim, momentum has changed.  Is ADX also above 19? - add a marker to chart
+if (val > nz(val[1]) and cRed > sqTolerance and val < 5 and not pos[1] and sigabove19 == true)
+    cRed := 0
+    pos := true  
+
+// if bright GREEN squeeze is now dim, momentum has changed.  Is ADX also above 19? - add a marker to chart
+if (val < nz(val[1]) and cGreen > sqTolerance and val > 5 and not neg[1] and sigabove19 == true)
+    cGreen := 0
+    neg := true  
+
+buySignal1 = pos and barstate.isconfirmed
+sellSignal1 = neg and barstate.isconfirmed
+
+pSQBuy = bShowSqueeze and buySignal1 ? pos : na
+pSQSell = bShowSqueeze and sellSignal1 ? neg : na
+
+plotshape(pSQBuy, title="Squeeze Buy Signal", style=shape.diamond, location=location.belowbar, color=color.yellow, size=size.tiny)
+plotshape(pSQSell, title="Squeeze Sell Signal", style=shape.diamond, location=location.abovebar, color=color.yellow, size=size.tiny)
+ 
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=   VECTOR CANDLES  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+import TradersReality/Traders_Reality_Lib/2 as trLib
+
+color redVectorColor = colorBigRed
+color greenVectorColor = colorBigGreen
+color violetVectorColor = input.color(title='Violet',defval=color.fuchsia, inline='vectors', group="Vector Candle Settings")
+color blueVectorColor = input.color(title='Blue', defval=color.rgb(83, 144, 249), inline='vectors', tooltip='Bull bars are green and bear bars are red when the bar is with volume >= 200% of the average volume of the 10 previous bars, or bars where the product of candle spread x candle volume is >= the highest for the 10 previous bars.\n Bull bars are blue and bear are violet when the bar is with with volume >= 150% of the average volume of the 10 previous bars.', group="Vector Candle Settings")
+color regularCandleUpColor = input.color(title='Regular: Up Candle', defval=color.new(#02a433, 99), inline='nonVectors', group="Vector Candle Settings")
+color regularCandleDownColor = input.color(title='Regular: Down Candle', defval=color.new(#a10101, 99), inline='nonVectors', tooltip='Bull bars are light gray and bear are dark gray when none of the red/green/blue/violet vector conditions are met.', group="Vector Candle Settings")
+
+bool overrideSym = false
+string pvsraSym = ''
+bool colorOverride = true
+
+pvsraVolume(overrideSymbolX, pvsraSymbolX, tickerIdX) =>
+    request.security(overrideSymbolX ? pvsraSymbolX : tickerIdX, '', [volume,high,low,close,open], barmerge.gaps_off, barmerge.lookahead_off)
+
+[pvsraVolume, pvsraHigh, pvsraLow, pvsraClose, pvsraOpen]  = pvsraVolume(overrideSym, pvsraSym, syminfo.tickerid)
+
+[pvsraColor, alertFlag, averageVolume, volumeSpread, highestVolumeSpread] = trLib.calcPvsra(pvsraVolume, pvsraHigh, pvsraLow, pvsraClose, pvsraOpen, redVectorColor, greenVectorColor, violetVectorColor, blueVectorColor, regularCandleDownColor, regularCandleUpColor)
+
+bVectorGreen = pvsraColor == greenVectorColor
+bVectorRed = pvsraColor == redVectorColor
+
+barcolor(sCandleType=="Vector" ? pvsraColor : na)
+plotcandle(sCandleType=="Vector" ? open : na, high, low, close, color=pvsraColor, wickcolor=pvsraColor, bordercolor=pvsraColor)
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=   TOTAL RECALL  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+bFinalColor = color.yellow
+
+if (bVectorGreen and (close[0] == upClose[0] or close[1] == upClose[1] or close[2] == upClose[2] or close[3] == upClose[3]))
+    bGreenSignal := true
+//plotcandle(open, high, low, close, "", color=pvsraColor, wickcolor=pvsraColor, bordercolor=color.rgb(255, 0, 0))
+if (bVectorRed and (close[0] == downClose[0] or close[1] == downClose[1] or close[2] == downClose[2] or close[3] == downClose[3]))
+    bRedSignal := true
+//plotcandle(open, high, low, close, "", color=pvsraColor, wickcolor=pvsraColor, bordercolor=color.rgb(0, 255, 132))
+
+pShowBuyRev = bGreenSignal and bShowEarlyReversal and barstate.isconfirmed ? 1 : na
+pShowSellRev = bRedSignal and bShowEarlyReversal and barstate.isconfirmed ? 1 : na
+
+plotshape(pShowBuyRev, title="Reversal Approaching", style=shape.cross, location=location.abovebar, color=bFinalColor, size=size.tiny)
+plotshape(pShowSellRev, title="Reversal Approaching", style=shape.cross, location=location.belowbar, color=bFinalColor, size=size.tiny)
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=   THE SHARK  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+
+bApply25and75 = input(false, title="Apply 25/75 RSI rule", group="Shark Settings")
+
+ema50 = ta.ema(close, 50)
+ema200 = ta.ema(close, 200)
+ema400 = ta.ema(close, 400)
+ema800 = ta.ema(close, 800)
+wapwap = ta.vwap(close)
+
+bTouchedLine = (ema50<high and ema50>low) or (ema200<high and ema200>low) or (ema400<high and ema400>low) or (ema800<high and ema800>low) or (wapwap<high and wapwap>low)
+
+basis5 = ta.sma(rsiM, 30)
+dev = 2.0 * ta.stdev(rsiM, 30)
+upper = basis5 + dev
+lower = basis5 - dev
+
+bBelow25 = rsiM < 26
+bAbove75 = rsiM > 74
+
+if not bApply25and75
+    bBelow25 := true
+    bAbove75 := true
+
+bShowSharkDown = (rsiM > upper and bAbove75) and barstate.isconfirmed
+bShowSharkUp = (rsiM < lower and bBelow25) and barstate.isconfirmed
+
+if bShowShark
+    if bShowSharkUp
+        f_AddChar(bar_index, "Up", color.white, "🦈", 4, size.normal) 
+    if bShowSharkDown
+        f_AddChar(bar_index, "Down", color.white, "🦈", 1, size.normal) 
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=   PIVOT POINTS STANDARD  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+
+AUTO = "Auto"
+DAILY = "Daily"
+WEEKLY = "Weekly"
+MONTHLY = "Monthly"
+QUARTERLY = "Quarterly"
+YEARLY = "Yearly"
+BIYEARLY = "Biyearly"
+TRIYEARLY = "Triyearly"
+QUINQUENNIALLY = "Quinquennially"
+DECENNIALLY = "Decennially"
+
+TRADITIONAL = "Traditional"
+
+custom_years_divisor = 2
+
+kind = TRADITIONAL
+pivot_time_frame = AUTO
+look_back = 15
+is_daily_based = true
+show_labels = false
+show_prices = false
+position_labels = "Left"
+
+var DEF_COLOR = color.new(#bb9057, pivot_opacity)
+var arr_time = array.new_int()
+var p = array.new_float()
+var r1 = array.new_float()
+var s1 = array.new_float()
+var r2 = array.new_float()
+var s2 = array.new_float()
+var r3 = array.new_float()
+var s3 = array.new_float()
+var r4 = array.new_float()
+var s4 = array.new_float()
+var r5 = array.new_float()
+var s5 = array.new_float()
+pivotX_open = float(na)
+pivotX_open := nz(pivotX_open[1], open)
+pivotX_high = float(na)
+pivotX_high := nz(pivotX_high[1], high)
+pivotX_low = float(na)
+pivotX_low := nz(pivotX_low[1], low)
+pivotX_prev_open = float(na)
+pivotX_prev_open := nz(pivotX_prev_open[1])
+pivotX_prev_high = float(na)
+pivotX_prev_high := nz(pivotX_prev_high[1])
+pivotX_prev_low = float(na)
+pivotX_prev_low := nz(pivotX_prev_low[1])
+pivotX_prev_close = float(na)
+pivotX_prev_close := nz(pivotX_prev_close[1])
+
+get_pivot_resolution() =>
+    timeframe.multiplier <= 15 ? "D" : "W"
+
+var lines = array.new_line()
+var labels = array.new_label()
+
+draw_line(i, pivot, col) =>
+    if array.size(arr_time) > 1
+        array.push(lines, line.new(array.get(arr_time, i), array.get(pivot, i), array.get(arr_time, i + 1), array.get(pivot, i), color=col, xloc=xloc.bar_time, width=line_width))
+
+traditional() =>
+    pivotX_Median = (pivotX_prev_high + pivotX_prev_low + pivotX_prev_close) / 3
+    array.push(p, pivotX_Median)
+    array.push(r1, pivotX_Median * 2 - pivotX_prev_low)
+    array.push(s1, pivotX_Median * 2 - pivotX_prev_high)
+    array.push(r2, pivotX_Median + 1 * (pivotX_prev_high - pivotX_prev_low))
+    array.push(s2, pivotX_Median - 1 * (pivotX_prev_high - pivotX_prev_low))
+    array.push(r3, pivotX_Median * 2 + (pivotX_prev_high - 2 * pivotX_prev_low))
+    array.push(s3, pivotX_Median * 2 - (2 * pivotX_prev_high - pivotX_prev_low))
+    array.push(r4, pivotX_Median * 3 + (pivotX_prev_high - 3 * pivotX_prev_low))
+    array.push(s4, pivotX_Median * 3 - (3 * pivotX_prev_high - pivotX_prev_low))
+    array.push(r5, pivotX_Median * 4 + (pivotX_prev_high - 4 * pivotX_prev_low))
+    array.push(s5, pivotX_Median * 4 - (4 * pivotX_prev_high - pivotX_prev_low))
+
+calc_pivot() =>
+    traditional()
+
+resolution = get_pivot_resolution()
+
+SIMPLE_DIVISOR = 2
+
+calc_high(prev, curr) =>
+    if na(prev) or na(curr)
+        nz(prev, nz(curr, na))
+    else
+        math.max(prev, curr)
+    
+calc_low(prev, curr) =>
+    if not na(prev) and not na(curr)
+        math.min(prev, curr)
+    else
+        nz(prev, nz(curr, na))
+
+calc_OHLC_for_pivot(custom_years_divisor) =>
+    if custom_years_divisor == SIMPLE_DIVISOR 
+        [open, high, low, close, open[1], high[1], low[1], close[1], time[1], time_close]
+    else
+        var prev_sec_open = float(na)
+        var prev_sec_high = float(na)
+        var prev_sec_low = float(na)
+        var prev_sec_close = float(na)
+        var prev_sec_time = int(na)
+        var curr_sec_open = float(na)
+        var curr_sec_high = float(na)
+        var curr_sec_low = float(na)
+        var curr_sec_close = float(na)
+        if year(time_close) % custom_years_divisor == 0
+        	curr_sec_open := open
+			curr_sec_high := high
+			curr_sec_low := low
+			curr_sec_close := close
+            prev_sec_high := high[1]
+            prev_sec_low := low[1]
+            prev_sec_close := close[1]
+            prev_sec_time := time[1]
+            for i = 2 to custom_years_divisor
+                prev_sec_open :=  nz(open[i], prev_sec_open)
+                prev_sec_high := calc_high(prev_sec_high, high[i])
+                prev_sec_low := calc_low(prev_sec_low, low[i])
+                prev_sec_time := nz(time[i], prev_sec_time)
+        [curr_sec_open, curr_sec_high, curr_sec_low, curr_sec_close, prev_sec_open, prev_sec_high, prev_sec_low, prev_sec_close, prev_sec_time, time_close]
+
+[sec_open, sec_high, sec_low, sec_close, prev_sec_open, prev_sec_high, prev_sec_low, prev_sec_close, prev_sec_time, sec_time] = request.security(syminfo.tickerid, resolution, calc_OHLC_for_pivot(custom_years_divisor), lookahead = barmerge.lookahead_on)
+sec_open_gaps_on = request.security(syminfo.tickerid, resolution, open, gaps = barmerge.gaps_on, lookahead = barmerge.lookahead_on)
+
+is_change_years = false
+var is_change = false
+var uses_current_bar = false
+var change_time = int(na)
+is_time_change = false
+
+var start_time = time
+var was_last_premarket = false
+var start_calculate_in_premarket = false
+
+is_last_premarket = barstate.islast and session.ispremarket and time_close > sec_time and not was_last_premarket
+
+if is_last_premarket
+    was_last_premarket := true
+    start_calculate_in_premarket := true
+if session.ismarket
+    was_last_premarket := false
+    
+without_time_change = barstate.islast and array.size(arr_time) == 0
+is_can_calc_pivot = (not uses_current_bar and is_time_change and session.ismarket) or (ta.change(sec_open) and not start_calculate_in_premarket) or is_last_premarket or (uses_current_bar and not na(sec_open_gaps_on)) or without_time_change
+enough_bars_for_calculate = prev_sec_time >= start_time or is_daily_based
+
+if is_can_calc_pivot and enough_bars_for_calculate 
+    if array.size(arr_time) == 0 and is_daily_based
+        pivotX_prev_open := prev_sec_open[1]
+        pivotX_prev_high := prev_sec_high[1]
+        pivotX_prev_low := prev_sec_low[1]
+        pivotX_prev_close := prev_sec_close[1]
+        pivotX_open := sec_open[1]
+        pivotX_high := sec_high[1]
+        pivotX_low := sec_low[1]
+        array.push(arr_time, start_time)
+        calc_pivot()
+    
+    if is_daily_based
+    	if is_last_premarket
+            pivotX_prev_open := sec_open
+            pivotX_prev_high := sec_high
+            pivotX_prev_low := sec_low
+            pivotX_prev_close := sec_close
+            pivotX_open := open
+            pivotX_high := high
+            pivotX_low := low
+        else
+			pivotX_prev_open := prev_sec_open
+			pivotX_prev_high := prev_sec_high
+			pivotX_prev_low := prev_sec_low
+			pivotX_prev_close := prev_sec_close
+			pivotX_open := sec_open
+			pivotX_high := sec_high
+			pivotX_low := sec_low
+    else
+        pivotX_prev_high := pivotX_high
+        pivotX_prev_low := pivotX_low
+        pivotX_prev_open := pivotX_open
+        pivotX_prev_close := close[1]
+        pivotX_open := open
+        pivotX_high := high
+        pivotX_low := low
+
+    if barstate.islast and not is_change and array.size(arr_time) > 0 and not without_time_change
+        array.set(arr_time, array.size(arr_time) - 1, change_time)
+    else if without_time_change
+        array.push(arr_time, start_time)
+    else
+        array.push(arr_time, nz(change_time, time))
+
+    calc_pivot()
+
+    if array.size(arr_time) > look_back
+        if array.size(arr_time) > 0
+            array.shift(arr_time)
+        if array.size(p) > 0 
+            array.shift(p)
+        if array.size(r1) > 0 
+            array.shift(r1)
+        if array.size(s1) > 0 
+            array.shift(s1)
+        if array.size(r2) > 0 
+            array.shift(r2)
+        if array.size(s2) > 0 
+            array.shift(s2)
+        if array.size(r3) > 0 
+            array.shift(r3)
+        if array.size(s3) > 0
+            array.shift(s3)
+        if array.size(r4) > 0 
+            array.shift(r4)
+        if array.size(s4) > 0 
+            array.shift(s4)
+        if array.size(r5) > 0
+            array.shift(r5)
+        if array.size(s5) > 0
+            array.shift(s5)
+    is_change := true
+else if not is_daily_based
+    pivotX_high := math.max(pivotX_high, high)
+    pivotX_low := math.min(pivotX_low, low)
+
+if barstate.islast and array.size(arr_time) > 0 and is_change
+    is_change := false
+    array.push(arr_time, time_close(resolution))
+
+    for i = 0 to array.size(lines) - 1
+        if array.size(lines) > 0
+            line.delete(array.shift(lines))
+        if array.size(labels) > 0
+            label.delete(array.shift(labels))
+
+    // array.get(p, i)
+    for i = 0 to array.size(arr_time) - 2
+        if array.size(p) > 0 and bShowPivotPoints
+            draw_line(i, p, DEF_COLOR)
+        if array.size(r1) > 0 and bShowPivotPoints 
+            draw_line(i, r1, DEF_COLOR)
+        if array.size(s1) > 0 and bShowPivotPoints
+            draw_line(i, s1, DEF_COLOR)
+        if array.size(r2) > 0 and bShowPivotPoints
+            draw_line(i, r2, DEF_COLOR)
+        if array.size(s2) > 0 and bShowPivotPoints
+            draw_line(i, s2, DEF_COLOR)
+        if array.size(r3) > 0 and bShowPivotPoints
+            draw_line(i, r3, DEF_COLOR)
+        if array.size(s3) > 0 and bShowPivotPoints
+            draw_line(i, s3, DEF_COLOR)
+        if array.size(r4) > 0 and bShowPivotPoints
+            draw_line(i, r4, DEF_COLOR)
+        if array.size(s4) > 0 and bShowPivotPoints
+            draw_line(i, s4, DEF_COLOR)
+        if array.size(r5) > 0 and bShowPivotPoints
+            draw_line(i, r5, DEF_COLOR)
+        if array.size(s5) > 0 and bShowPivotPoints
+            draw_line(i, s5, DEF_COLOR)
+
+
+// =====================================   VODKA SHOT   ==================================================================
+
+var isLong = false
+var isShort = false
+
+// ===================================  NEGLECTED VOL by DGT  ======================================--
+
+nzVolume = nz(volume)
+source5   = barstate.isconfirmed ? close : close[1]
+vsource  = nzVolume ? barstate.isconfirmed ? ta.obv : ta.obv[1] : na
+corr     = ta.correlation(source5, vsource, 14)
+volAvgS  = ta.sma(nzVolume, 14)
+volAvgL  = ta.sma(nzVolume, 14 * 5)
+volDev   = (volAvgL + 1.618034 * ta.stdev(volAvgL, 14 * 5)) / volAvgL * 11 / 100
+volRel   = nzVolume / volAvgL
+momentum = ta.change(vsource, 14) / 14
+momOsc   = ta.linreg(momentum / volAvgS * 1.618034, 5, 0)
+
+vbcbColor = if close < open
+    if nzVolume > volAvgS * 1.618034
+        #910000
+    else if nzVolume >= volAvgS * .618034 and nzVolume <= volAvgS * 1.618034
+        color.red
+    else
+        color.orange
+else
+    if nzVolume > volAvgS * 1.618034
+        #006400
+    else if nzVolume >= volAvgS * .618034 and nzVolume <= volAvgS * 1.618034
+        color.green
+    else
+        #7FFFD4
+
+bColor5 = color.new(color.black, 25)
+gColor = color.new(color.gray, 50)
+
+// ===================================  RedK Dual VADER with Energy Bars [VADER-DEB]  ======================================--
+
+f_derma(_data, _len, MAOption) =>
+    value = 
+      MAOption == 'SMA' ? ta.sma(_data, _len) :
+      MAOption == 'EMA' ? ta.ema(_data, _len) :
+      ta.wma(_data, _len)
+
+rlength  = input.int(12, minval=1)
+DER_avg = input.int(5, 'Average', minval=1, inline='DER', group='Directional Energy Ratio')
+MA_Type5 = input.string('WMA', 'DER MA type', options=['WMA', 'EMA', 'SMA'], inline='DER', group='Directional Energy Ratio') 
+rsmooth  = input.int(3, 'Smooth', minval=1,  inline='DER_1', group='Directional Energy Ratio')
+
+show_senti = input.bool(true, 'Sentiment',  inline='DER_s', group='Directional Energy Ratio')
+senti   = input.int(20, 'Length', minval=1, inline='DER_s', group='Directional Energy Ratio')
+
+v_calc  = input.string('Relative', 'Calculation', options=['Relative', 'Full', 'None'], group='Volume Parameters')
+vlookbk = input.int(20, 'Lookback (for Relative)', minval=1,                            group='Volume Parameters')
+
+v5 = volume
+
+vola    = 
+  v_calc == 'None' or na(volume) ? 1 : 
+  v_calc == 'Relative' ?   ta.stoch(v5, v5, v5, vlookbk) / 100 : 
+  v5
+
+R       = (ta.highest(2) - ta.lowest(2)) / 2                    // R is the 2-bar average bar range - this method accomodates bar gaps
+sr      = ta.change(close) / R                                  // calc ratio of change to R
+rsr     = math.max(math.min(sr, 1), -1)                         // ensure ratio is restricted to +1/-1 in case of big moves
+c       = fixnan(rsr * vola)                                    
+c_plus  = math.max(c, 0)                                        // calc directional vol-accel energy
+c_minus = -math.min(c, 0)
+avg_vola    = f_derma(vola, rlength, MA_Type5)
+dem         = f_derma(c_plus, rlength, MA_Type5)  / avg_vola          // directional energy ratio
+sup         = f_derma(c_minus, rlength, MA_Type5) / avg_vola
+adp         = 100 * ta.wma(nz(dem), DER_avg)                        // average DER
+asp         = 100 * ta.wma(nz(sup), DER_avg)
+anp         = adp - asp                                             // net DER..
+anp_s       = ta.wma(anp, rsmooth)
+s_adp       = 100 * ta.wma(nz(dem), senti)                            // average DER for sentiment length
+s_asp       = 100 * ta.wma(nz(sup), senti)
+V_senti     = ta.wma(s_adp - s_asp, rsmooth)
+c_adp   = color.new(#11ff20, 30)
+c_asp   = color.new(#ff1111, 30)
+c_fd    = color.new(color.green, 80)
+c_fs    = color.new(color.red, 80)
+c_zero  = color.new(#ffee00, 70)
+c_up5    = color.new(#11ff20, 0)
+c_dn5    = color.new(#ff1111, 0)
+
+up5      = anp_s >= 0
+s_up    = V_senti >= 0 
+
+c_grow_above = #1b5e2080 
+c_grow_below = #dc4c4a80
+c_fall_above = #66bb6a80  
+c_fall_below = #ef8e9880     
+
+sflag_up = math.abs(V_senti) >= math.abs(V_senti[1])
+bo = fixnan(asp)
+bc = fixnan(adp)
+bh = math.max(bo, bc)
+bl = math.min(bo, bc)
+
+rising      = ta.change(bc) > 0
+c_barup     = #11ff2088
+c_bardn     = #ff111188
+c_bardj     = #ffffff88
+
+barcolor    = bc > bo and rising ? c_barup : bc < bo and not rising ? c_bardn : c_bardj
+
+// ===================================  RedK Slow_Smooth WMA, RSS_WMA v3 ======================================--
+
+f_LazyLine(_data, _length) =>
+    w1 = 0, w2 = 0, w3 = 0
+    L1 = 0.0, L2 = 0.0, L3 = 0.0
+    w = _length / 3
+    
+    if _length > 2 
+        w2 := math.round(w)
+        w1 := math.round((_length-w2)/2)
+        w3 :=   int((_length-w2)/2)
+        
+        L1 := ta.wma(_data, w1)
+        L2 := ta.wma(L1, w2)
+        L3 := ta.wma(L2, w3)
+    else
+        L3 := _data
+    L3
+
+LL = f_LazyLine(close, 21)
+
+lc_up        = color.new(#33ff00, 0)
+lc_dn        = color.new(#ff1111, 0)
+luptrend     = LL > LL[1]
+SigMulti    = 1.0
+
+SignalOn    = barstate.isconfirmed 
+SwingDn     = luptrend[1] and not(luptrend) and barstate.isconfirmed 
+SwingUp     = luptrend and not(luptrend[1]) and barstate.isconfirmed 
+
+dl = SigMulti / 100 * LL  
+
+upwards = LL > LL[1] and (barcolor == c_barup) and up and (open < close and volRel * .145898 > volDev) and not isLong
+downwards = LL < LL[1]  and (barcolor == c_bardn) and (open > close and volRel * .145898 > volDev) and not isShort
+
+showUp = upwards and not upwards[1] and not upwards[2] and not upwards[3] and not upwards[4] 
+showDown = downwards and not downwards[1] and not upwards[2] and not upwards[3] and not upwards[4] 
+
+if (bShowVodka and showUp)
+    f_AddLabel(bar_index, "Up", "V")
+if (bShowVodka and showDown)
+    f_AddLabel(bar_index, "Down", "V")
+
+pBuyVodka = bShowVodka and showUp ? 1 : na
+pSellVodka = bShowVodka and showDown ? 1 : na
+//plotshape(pBuyVodka, title="VodkaShot", text="V", location=location.belowbar, style=shape.labelup, size=size.tiny, color=colorMildGreen, textcolor=color.white)
+//plotshape(pSellVodka, title="VodkaShot", text="V", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=colorMildRed, textcolor=color.white)
+
+if showUp
+    isLong := true
+    isShort := false
+
+if showDown
+    isLong := false
+    isShort := true
+
+
+// ==========================   Waddah Attar Explosion v1 by LazyBear   ================================
+sensitivity = input.int(150, title="Sensitivity", group="WAE")
+fastLength = input.int(20, title="FastEMA Length", group="WAE")
+slowLength = input.int(40, title="SlowEMA Length", group="WAE")
+channelLength = input.int(20, title="BB Channel Length", group="WAE")
+multWAE = input.float(2.0, title="BB Stdev Multiplier", group="WAE")
+
+calc_macd(source, fastLength, slowLength) =>
+    fastMA = ta.ema(source, fastLength)
+    slowMA = ta.ema(source, slowLength)
+    fastMA - slowMA
+
+calc_BBUpper(source, length, mult) => 
+    basis = ta.sma(source, length)
+    dev = mult * ta.stdev(source, length)
+    basis + dev
+
+calc_BBLower(source, length, mult) => 
+    basis = ta.sma(source, length)
+    dev = mult * ta.stdev(source, length)
+    basis - dev
+
+upperDD = calc_BBUpper(close, channelLength, multWAE)
+lowerDD = calc_BBLower(close, channelLength, multWAE)
+
+t1 = (calc_macd(close, fastLength, slowLength) - calc_macd(close[1], fastLength, slowLength))*sensitivity
+e1 = (upperDD - lowerDD)
+
+trendUpWAE = (t1 >= 0) ? t1 : 0
+trendDownWAE = (t1 < 0) ? (-1*t1) : 0
+
+cBodyColor = color.white
+cBorderColor = color.white
+cWickColor = color.white
+
+if (trendUpWAE > e1 and trendUpWAE > 0)
+    cBodyColor := color.from_gradient(math.abs(trendUpWAE - e1), 1, iTopBody, color.new(colorBigGreen, 70), color.new(colorBigGreen, 0))
+    cBorderColor := color.from_gradient(math.abs(trendUpWAE - e1), 1, iTopBorder, color.new(colorBigGreen, 70), color.new(colorBigGreen, 0))
+    cWickColor := color.new(colorBigGreen, 0)
+
+if (trendUpWAE < e1 and trendUpWAE > 0)
+    cBodyColor := color.new(colorBigGreen, 90)
+    cBorderColor := color.from_gradient(math.abs(e1 - trendUpWAE), 1, iTopBody, color.new(colorBigGreen, 70), color.new(colorBigGreen, 0))
+    cWickColor := color.new(colorBigGreen, 30)
+
+if (trendDownWAE > e1 and trendDownWAE > 0)
+    cBodyColor := color.from_gradient(math.abs(trendDownWAE - e1), 1, iTopBody, color.new(colorBigRed, 50), color.new(colorBigRed, 0))
+    cBorderColor := color.from_gradient(math.abs(trendDownWAE - e1), 1, iTopBorder, color.new(colorBigRed, 50), color.new(colorBigRed, 0))
+    cWickColor := color.new(colorBigRed, 0)
+
+if (trendDownWAE < e1 and trendDownWAE > 0)
+    cBodyColor := color.new(colorBigRed, 90)
+    cBorderColor := color.from_gradient(math.abs(e1 - trendDownWAE), 1, iTopBody, color.new(colorBigRed, 50), color.new(colorBigRed, 0))
+    cWickColor := color.new(colorBigRed, 30)
+
+plotcandle(sCandleType=="Waddah" ? open : na, high, low, close, "", color=cBodyColor, wickcolor=cWickColor, bordercolor=cBorderColor)
+
+colUp = rsiM > 50 ? input.color(color.rgb(230,  75,  75), '', group= 'RSI > 50', inline= 'up') : 
+                   input.color(color.rgb(  0, 188, 230), '', group= 'RSI < 50', inline= 'dn')
+colDn = rsiM > 50 ? input.color(color.rgb(  0, 188, 230), '', group= 'RSI > 50', inline= 'up') : 
+                   input.color(color.rgb( 91, 214,  64), '', group= 'RSI < 50', inline= 'dn')
+
+fun1 = rsiM > 50 ? 80 : 50
+fun2 = rsiM > 50 ? 50 : 20
+
+//fill(p_upper_near, p_upper_avg, fun1, fun2, colUp, colDn) 
+//fill(p_lower_near, p_lower_avg, fun1, fun2, colUp, colDn) 
+
+
+// =====================================   JOHN WICK SETTINGS  ==================================================================
+
+upWick50PercentLarger = close > open and math.abs(high - close) > math.abs(open - close)
+downWick50PercentLarger = close < open and math.abs(low - close) > math.abs(open - close)
+
+// JOHN WICK BOLLINGER BANDS
+wlengthBB = input.int(20, minval=1, group="Wicking Bollinger Bands")
+wsrcBB = input(close, title="Source", group="Wicking Bollinger Bands")
+wmultBB = input.float(2.5, minval=0.001, maxval=50, title="StdDev", group="Wicking Bollinger Bands")
+woffsetBB = input.int(0, "Offset", minval = -500, maxval = 500, group="Wicking Bollinger Bands")
+wbasisBB = ta.sma(wsrcBB, wlengthBB)
+wdevBB = wmultBB * ta.stdev(wsrcBB, wlengthBB)
+wupperBB = wbasisBB + wdevBB
+wlowerBB = wbasisBB - wdevBB
+
+if bUseBB
+    if low <= wlowerBB and close >= wlowerBB and close < open
+        f_AddChar(bar_index, "Up", colorBigGreen, "ß", 1, size.normal) 
+    if high >= wupperBB and close < wupperBB and close > open
+        f_AddChar(bar_index, "Down", colorBigRed, "ß", 1, size.normal) 
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=  RSI  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+
+Rsi2 = ta.rsi(close, 14)
+
+if bUseRSI
+    if upWick50PercentLarger and Rsi2 > rsiUpperW
+        f_AddChar(bar_index, "Up", colorBigGreen, "Ş", 1, size.normal) 
+    if downWick50PercentLarger and Rsi2 < rsiLowerW 
+        f_AddChar(bar_index, "Down", colorBigRed, "Ş", 1, size.normal) 
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=   ALERTS   =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+
+alertcondition(showUp, title='Vodka BUY', message='Vodka BUY')
+alertcondition(showDown, title='Vodka SELL', message='Vodka SELL')
+
+alertcondition(upThrust, title='Trampoline BUY', message='Trampoline BUY')
+alertcondition(downThrust, title='Trampoline SELL', message='Trampoline SELL')
+
+alertcondition(bVectorGreen, title='Vector Candle GREEN', message='Vector Candle GREEN')
+alertcondition(bVectorRed, title='Vector Candle RED', message='Vector Candle RED')
+
+alertcondition(buySignal1, title='Squeeze BUY', message='Squeeze BUY')
+alertcondition(sellSignal1, title='Squeeze SELL', message='Squeeze SELL')
+
+alertcondition(bShowShark and bShowSharkUp, title='Shark BUY', message='Shark BUY')
+alertcondition(bShowShark and bShowSharkDown, title='Shark SELL', message='Shark SELL')
+
+ema2H = ta.ema(close, 200)
+vjj = ta.vwap(close)
+
+vjjColor = math.abs(close - vjj) < syminfo.mintick * NearTicks ? color.blue : color.new(color.blue, 80)
+ema200Color = math.abs(close - ema200) < syminfo.mintick * NearTicks ? color.rgb(161, 161, 161) : color.new(color.rgb(161, 161, 161), 80)
+
+if bShowEMA and false
+    f_AddLine(bar_index, ema2H, ema200Color, 2)
+    f_AddLine(bar_index, vjj, vjjColor, 3)
+
+//asdf = chart.point(open, ema2H)
+//line.new(chart.point(open), ema2H, chart.point(open), ema2H, bar_index+100, color=color.white, style=line.style_solid, width=3)
+
+plot(bShowEMA ? ema2H : na, "200 EMA", color=ema200Color, style=plot.style_linebr, linewidth=2)
+plot(bShowEMA ? vjj : na, "VWAP", color=vjjColor, style=plot.style_linebr, linewidth=3)
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=   CLOUD ALERTS   =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+
+alertcondition((bBrokeDown and buySignal1) or (bBrokeUp and sellSignal1), title='Squeeze in Cloud', message='Squeeze in Cloud')
+alertcondition((bBrokeDown and downThrust) or (bBrokeUp and upThrust), title='Trampoline in Cloud', message='Trampoline in Cloud')
+alertcondition((bBrokeUp and upWick50PercentLarger) or (bBrokeDown and downWick50PercentLarger), title='Large Wick in Cloud', message='Large Wick in Cloud')
+

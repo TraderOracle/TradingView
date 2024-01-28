@@ -1,0 +1,896 @@
+ // @version=5
+
+indicator(title="TO Method v1.3", overlay=true)
+
+bShowCloud = input.bool(true, "Show Resistance Cloud", group="Basic Settings")
+bShowSqueeze = input.bool(true, "Show Squeeze Relaxer Dots", group="Basic Settings")
+bShowShark = input.bool(true, "Show Shark Icons", group="Basic Settings")
+bShowVector = input.bool(true, "Show Vector Candles", group="Basic Settings")
+bShowEMA = input.bool(true, "Show EMA and VWAP", group="Basic Settings")
+bShowTramp = input.bool(true, "Show Trampoline", group="Basic Settings")
+bShowPivotPoints = input(true, title="Show Pivot Points", group="Basic Settings")
+bShowEverest = input(true, title="Show Everest", group="Basic Settings")
+
+// =-=-=-=-=-=-=  Nadaraya-Watson: Envelope (Non-Repainting) © jdehorty  =-=-=-=-=-=-=-=-= //
+
+import jdehorty/KernelFunctions/2 as kernels 
+
+getBounds(_atr, _nearFactor, _farFactor, _yhat) => 
+    _upper_far = _yhat + _farFactor*_atr
+    _upper_near = _yhat + _nearFactor*_atr
+    _lower_near = _yhat - _nearFactor*_atr
+    _lower_far = _yhat - _farFactor*_atr
+    _upper_avg = (_upper_far + _upper_near) / 2
+    _lower_avg = (_lower_far + _lower_near) / 2 
+    [_upper_near, _upper_far, _upper_avg, _lower_near, _lower_far, _lower_avg]
+
+kernel_atr(length, _high, _low, _close) =>
+    trueRange = na(_high[1])? _high-_low : math.max(math.max(_high - _low, math.abs(_high - _close[1])), math.abs(_low - _close[1]))
+    ta.rma(trueRange, length)
+
+h = input.int(256, 'Lookback Window', tooltip='The number of bars used for the estimation. This is a sliding value that represents the most recent historical bars. Recommended range: 3-50', group='Cloud Settings')
+alpha = input.float(3.5, 'Relative Weighting', step=0.25, tooltip='Relative weighting of time frames. As this value approaches zero, the longer time frames will exert more influence on the estimation. As this value approaches infinity, the behavior of the Rational Quadratic Kernel will become identical to the Gaussian kernel. Recommended range: 0.25-25', group='Cloud Settings')
+x_0 = input.int(30, "Start Regression at Bar", tooltip='Bar index on which to start regression. The first bars of a chart are often highly volatile, and omission of these initial bars often leads to a better overall fit. Recommended range: 5-25', group='Cloud Settings')
+
+yhat_close = kernels.rationalQuadratic(close, h, alpha, x_0)
+yhat_high = kernels.rationalQuadratic(high, h, alpha, x_0)
+yhat_low = kernels.rationalQuadratic(low, h, alpha, x_0)
+yhat = yhat_close
+atr_length = input.int(66, 'ATR Length', minval=1, tooltip='The number of bars associated with the Average True Range (ATR).', group='Cloud Settings')
+ktr = kernel_atr(atr_length, yhat_high, yhat_low, yhat_close)
+nearFactor = input.float(1.95, 'Near ATR Factor', minval=0.5, step=0.25, tooltip='The factor by which to multiply the ATR to calculate the near bound of the envelope. Recommended range: 0.5-2.0', group='Cloud Settings')
+farFactor = input.float(7, 'Far ATR Factor', minval=1.0, step=0.25, tooltip='The factor by which to multiply the ATR to calculate the far bound of the envelope. Recommended range: 6.0-8.0', group='Cloud Settings')
+[upper_near, upper_far, upper_avg, lower_near, lower_far, lower_avg] = getBounds(ktr, nearFactor, farFactor, yhat_close)
+
+red_far = input.color(color.new(color.red, 70), title='Upper Boundary Color: Far', tooltip='The color of the farmost upper boundary of the envelope.', group='Cloud Settings')
+red_near = input.color(color.new(color.red, 80), title='Upper Boundary Color: Near', tooltip='The color of the nearmost upper boundary of the envelope.', group='Cloud Settings')
+yhat_green = input.color(color.new(color.green, 50), title='Bullish Estimator Color', tooltip='The Bullish color of the Nadaraya-Watson estimator.', group='Cloud Settings')
+yhat_red = input.color(color.new(color.red, 50), title='Bearish Estimator Color', tooltip='The Bearish color of the Nadaraya-Watson estimator.', group='Cloud Settings')
+green_near = input.color(color.new(color.green, 80), title='Lower Boundary Color: Near', tooltip='The color of the nearmost lower boundary of the envelope.', group='Cloud Settings')
+green_far = input.color(color.new(color.green, 70), title='Lower Boundary Color: Far', tooltip='The color of the farmost lower boundary of the envelope.', group='Cloud Settings')
+
+// p_upper_far = plot(bShowCloud ? upper_far : na, color=red_far, title='Upper Boundary: Far')
+p_upper_avg = plot(bShowCloud ? upper_avg : na, color=red_near,title='Upper Boundary: Average')
+p_upper_near = plot(bShowCloud ? upper_near : na, color=red_near, title='Upper Boundary: Near') 
+// p_yhat = plot(yhat_close, color=yhat > yhat[1] ? yhat_green : yhat_red, linewidth=2, title='Nadaraya-Watson Estimation')
+p_lower_near = plot(bShowCloud ? lower_near : na, color=green_near, title='Lower Boundary: Near')
+p_lower_avg = plot(bShowCloud ? lower_avg : na, color=green_near, title='Lower Boundary: Average') 
+// p_lower_far = plot(bShowCloud ? lower_far : na, color=green_far, title='Lower Boundary: Far')
+
+// fill(p_upper_far, p_upper_avg, color=red_far, title='Upper Boundary: Farmost Region')
+fill(p_upper_near, p_upper_avg, color=red_near, title='Upper Boundary: Nearmost Region')
+fill(p_lower_near, p_lower_avg, color=green_near, title='Lower Boundary: Nearmost Region')
+// fill(p_lower_far, p_lower_avg, color=green_far, title='Lower Boundary: Farmost Region')
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=   TRAMPOLINE  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+
+// Idea from "Serious Backtester" - https://www.youtube.com/watch?v=2hX7qTamOAQ
+// Defaults are optimized for 30 min candles
+
+// CONFIG
+iBBThreshold = input.float(0.0015, minval=0.0, title="Bollinger Lower Threshold", tooltip="0.003 for daily, 0.0015 for 30 min candles", group="TRAMPOLINE Settings")
+RSIThreshold = input.int(25, minval=1, title="RSI Lower Threshold", tooltip="Normally 25", group="TRAMPOLINE Settings")
+RSIDown = input.int(72, minval=1, title="RSI Upper Threshold", tooltip="Normally 75", group="TRAMPOLINE Settings")
+
+rsiLengthInput = input.int(14, minval=1, title="RSI Length", group="TRAMPOLINE Settings")
+rsiSourceInput = input(close, "RSI Source", group="TRAMPOLINE Settings")
+lengthBB = input.int(20, minval=1, group="TRAMPOLINE Bollinger Bands")
+srcBB = input(close, title="Source", group="TRAMPOLINE Bollinger Bands")
+multBB = input.float(2.0, minval=0.001, maxval=50, title="StdDev", group="TRAMPOLINE Bollinger Bands")
+offsetBB = input.int(0, "Offset", minval = -500, maxval = 500, group="TRAMPOLINE Bollinger Bands")
+
+isRed = close < open
+isGreen = close > open
+
+// BOLLINGER BANDS
+basisBB = ta.sma(srcBB, lengthBB)
+devBB = multBB * ta.stdev(srcBB, lengthBB)
+upperBB = basisBB + devBB
+lowerBB = basisBB - devBB
+downBB = low < lowerBB or high < lowerBB
+upBB = low > upperBB or high > upperBB
+bbw = (upperBB - lowerBB) / basisBB
+
+// RSI
+up = ta.rma(math.max(ta.change(rsiSourceInput), 0), rsiLengthInput)
+down = ta.rma(-math.min(ta.change(rsiSourceInput), 0), rsiLengthInput)
+rsiM = down == 0 ? 100 : up == 0 ? 0 : 100 - (100 / (1 + up / down))
+
+back1 = isRed[1] and rsiM[1] <= RSIThreshold and close[1] < lowerBB[1] and bbw[1] > iBBThreshold
+back2 = isRed[2] and rsiM[2] <= RSIThreshold and close[2] < lowerBB[2] and bbw[2] > iBBThreshold
+back3 = isRed[3] and rsiM[3] <= RSIThreshold and close[3] < lowerBB[3] and bbw[3] > iBBThreshold
+back4 = isRed[4] and rsiM[4] <= RSIThreshold and close[4] < lowerBB[4] and bbw[4] > iBBThreshold
+back5 = isRed[5] and rsiM[5] <= RSIThreshold and close[5] < lowerBB[5] and bbw[5] > iBBThreshold
+
+for1 = isGreen[1] and rsiM[1] >= RSIDown and close[1] > upperBB[1] and bbw[1] > iBBThreshold
+for2 = isGreen[2] and rsiM[2] >= RSIDown and close[2] > upperBB[2] and bbw[2] > iBBThreshold
+for3 = isGreen[3] and rsiM[3] >= RSIDown and close[3] > upperBB[3] and bbw[3] > iBBThreshold
+for4 = isGreen[4] and rsiM[4] >= RSIDown and close[4] > upperBB[4] and bbw[4] > iBBThreshold
+for5 = isGreen[5] and rsiM[5] >= RSIDown and close[5] > upperBB[5] and bbw[5] > iBBThreshold
+
+weGoUp = isGreen and (back1 or back2 or back3 or back4 or back5) and (high > high[1])
+upThrust = weGoUp and not weGoUp[1] and not weGoUp[2] and not weGoUp[3] and not weGoUp[4]
+weGoDown = isRed and (for1 or for2 or for3 or for4 or for5) and (low < low[1])
+downThrust = weGoDown and not weGoDown[1] and not weGoDown[2] and not weGoDown[3] and not weGoDown[4]
+
+// PLOT THE THINGS
+plotshape(bShowTramp and upThrust ? hl2 : na, title="T", text="T", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.rgb(46, 173, 84), textcolor=color.white)
+plotshape(bShowTramp and downThrust ? hl2 : na, title="T", text="T", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.rgb(173, 46, 69), textcolor=color.white)
+
+alertcondition(upThrust, title='Trampoline BUY', message='Trampoline BUY')
+alertcondition(downThrust, title='Trampoline SELL', message='Trampoline SELL')
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=   Squeeze Relaxer version 2.1  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+
+var cGreen = 0
+var cRed = 0
+var pos = false 
+var neg = false 
+
+ignoreDots = input.bool(false, title="Ignore dots on Squeeze Indicator", group="Relaxing Settings", tooltip="Any squeeze bar is counted, no matter if it has a white dot or not")
+sqTolerance = input.int(1, title="Squeeze Tolerance (lower = more sensitive)", group="Relaxing Settings", tooltip="How many bars to look back on the squeeze indicator")
+adxValue = input.int(11, title="ADX Threshold", group="Relaxing Settings", tooltip="Anything over 19 filters out low volume periods. Set to 11 as a default, feel free to increase to get less noise")
+
+uno = ta.ema(close, 200)
+plot(bShowEMA ? uno : na, "First", color=color.new(color.white, transp=60), linewidth=3)
+plot(bShowEMA ? ta.vwap(close) : na, "VWAP", color=color.blue, linewidth=3)
+
+adxlen = input.int(14, title="ADX Smoothing", group="Relaxing ADX Settings")
+dilen = input.int(14, title="DI Length", group="Relaxing ADX Settings")
+
+rsiOver = input.int(66, title="RSI Oversold Value", group="Relaxing RSI Settings")
+rsiUnder = input.int(34, title="RSI Overbought Value", group="Relaxing RSI Settings")
+
+// Keltner Channel
+mult = input.float(2.0, "Multiplier", group="Relaxing KC Settings")
+exp = input.bool(true, "Use Exponential MA", group="Relaxing KC Settings")
+BandsStyle = "Average True Range"
+
+esma(close, length)=>
+	s = ta.sma(close, 20)
+	e = ta.ema(close, 20)
+	exp ? e : s
+ma1 = esma(close, 20)
+rangema1 = BandsStyle == "True Range" ? ta.tr(true) : BandsStyle == "Average True Range" ? ta.atr(10) : ta.rma(high - low, 20)
+upper1 = ma1 + rangema1 * mult
+lower1 = ma1 - rangema1 * mult
+
+KeltnerCross = ta.crossover(close, upper1) or ta.crossover(close, lower1)
+
+// ADX
+dirmov(len) =>
+	up4 = ta.change(high)
+	down4 = -ta.change(low)
+	plusDM = na(up4) ? na : (up4 > down4 and up4 > 0 ? up4 : 0)
+	minusDM = na(down4) ? na : (down4 > up4 and down4 > 0 ? down4 : 0)
+	truerange = ta.rma(ta.tr, len)
+	plus = fixnan(100 * ta.rma(plusDM, len) / truerange)
+	minus = fixnan(100 * ta.rma(minusDM, len) / truerange)
+	[plus, minus]
+adx(dilen, adxlen) =>
+	[plus, minus] = dirmov(dilen)
+	sum = plus + minus
+	adx = 100 * ta.rma(math.abs(plus - minus) / (sum == 0 ? 1 : sum), adxlen)
+sig = adx(dilen, adxlen)
+sigabove19 = sig > adxValue
+
+// WAE Dead Zone 
+sensitivity = input(150, title="Sensitivity", group="Relaxing Dead Zone (WAE) Settings")
+fastLength=input(20, title="FastEMA Length", group="Relaxing Dead Zone (WAE) Settings")
+slowLength=input(40, title="SlowEMA Length", group="Relaxing Dead Zone (WAE) Settings")
+
+calc_macd(source, fastLength, slowLength) =>
+	fastMA = ta.ema(source, fastLength)
+	slowMA = ta.ema(source, slowLength)
+	fastMA - slowMA
+
+t1 = (calc_macd(close, fastLength, slowLength) - calc_macd(close[1], fastLength, slowLength))*sensitivity
+t2 = (calc_macd(close[2], fastLength, slowLength) - calc_macd(close[3], fastLength, slowLength))*sensitivity
+
+trendUp = (t1 >= 0) ? t1 : 0
+trendDown = (t1 < 0) ? (-1*t1) : 0
+
+// Squeeze Momentum
+length = input(20, title="BB Length", group="Relaxing Momentum Settings")
+multQ = input(2.0,title="BB MultFactor", group="Relaxing Momentum Settings")
+lengthKC=input(20, title="KC Length", group="Relaxing Momentum Settings")
+multKC = input(1.5, title="KC MultFactor", group="Relaxing Momentum Settings")
+
+useTrueRange = true
+source = close
+basis = ta.sma(source, length)
+dev1 = multKC * ta.stdev(source, length)
+upperBB1 = basis + dev1
+lowerBB1 = basis - dev1
+ma = ta.sma(source, lengthKC)
+rangeQ = (high - low)
+rangema = ta.sma(rangeQ, lengthKC)
+upperKC = ma + rangema * multKC
+lowerKC = ma - rangema * multKC
+sqzOn  = (lowerBB1 > lowerKC) and (upperBB1 < upperKC)
+sqzOff = (lowerBB1 < lowerKC) and (upperBB1 > upperKC)
+noSqz  = (sqzOn == false) and (sqzOff == false)
+
+avg1 = math.avg(ta.highest(high, lengthKC), ta.lowest(low, lengthKC))
+avg2 = math.avg(avg1, ta.sma(close, lengthKC))
+val = ta.linreg(close - avg2, lengthKC, 0)
+
+pos := false
+neg := false
+
+if (val < nz(val[1]) and val < 5 and not sqzOn)
+    cRed := cRed + 1   
+
+if (val > nz(val[1]) and val > 5 and not sqzOn)
+    cGreen := cGreen + 1   
+
+if (val > nz(val[1]) and cRed > sqTolerance and val < 5 and not pos[1] and sigabove19 == true)
+    cRed := 0
+    pos := true  
+
+if (val < nz(val[1]) and cGreen > sqTolerance and val > 5 and not neg[1] and sigabove19 == true)
+    cGreen := 0
+    neg := true  
+
+buySignal1 = pos 
+sellSignal1 = neg
+
+bColor = rsiM < rsiUnder or rsiM > rsiOver?  color.red : color.yellow
+cColor = KeltnerCross ? color.aqua : bColor
+ 
+plotshape(bShowSqueeze and buySignal1 ? pos : na, title="Squeeze Buy", style=shape.diamond, location=location.belowbar, color=cColor, size=size.tiny)
+plotshape(bShowSqueeze and sellSignal1 ? neg : na, title="Squeeze Sell", style=shape.diamond, location=location.abovebar, color=cColor, size=size.tiny)
+
+alertcondition(buySignal1, title='Squeeze BUY', message='Squeeze BUY')
+alertcondition(sellSignal1, title='Squeeze SELL', message='Squeeze SELL')
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=   VECTOR CANDLES  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+
+import TradersReality/Traders_Reality_Lib/2 as trLib
+
+color redVectorColor = input.color(title='Vector: Red', defval=color.rgb(255, 0, 0), inline='vectors', group="Vector Candle Settings")
+color greenVectorColor = input.color(title='Green',defval=color.rgb(0, 255, 132), inline='vectors', group="Vector Candle Settings")
+color violetVectorColor = input.color(title='Violet',defval=color.fuchsia, inline='vectors', group="Vector Candle Settings")
+color blueVectorColor = input.color(title='Blue', defval=color.rgb(83, 144, 249), inline='vectors', tooltip='Bull bars are green and bear bars are red when the bar is with volume >= 200% of the average volume of the 10 previous bars, or bars where the product of candle spread x candle volume is >= the highest for the 10 previous bars.\n Bull bars are blue and bear are violet when the bar is with with volume >= 150% of the average volume of the 10 previous bars.', group="Vector Candle Settings")
+color regularCandleUpColor = input.color(title='Regular: Up Candle', defval=color.new(#999999, 99), inline='nonVectors', group="Vector Candle Settings")
+color regularCandleDownColor = input.color(title='Down Candle', defval=color.new(#4d4d4d, 99), inline='nonVectors', tooltip='Bull bars are light gray and bear are dark gray when none of the red/green/blue/violet vector conditions are met.', group="Vector Candle Settings")
+
+bool overrideSym = input.bool(title='Override chart symbol?', defval=false, inline='pvsra', group="Vector Candle Settings")
+string pvsraSym = input.string(title='', defval='INDEX:BTCUSD', tooltip='You can use INDEX:BTCUSD or you can combine multiple feeds, for example BINANCE:BTCUSDT+COINBASE:BTCUSD. Note that adding too many will slow things down.', inline='pvsra', group="Vector Candle Settings")
+bool colorOverride = input.bool(true, 'Override color?' , inline="vcz1", group="Vector Candle Settings")
+
+pvsraVolume(overrideSymbolX, pvsraSymbolX, tickerIdX) =>
+    request.security(overrideSymbolX ? pvsraSymbolX : tickerIdX, '', [volume,high,low,close,open], barmerge.gaps_off, barmerge.lookahead_off)
+
+[pvsraVolume, pvsraHigh, pvsraLow, pvsraClose, pvsraOpen]  = pvsraVolume(overrideSym, pvsraSym, syminfo.tickerid)
+
+[pvsraColor, alertFlag, averageVolume, volumeSpread, highestVolumeSpread] = trLib.calcPvsra(pvsraVolume, pvsraHigh, pvsraLow, pvsraClose, pvsraOpen, redVectorColor, greenVectorColor, violetVectorColor, blueVectorColor, regularCandleDownColor, regularCandleUpColor)
+barcolor(bShowVector ? pvsraColor : na)
+
+alertcondition(pvsraColor == greenVectorColor, title='Vector Candle GREEN', message='Vector Candle GREEN')
+alertcondition(pvsraColor == redVectorColor, title='Vector Candle RED', message='Vector Candle RED')
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=   THE SHARK  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+
+bApply25and75 = input(false, title="Apply 25/75 RSI rule", group="Shark Settings")
+
+ema50 = ta.ema(close, 50)
+ema200 = ta.ema(close, 200)
+ema400 = ta.ema(close, 400)
+ema800 = ta.ema(close, 800)
+wapwap = ta.vwap(close)
+
+bTouchedLine = (ema50<high and ema50>low) or (ema200<high and ema200>low) or (ema400<high and ema400>low) or (ema800<high and ema800>low) or (wapwap<high and wapwap>low)
+
+basis5 = ta.sma(rsiM, 30)
+dev = mult * ta.stdev(rsiM, 30)
+upper = basis5 + dev
+lower = basis5 - dev
+
+bBelow25 = rsiM < 26
+bAbove75 = rsiM > 74
+
+if not bApply25and75
+    bBelow25 := true
+    bAbove75 := true
+
+bShowSharkDown = (rsiM > upper and bAbove75)
+bShowSharkUp = (rsiM < lower and bBelow25)
+
+plotchar(bShowShark and bShowSharkUp ? hlcc4 : na, char="🦈", location = location.belowbar, size=size.auto)
+plotchar(bShowShark and bShowSharkDown ? hlcc4 : na, char="🦈", location = location.abovebar, size=size.auto)
+
+alertcondition(bShowShark and bShowSharkUp, title='Shark BUY', message='Shark BUY')
+alertcondition(bShowShark and bShowSharkDown, title='Shark SELL', message='Shark SELL')
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=   PIVOT POINTS STANDARD  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+
+AUTO = "Auto"
+DAILY = "Daily"
+WEEKLY = "Weekly"
+MONTHLY = "Monthly"
+QUARTERLY = "Quarterly"
+YEARLY = "Yearly"
+BIYEARLY = "Biyearly"
+TRIYEARLY = "Triyearly"
+QUINQUENNIALLY = "Quinquennially"
+DECENNIALLY = "Decennially"
+
+TRADITIONAL = "Traditional"
+
+custom_years_divisor = 2
+
+kind = TRADITIONAL
+pivot_time_frame = AUTO
+look_back = 15
+is_daily_based = true
+show_labels = false
+show_prices = false
+position_labels = "Left"
+line_width = 1
+
+var DEF_COLOR = #bb9057
+var arr_time = array.new_int()
+var p = array.new_float()
+var r1 = array.new_float()
+var s1 = array.new_float()
+var r2 = array.new_float()
+var s2 = array.new_float()
+var r3 = array.new_float()
+var s3 = array.new_float()
+var r4 = array.new_float()
+var s4 = array.new_float()
+var r5 = array.new_float()
+var s5 = array.new_float()
+pivotX_open = float(na)
+pivotX_open := nz(pivotX_open[1], open)
+pivotX_high = float(na)
+pivotX_high := nz(pivotX_high[1], high)
+pivotX_low = float(na)
+pivotX_low := nz(pivotX_low[1], low)
+pivotX_prev_open = float(na)
+pivotX_prev_open := nz(pivotX_prev_open[1])
+pivotX_prev_high = float(na)
+pivotX_prev_high := nz(pivotX_prev_high[1])
+pivotX_prev_low = float(na)
+pivotX_prev_low := nz(pivotX_prev_low[1])
+pivotX_prev_close = float(na)
+pivotX_prev_close := nz(pivotX_prev_close[1])
+
+get_pivot_resolution() =>
+    timeframe.multiplier <= 15 ? "D" : "W"
+
+var lines = array.new_line()
+var labels = array.new_label()
+
+draw_line(i, pivot, col) =>
+    if array.size(arr_time) > 1
+        array.push(lines, line.new(array.get(arr_time, i), array.get(pivot, i), array.get(arr_time, i + 1), array.get(pivot, i), color=col, xloc=xloc.bar_time, width=line_width))
+
+traditional() =>
+    pivotX_Median = (pivotX_prev_high + pivotX_prev_low + pivotX_prev_close) / 3
+    array.push(p, pivotX_Median)
+    array.push(r1, pivotX_Median * 2 - pivotX_prev_low)
+    array.push(s1, pivotX_Median * 2 - pivotX_prev_high)
+    array.push(r2, pivotX_Median + 1 * (pivotX_prev_high - pivotX_prev_low))
+    array.push(s2, pivotX_Median - 1 * (pivotX_prev_high - pivotX_prev_low))
+    array.push(r3, pivotX_Median * 2 + (pivotX_prev_high - 2 * pivotX_prev_low))
+    array.push(s3, pivotX_Median * 2 - (2 * pivotX_prev_high - pivotX_prev_low))
+    array.push(r4, pivotX_Median * 3 + (pivotX_prev_high - 3 * pivotX_prev_low))
+    array.push(s4, pivotX_Median * 3 - (3 * pivotX_prev_high - pivotX_prev_low))
+    array.push(r5, pivotX_Median * 4 + (pivotX_prev_high - 4 * pivotX_prev_low))
+    array.push(s5, pivotX_Median * 4 - (4 * pivotX_prev_high - pivotX_prev_low))
+
+calc_pivot() =>
+    traditional()
+
+resolution = get_pivot_resolution()
+
+SIMPLE_DIVISOR = 2
+
+calc_high(prev, curr) =>
+    if na(prev) or na(curr)
+        nz(prev, nz(curr, na))
+    else
+        math.max(prev, curr)
+    
+calc_low(prev, curr) =>
+    if not na(prev) and not na(curr)
+        math.min(prev, curr)
+    else
+        nz(prev, nz(curr, na))
+
+calc_OHLC_for_pivot(custom_years_divisor) =>
+    if custom_years_divisor == SIMPLE_DIVISOR 
+        [open, high, low, close, open[1], high[1], low[1], close[1], time[1], time_close]
+    else
+        var prev_sec_open = float(na)
+        var prev_sec_high = float(na)
+        var prev_sec_low = float(na)
+        var prev_sec_close = float(na)
+        var prev_sec_time = int(na)
+        var curr_sec_open = float(na)
+        var curr_sec_high = float(na)
+        var curr_sec_low = float(na)
+        var curr_sec_close = float(na)
+        if year(time_close) % custom_years_divisor == 0
+        	curr_sec_open := open
+			curr_sec_high := high
+			curr_sec_low := low
+			curr_sec_close := close
+            prev_sec_high := high[1]
+            prev_sec_low := low[1]
+            prev_sec_close := close[1]
+            prev_sec_time := time[1]
+            for i = 2 to custom_years_divisor
+                prev_sec_open :=  nz(open[i], prev_sec_open)
+                prev_sec_high := calc_high(prev_sec_high, high[i])
+                prev_sec_low := calc_low(prev_sec_low, low[i])
+                prev_sec_time := nz(time[i], prev_sec_time)
+        [curr_sec_open, curr_sec_high, curr_sec_low, curr_sec_close, prev_sec_open, prev_sec_high, prev_sec_low, prev_sec_close, prev_sec_time, time_close]
+
+[sec_open, sec_high, sec_low, sec_close, prev_sec_open, prev_sec_high, prev_sec_low, prev_sec_close, prev_sec_time, sec_time] = request.security(syminfo.tickerid, resolution, calc_OHLC_for_pivot(custom_years_divisor), lookahead = barmerge.lookahead_on)
+sec_open_gaps_on = request.security(syminfo.tickerid, resolution, open, gaps = barmerge.gaps_on, lookahead = barmerge.lookahead_on)
+
+is_change_years = false
+var is_change = false
+var uses_current_bar = false
+var change_time = int(na)
+is_time_change = false
+
+var start_time = time
+var was_last_premarket = false
+var start_calculate_in_premarket = false
+
+is_last_premarket = barstate.islast and session.ispremarket and time_close > sec_time and not was_last_premarket
+
+if is_last_premarket
+    was_last_premarket := true
+    start_calculate_in_premarket := true
+if session.ismarket
+    was_last_premarket := false
+    
+without_time_change = barstate.islast and array.size(arr_time) == 0
+is_can_calc_pivot = (not uses_current_bar and is_time_change and session.ismarket) or (ta.change(sec_open) and not start_calculate_in_premarket) or is_last_premarket or (uses_current_bar and not na(sec_open_gaps_on)) or without_time_change
+enough_bars_for_calculate = prev_sec_time >= start_time or is_daily_based
+
+if is_can_calc_pivot and enough_bars_for_calculate 
+    if array.size(arr_time) == 0 and is_daily_based
+        pivotX_prev_open := prev_sec_open[1]
+        pivotX_prev_high := prev_sec_high[1]
+        pivotX_prev_low := prev_sec_low[1]
+        pivotX_prev_close := prev_sec_close[1]
+        pivotX_open := sec_open[1]
+        pivotX_high := sec_high[1]
+        pivotX_low := sec_low[1]
+        array.push(arr_time, start_time)
+        calc_pivot()
+    
+    if is_daily_based
+    	if is_last_premarket
+            pivotX_prev_open := sec_open
+            pivotX_prev_high := sec_high
+            pivotX_prev_low := sec_low
+            pivotX_prev_close := sec_close
+            pivotX_open := open
+            pivotX_high := high
+            pivotX_low := low
+        else
+			pivotX_prev_open := prev_sec_open
+			pivotX_prev_high := prev_sec_high
+			pivotX_prev_low := prev_sec_low
+			pivotX_prev_close := prev_sec_close
+			pivotX_open := sec_open
+			pivotX_high := sec_high
+			pivotX_low := sec_low
+    else
+        pivotX_prev_high := pivotX_high
+        pivotX_prev_low := pivotX_low
+        pivotX_prev_open := pivotX_open
+        pivotX_prev_close := close[1]
+        pivotX_open := open
+        pivotX_high := high
+        pivotX_low := low
+
+    if barstate.islast and not is_change and array.size(arr_time) > 0 and not without_time_change
+        array.set(arr_time, array.size(arr_time) - 1, change_time)
+    else if without_time_change
+        array.push(arr_time, start_time)
+    else
+        array.push(arr_time, nz(change_time, time))
+
+    calc_pivot()
+
+    if array.size(arr_time) > look_back
+        if array.size(arr_time) > 0
+            array.shift(arr_time)
+        if array.size(p) > 0 
+            array.shift(p)
+        if array.size(r1) > 0 
+            array.shift(r1)
+        if array.size(s1) > 0 
+            array.shift(s1)
+        if array.size(r2) > 0 
+            array.shift(r2)
+        if array.size(s2) > 0 
+            array.shift(s2)
+        if array.size(r3) > 0 
+            array.shift(r3)
+        if array.size(s3) > 0
+            array.shift(s3)
+        if array.size(r4) > 0 
+            array.shift(r4)
+        if array.size(s4) > 0 
+            array.shift(s4)
+        if array.size(r5) > 0
+            array.shift(r5)
+        if array.size(s5) > 0
+            array.shift(s5)
+    is_change := true
+else if not is_daily_based
+    pivotX_high := math.max(pivotX_high, high)
+    pivotX_low := math.min(pivotX_low, low)
+
+if barstate.islast and array.size(arr_time) > 0 and is_change
+    is_change := false
+    array.push(arr_time, time_close(resolution))
+
+    for i = 0 to array.size(lines) - 1
+        if array.size(lines) > 0
+            line.delete(array.shift(lines))
+        if array.size(labels) > 0
+            label.delete(array.shift(labels))
+
+    for i = 0 to array.size(arr_time) - 2
+        if array.size(p) > 0 and bShowPivotPoints
+            draw_line(i, p, DEF_COLOR)
+        if array.size(r1) > 0 and bShowPivotPoints 
+            draw_line(i, r1, DEF_COLOR)
+        if array.size(s1) > 0 and bShowPivotPoints
+            draw_line(i, s1, DEF_COLOR)
+        if array.size(r2) > 0 and bShowPivotPoints
+            draw_line(i, r2, DEF_COLOR)
+        if array.size(s2) > 0 and bShowPivotPoints
+            draw_line(i, s2, DEF_COLOR)
+        if array.size(r3) > 0 and bShowPivotPoints
+            draw_line(i, r3, DEF_COLOR)
+        if array.size(s3) > 0 and bShowPivotPoints
+            draw_line(i, s3, DEF_COLOR)
+        if array.size(r4) > 0 and bShowPivotPoints
+            draw_line(i, r4, DEF_COLOR)
+        if array.size(s4) > 0 and bShowPivotPoints
+            draw_line(i, s4, DEF_COLOR)
+        if array.size(r5) > 0 and bShowPivotPoints
+            draw_line(i, r5, DEF_COLOR)
+        if array.size(s5) > 0 and bShowPivotPoints
+            draw_line(i, s5, DEF_COLOR)
+
+
+// indicator(title='Everest', shorttitle='Everest', overlay=true)
+
+// Inspired by this video: https://www.youtube.com/watch?v=a7Hd0b5grZs
+
+// ==============================   SMOOTHED HA   ====================================
+
+g_TimeframeSettings = 'Display & Timeframe Settings'
+time_frame = input.timeframe(title='Timeframe for HA candle calculation', defval='', group=g_TimeframeSettings) 
+g_SmoothedHASettings = 'Smoothed HA Settings'
+smoothedHALength = input.int(title='HA Price Input Smoothing Length', minval=1, maxval=500, step=1, defval=13, group=g_SmoothedHASettings)
+smoothedMAType = input.string(title='Moving Average Calculation', group=g_SmoothedHASettings, options=['Exponential', 'Simple', 'Smoothed', 'Weighted', 'Linear', 'Hull', 'Arnaud Legoux'], defval='Exponential')
+smoothedHAalmaSigma = input.float(title="ALMA Sigma", defval=6, minval=0, maxval=100, step=0.1, group=g_SmoothedHASettings)
+smoothedHAalmaOffset = input.float(title="ALMA Offset", defval=0.85, minval=0, maxval=1, step=0.01, group=g_SmoothedHASettings)
+g_DoubleSmoothingSettings = 'Double-smoothed HA Settings'
+doDoubleSmoothing = input.bool(title='Enable double-smoothing', defval=true, group=g_DoubleSmoothingSettings)
+doubleSmoothedHALength = input.int(title='HA Second Smoothing Length', minval=1, maxval=500, step=1, defval=10, group=g_DoubleSmoothingSettings)
+doubleSmoothedMAType = input.string(title='Double-Smoothing Moving Average Calculation', group=g_DoubleSmoothingSettings, options=['Exponential', 'Simple', 'Smoothed', 'Weighted', 'Linear', 'Hull', 'Arnaud Legoux'], defval='Exponential')
+doubleSmoothedHAalmaSigma = input.float(title="ALMA Sigma", defval=6, minval=0, maxval=100, step=0.1, group=g_DoubleSmoothingSettings)
+doubleSmoothedHAalmaOffset = input.float(title="ALMA Offset", defval=0.85, minval=0, maxval=1, step=0.01, group=g_DoubleSmoothingSettings)
+
+smoothedMovingAvg(src, len) => 
+	smma = 0.0
+	smma := na(smma[1]) ? ta.sma(src, len) : (smma[1] * (len - 1) + src) / len 
+	smma
+	
+getHAOpen(prevOpen, prevClose) =>
+    haOpen = 0.0
+    haOpen := ((prevOpen + prevClose)/2)
+    haOpen
+
+getHAHigh(o, h, c) =>
+    haHigh = 0.0
+    haHigh := math.max(h, o, c)
+    haHigh
+
+getHALow(o, l, c) =>
+    haLow = 0.0
+    haLow := math.min(o, l, c)
+    haLow
+    
+getHAClose(o, h, l, c) =>
+    haClose = 0.0
+    haClose := ((o + h + l + c)/4)
+    haClose
+	
+getMAValue(src, len, type, isDoubleSmooth) =>
+	maValue = 0.0
+	if (type == 'Exponential')
+		maValue := ta.ema(source=src, length=len)
+	else if (type == 'Simple')
+		maValue := ta.sma(source=src, length=len)
+	else if (type == 'Smoothed')
+		maValue := smoothedMovingAvg(src=src, len=len)
+	else if (type == 'Weighted')
+		maValue := ta.wma(source=src, length=len)
+	else if (type == 'Linear')
+		maValue := ta.linreg(source=src, length=len, offset=0)
+	else if (type == 'Hull')
+		maValue := ta.hma(source=src, length=len)
+	else if (type == 'Arnaud Legoux')
+		maValue := ta.alma(series=src, length=len, offset=(isDoubleSmooth ? doubleSmoothedHAalmaOffset : smoothedHAalmaOffset), sigma=(isDoubleSmooth ? doubleSmoothedHAalmaSigma : smoothedHAalmaSigma))
+	else 
+		maValue := na
+	maValue
+
+realPriceTicker = ticker.new(prefix=syminfo.prefix, ticker=syminfo.ticker)
+actualOpen = request.security(symbol=realPriceTicker, timeframe=time_frame, expression=open, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+actualHigh = request.security(symbol=realPriceTicker, timeframe=time_frame, expression=high, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+actualLow = request.security(symbol=realPriceTicker, timeframe=time_frame, expression=low, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+actualClose = request.security(symbol=realPriceTicker, timeframe=time_frame, expression=close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+smoothedMA1open = getMAValue(actualOpen, smoothedHALength, smoothedMAType, false) 
+smoothedMA1high = getMAValue(actualHigh, smoothedHALength, smoothedMAType, false) 
+smoothedMA1low = getMAValue(actualLow, smoothedHALength, smoothedMAType, false) 
+smoothedMA1close = getMAValue(actualClose, smoothedHALength, smoothedMAType, false)
+smoothedHAClose = getHAClose(smoothedMA1open, smoothedMA1high, smoothedMA1low, smoothedMA1close)
+
+smoothedHAOpen = smoothedMA1open
+smoothedHAOpen := na(smoothedHAOpen[1]) ? smoothedMA1open : getHAOpen(smoothedHAOpen[1], smoothedHAClose[1])
+smoothedHAHigh = getHAHigh(smoothedHAOpen, smoothedMA1high, smoothedHAClose)
+smoothedHALow =  getHALow(smoothedHAOpen, smoothedMA1low, smoothedHAClose)
+
+openToPlot = smoothedHAOpen
+closeToPlot = smoothedHAClose
+highToPlot = smoothedHAHigh
+lowToPlot = smoothedHALow
+
+if (doDoubleSmoothing)
+    openToPlot := getMAValue(smoothedHAOpen, doubleSmoothedHALength, doubleSmoothedMAType, true)
+    closeToPlot := getMAValue(smoothedHAClose, doubleSmoothedHALength, doubleSmoothedMAType, true)
+    highToPlot := getMAValue(smoothedHAHigh, doubleSmoothedHALength, doubleSmoothedMAType, true)
+    lowToPlot := getMAValue(smoothedHALow, doubleSmoothedHALength, doubleSmoothedMAType, true)
+else
+    na
+
+candleColor = color.rgb(0, 0, 0, 100)
+// candleColor := (closeToPlot > openToPlot) ? colorBullish : (closeToPlot < openToPlot) ? colorBearish : candleColor[1]
+
+// ===================================   DXF   ======================================================
+
+f_avgdxf(_price, _length, _vol, _avg) =>
+    mf              = ta.change(_price) * _vol
+    SumAbsChange    = math.sum(math.abs(mf), _length)
+    SumUpChange     = math.sum(math.max(mf, 0), _length)
+    o_dxf           = SumUpChange / SumAbsChange * 200 - 100
+    o_avgdxf        = ta.wma(o_dxf, _avg)
+
+price       = input(close, 'Price')
+lookbk      = input.int(15, 'DXF Lookback', minval=1)
+lengthE     = input.int(5, 'Avg Length', minval=1)
+smth        = input.int(3, 'Smooth', minval=1)
+step        = input.int(20, 'Step [0 = No Step]', minval=0, step=5)
+s_level     = input(20, 'Significant Trend Level')
+vol_w       = input(false, 'Volume Weighted?')
+
+v           = vol_w ? volume : 1                                   
+dxf_raw     = f_avgdxf(price, lookbk, v, lengthE)
+dxf_s       = ta.wma(dxf_raw, smth)                                
+dxf         = step > 0 ? math.round(dxf_s / step) * step : dxf_s
+
+c_up        = color.new(#33ff00, 0)
+c_dn        = color.new(#ff1111, 0)
+upDXF       = dxf >= 0
+downDXF     = dxf < 0
+c_zeroline  = color.new(color.yellow, 70)
+
+//l_zero      = hline(0,          color=c_zeroline,                   linestyle=hline.style_solid, editable=false)
+//l_splus     = hline(s_level,    color=color.green,                  linestyle=hline.style_dotted, editable=false)
+//l_sminus    = hline(-s_level,   color=color.red,                    linestyle=hline.style_dotted, editable=false)
+//l_100plus   = hline(100,        color=color.new(color.green,90),    linestyle=hline.style_dotted, editable=false)
+//l_100minus  = hline(-100,       color=color.new(color.red,90),      linestyle=hline.style_dotted, editable=false)
+
+
+// =====================================   REDK EVEREX 2.0   ====================================================
+
+GetAverage(_data, _len, MAOption) =>
+    value = switch MAOption
+        'SMA' => ta.sma(_data, _len) 
+        'EMA' => ta.ema(_data, _len) 
+        'HMA' => ta.hma(_data, _len) 
+        'RMA' => ta.rma(_data, _len) 
+        => 
+            ta.wma(_data, _len)
+
+Normalize(_Value, _Avg) =>
+    _X = _Value / _Avg
+    _Nor = 
+      _X > 1.50 ? 1.00 :
+      _X > 1.20 ? 0.90 :
+      _X > 1.00 ? 0.80 :
+      _X > 0.80 ? 0.70 :
+      _X > 0.60 ? 0.60 :
+      _X > 0.40 ? 0.50 :
+      _X > 0.20 ? 0.25 :
+      0.1
+
+grp_1   = 'Rate of FLow (RoF)'
+grp_2   = 'Lookback Parameters'
+grp_3   = 'Bias / Sentiment'
+grp_4   = 'EVEREX Bands'
+
+length1    = input.int(10, minval = 1, inline = 'ROF', group = grp_1)
+MA_Type   = input.string(defval = 'WMA', title = 'MA type', 
+  options = ['WMA', 'EMA', 'SMA', 'HMA', 'RMA'], inline = 'ROF', group = grp_1) 
+smooth    = input.int(defval = 3, title = 'Smooth', minval = 1,  inline = 'ROF', group = grp_1)
+
+sig_length  = input.int(5, 'Signal Length', minval = 1, inline = 'Signal', group = grp_1)
+S_Type      = input.string(defval = 'WMA', title = 'Signal Type', 
+  options = ['WMA', 'EMA', 'SMA', 'HMA', 'RMA'], inline = 'Signal', group = grp_1)
+
+lookback    = input.int(defval = 20, title = 'Length', minval = 1, inline = 'Lookback', group = grp_2)
+lkbk_Calc   = input.string(defval = 'Simple', title = 'Averaging', 
+  options = ['Simple', 'Same as RRoF'], inline='Lookback', group = grp_2 )
+
+showBias    = input.bool(defval = false, title = 'Bias Plot ? -- ', inline = 'Bias', group = grp_3)
+B_Length    = input.int(defval = 30, title = 'Length', minval = 1, inline = 'Bias', group = grp_3)
+B_Type      = input.string(defval = 'WMA', title = 'MA type', 
+  options = ['WMA', 'EMA', 'SMA', 'HMA', 'RMA'], inline = 'Bias', group = grp_3)
+
+showEVEREX  = input.bool(true, 'Show EVEREX Bands ? -- ', inline = 'EVEREX', group = grp_4)
+
+bandscale   = str.tonumber(input.string("100", title = "Band Scale", 
+  options = ['100', '200', '400'], inline = 'EVEREX', group = grp_4))
+
+DispBias    = showBias ? display.pane : display.none 
+DispBands   = showEVEREX ? display.pane : display.none 
+showhlines  = showEVEREX ? display.all : display.none 
+
+Disp_vals   = display.status_line + display.data_window
+
+v1   = na(volume) ? 1 : volume                  // this part ensures we're not hit with calc issues due to NaN's
+NoVol_Flag = na(volume) ? true : false          // this is a flag to use later 
+
+lkbk_MA_Type = lkbk_Calc == 'Simple' ? 'SMA' : MA_Type
+
+Vola  = GetAverage(v1, lookback, lkbk_MA_Type)
+Vola_n_pre = Normalize(v1, Vola) * 100
+Vola_n = NoVol_Flag ? 100 : Vola_n_pre
+
+BarSpread = close - open 
+BarRange  = high - low
+R2        = ta.highest(2) - ta.lowest(2)
+SrcShift  = ta.change(close)
+
+sign_shift = math.sign(SrcShift) 
+sign_spread = math.sign(BarSpread) 
+barclosing  = 2 * (close - low) / BarRange * 100 - 100
+s2r = BarSpread / BarRange * 100
+
+BarSpread_abs   = math.abs(BarSpread)
+BarSpread_avg   = GetAverage(BarSpread_abs, lookback, lkbk_MA_Type)
+BarSpread_ratio_n = Normalize(BarSpread_abs, BarSpread_avg) * 100 * sign_spread  
+barclosing_2  = 2 * (close - ta.lowest(2)) / R2 * 100 - 100
+Shift2Bar_toR2 = SrcShift / R2 * 100 
+
+SrcShift_abs    = math.abs(SrcShift)
+srcshift_avg    = GetAverage(SrcShift_abs, lookback, lkbk_MA_Type) 
+srcshift_ratio_n   = Normalize(SrcShift_abs, srcshift_avg) * 100 * sign_shift
+
+Pricea_n = (barclosing + s2r + BarSpread_ratio_n + barclosing_2 + Shift2Bar_toR2 + srcshift_ratio_n) / 6
+bar_flow  =   Pricea_n * Vola_n / 100 
+
+bulls = math.max(bar_flow, 0)
+bears = -1 * math.min(bar_flow, 0)
+
+bulls_avg = GetAverage(bulls, length1, MA_Type)
+bears_avg = GetAverage(bears, length1, MA_Type)
+
+dx          = bulls_avg / bears_avg
+RROF         = 2 * (100 - 100 / (1 + dx)) - 100
+RROF_s      = ta.wma(RROF, smooth)
+
+Signal = GetAverage(RROF_s, sig_length, S_Type)
+
+dx_b          = GetAverage(bulls, B_Length, B_Type) / GetAverage(bears, B_Length, B_Type)
+RROF_b       = 2 * (100 - 100 / (1 + dx_b)) - 100
+RROF_bs      = ta.wma(RROF_b, smooth)
+
+up1      = RROF_s >= 0
+s_up1    = RROF_bs >=0 
+
+//hline(0, 'Zero Line', c_zero, linestyle = hline.style_solid)
+//hline(0.25 * bandscale, title = '1/4 Level', color=c_band, linestyle = hline.style_dotted, display = showhlines)
+//hline(0.50 * bandscale, title = '2/4 Level', color=c_band, linestyle = hline.style_dotted, display = showhlines)
+//hline(0.75 * bandscale, title = '3/4 Level', color=c_band, linestyle = hline.style_dotted, display = showhlines)
+//hline(bandscale, title = '4/4 Level', color=c_band, linestyle = hline.style_dotted, display = showhlines)
+
+//plot(ta.wma(bulls_avg, smooth), "Bulls", color = #11ff20, linewidth = 2, display = display.none)
+//plot(ta.wma(bears_avg, smooth), "Bears", color = #d5180b, linewidth = 2, display = display.none)
+
+// plot (RROF_bs, "Bias / Sentiment", style=plot.style_area, color = s_up ? c_sup : c_sdn, linewidth = 4, display = DispBias ) 
+
+Eq_band_option = input.string("Joint", title = 'Band Option', options = ["Joint", "Separate"], group = grp_4)
+
+nPrice  = math.max(math.min(Pricea_n, 100), -100)
+nVol    = math.max(math.min(Vola_n, 100), -100)
+
+bar = bar_flow
+
+c_vol_grn   = color.new(#26a69a, 75)
+c_vol_red   = color.new(#ef5350, 75)
+
+cb_vol_grn  = color.new(#26a69a, 20)
+cb_vol_red  = color.new(#ef5350, 20)
+
+c_vol       = bar > 0 ? c_vol_grn : c_vol_red
+cb_vol      = bar > 0 ? cb_vol_grn : cb_vol_red
+
+vc_lo       = 0
+vc_hi       = nVol * bandscale / 100 / 2
+
+// plotcandle(vc_lo, vc_hi, vc_lo, vc_hi , "Volume Band", c_vol, c_vol, bordercolor = cb_vol, display = DispBands)
+
+c_pri_grn   = color.new(#3ed73e, 75)
+c_pri_red   = color.new(#ff870a, 75)
+
+cb_pri_grn  = color.new(#3ed73e, 20)
+cb_pri_red  = color.new(#ff870a, 20)
+
+c_pri       = bar > 0 ? c_pri_grn : c_pri_red
+cb_pri      = bar > 0 ? cb_pri_grn : cb_pri_red
+
+pc_lo_base  = Eq_band_option == "Joint" ? vc_hi : 0.50 * bandscale
+
+pc_lo       = pc_lo_base
+pc_hi       = pc_lo_base + math.abs(nPrice) * bandscale / 100 / 2
+
+//plotcandle(pc_lo, pc_hi, pc_lo ,pc_hi , "Price Band", c_pri, c_pri, bordercolor = cb_pri, display = DispBands)
+//plotchar(nVol,    "Normalized Vol",   char = "", color = c_vol, editable = false, display = Disp_vals)
+//plotchar(nPrice,  "Normalized Price", char = "", color = c_pri, editable = false, display = Disp_vals)
+
+//plot(RROF, 'RROF Raw', color.new(#2470f0, 9), display=display.none)
+//plot(RROF_s, 'RROF Smooth', color = color.new(#b2b5be,40), linewidth = 2)
+//plot(Signal, "Signal Line", up ? c_up : c_dn, 3)
+
+Alert_up    = ta.crossover(RROF_s,0)
+Alert_dn    = ta.crossunder(RROF_s,0)
+Alert_swing = ta.cross(RROF_s,0)
+
+nPrice_abs = math.abs(nPrice)
+EV_Ratio = 100 * nPrice_abs / nVol
+is_positive     = nPrice > 0
+
+is_Compression  = EV_Ratio <= 50
+is_EoM          = EV_Ratio >= 120
+
+//plotshape(showMarkers and is_EoM and is_positive ? 0 : na,      "EoM +ve", shape.triangleup,    color=color.green, location=location.absolute, size=size.auto, editable = false, display = display.pane)
+//plotshape(showMarkers and is_EoM and not(is_positive) ? 0 : na, "EoM -ve", shape.triangledown,  color=color.red, location=location.absolute, size=size.auto, editable = false, display = display.pane)
+//plotshape(showMarkers and is_Compression and is_positive ? 0 : na,        "Compression +ve", style = SetShape(Mshape), color=color.green, location=location.absolute, size = size.auto, editable = false, display = display.pane)
+//plotshape(showMarkers and is_Compression and not(is_positive) ? 0 : na,   "Compression -ve", style = SetShape(Mshape), color=color.red, location=location.absolute, size=size.auto, editable = false, display = display.pane)
+
+// =====================================   MY SHIT   ==================================================================
+
+upwards = upDXF and up1 and (closeToPlot > openToPlot) and pc_hi > 74 and bar > 0
+downwards = downDXF and not up1 and (closeToPlot < openToPlot) and pc_hi > 74 and bar < 0
+
+showUp = upwards and not upwards[1] and not upwards[2] and not upwards[3] and not upwards[4] 
+showDown = downwards and not downwards[1] and not upwards[2] and not upwards[3] and not upwards[4] 
+
+plotshape(bShowEverest and showUp ? 1 : na, title="E", text="E", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.green, textcolor=color.white)
+plotshape(bShowEverest and showDown ? 1 : na, title="E", text="E", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.red, textcolor=color.white)
+
+alertcondition(showUp, title='Everest BUY', message='Everest BUY')
+alertcondition(showDown, title='Everest SELL', message='Everest SELL')

@@ -1,0 +1,53 @@
+//@version=4
+study(title = "Shark", shorttitle="Shark")
+
+rsiLengthInput = input(14, minval=1, title="RSI Length", group="RSI Settings")
+rsiSourceInput = input(close, "Source", group="RSI Settings")
+
+length2 = input(30, minval=1, group="Bollinger Bands")
+src = input(close, title="Source", group="Bollinger Bands")
+mult = input(2.0, minval=0.001, maxval=50, title="StdDev", group="Bollinger Bands")
+offset = input(0, "Offset", minval = -500, maxval = 500, group="Bollinger Bands")
+
+HighlightBreaches = input(true, title="Highlight Oversold/Overbought", group="Basic Settings")
+bApply25and75 = input(true, title="Apply 25/75 RSI rule", group="Basic Settings")
+
+ema50 = ema(close, 50)
+ema200 = ema(close, 200)
+ema400 = ema(close, 400)
+ema800 = ema(close, 800)
+wapwap = vwap(close)
+
+bTouchedLine = (ema50<high and ema50>low) or (ema200<high and ema200>low) or (ema400<high and ema400>low) or (ema800<high and ema800>low) or (wapwap<high and wapwap>low)
+
+// RSI
+upTR = rma(max(change(rsiSourceInput), 0), rsiLengthInput)
+downTR = rma(-min(change(rsiSourceInput), 0), rsiLengthInput)
+rsiM = downTR == 0 ? 100 : upTR == 0 ? 0 : 100 - (100 / (1 + upTR / downTR))
+
+plot(rsiM, color=color.new(color.purple, transp=0), linewidth=3)
+
+basis = sma(rsiM, length2)
+dev = mult * stdev(rsiM, length2)
+upper = basis + dev
+lower = basis - dev
+plot(upper, color=color.new(color.blue, transp=0), linewidth=1)
+plot(lower, color=color.new(color.blue, transp=0), linewidth=1)
+
+bBelow25 = rsiM < 26
+bAbove75 = rsiM > 74
+
+if not bApply25and75
+    bBelow25 := true
+    bAbove75 := true
+
+b_color = (rsiM > upper and bAbove75) ? color.new(color.red, transp=60) : (rsiM < lower and bBelow25) ? color.new(color.green, transp=60) : na
+
+if bTouchedLine and b_color == color.new(color.red, transp=60) 
+    b_color := color.new(color.orange, transp=50)
+
+if bTouchedLine and b_color == color.new(color.green, transp=60)
+    b_color := color.new(color.lime, transp=50)
+
+bgcolor(HighlightBreaches ? b_color : na)
+

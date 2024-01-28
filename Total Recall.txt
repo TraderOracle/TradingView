@@ -1,0 +1,120 @@
+//@version=5
+indicator("Total Recall", overlay=true)
+
+var float upOpen = na
+var float upClose = na
+var float downOpen = na
+var float downClose = na
+
+bGreenSignal = false
+bRedSignal = false
+
+int lookHead = input.int(3, 'Look ahead candles', group='Basic Settings')
+bool bUseBB = input.bool(true, 'Use Bollinger Bands wicking', group='Basic Settings')
+bool bShowVector = input.bool(true, 'Show Volume Based Candles', group='Basic Settings')
+
+// Determine wick size (that's what SHE said)
+upWickPercentLarger = close > open and math.abs(high - close) > math.abs(low - open) // math.abs(open - close)
+downWickPercentLarger = close < open and math.abs(low - close) > math.abs(open - high) // math.abs(open - close)
+
+// Standard Bollinger Bands calculation
+wlengthBB = input.int(20, minval=1, group="Wicking Bollinger Bands")
+wsrcBB = input(close, title="Source", group="Wicking Bollinger Bands")
+wmultBB = input.float(2.5, minval=0.001, maxval=50, title="StdDev", group="Wicking Bollinger Bands")
+woffsetBB = input.int(0, "Offset", minval = -500, maxval = 500, group="Wicking Bollinger Bands")
+wbasisBB = ta.sma(wsrcBB, wlengthBB)
+wdevBB = wmultBB * ta.stdev(wsrcBB, wlengthBB)
+wupperBB = wbasisBB + wdevBB
+wlowerBB = wbasisBB - wdevBB
+
+// Is this candle wicking the edge of our Bollinger Bands?
+bbUp = low <= wlowerBB and close >= wlowerBB and close < open and bUseBB
+bbDown = high >= wupperBB and close < wupperBB and close > open and bUseBB 
+
+
+// Originally from the Trader's Reality indicator - I isolated out vector candle code
+import TradersReality/Traders_Reality_Lib/2 as trLib
+
+pvsraVolume(overrideSymbolX, pvsraSymbolX, tickerIdX) =>
+    request.security(overrideSymbolX ? pvsraSymbolX : tickerIdX, '', [volume,high,low,close,open], barmerge.gaps_off, barmerge.lookahead_off)
+[pvsraVolume, pvsraHigh, pvsraLow, pvsraClose, pvsraOpen]  = pvsraVolume(false, "", syminfo.tickerid)
+[pvsraColor, alertFlag, averageVolume, volumeSpread, highestVolumeSpread] = trLib.calcPvsra(pvsraVolume, pvsraHigh, pvsraLow, pvsraClose, pvsraOpen, color.red, color.lime, color.fuchsia, color.blue, color.new(color.black, 90), color.new(color.black, 90))
+barcolor(bShowVector ? pvsraColor : na)
+
+bVectorGreen = pvsraColor == color.lime
+bVectorRed = pvsraColor == color.red
+
+// This section is from LuxAlgo - Market Structure (Fractal)
+length = 5 // default, min 3
+
+type fractal
+    float value
+    int loc
+    bool iscrossed
+
+var p = int(length / 2)
+n = bar_index
+dh = math.sum(math.sign(high - high[1]), p)
+dl = math.sum(math.sign(low - low[1]), p)
+bullf = dh == -p and dh[p] == p and high[p] == ta.highest(length)
+bearf = dl == p and dl[p] == -p and low[p] == ta.lowest(length)
+bullf_count = ta.cum(bullf ? 1 : 0)
+bearf_count = ta.cum(bearf ? 1 : 0)
+
+
+// CHoCH upwards
+var upper = fractal.new()
+var line lower_lvl = na
+var label ms_lbl = na
+var bull_ms_count = 0
+var broken_sup = false
+var os = 0
+
+if bullf
+    upper.value := high[p]
+    upper.loc := n-p
+    upper.iscrossed := false
+
+if ta.crossover(close, upper.value) and not upper.iscrossed
+    upOpen := open
+    upClose := close
+    //line.new(upper.loc, upper.value, n, upper.value, color = color.lime)
+else if not broken_sup
+    lower_lvl.set_x2(n)
+    if close < lower_lvl.get_y2()
+        broken_sup := true
+
+
+// CHoCH downwards
+var lower = fractal.new()
+var line upper_lvl = na
+var broken_res = false
+var bear_ms_count = 0
+
+if bearf
+    lower.value := low[p]
+    lower.loc := n-p
+    lower.iscrossed := false
+
+if ta.crossunder(close, lower.value) and not lower.iscrossed
+    downOpen := open
+    downClose := close
+    //line.new(lower.loc, lower.value, n, lower.value, color = color.red)
+else if not broken_res
+    upper_lvl.set_x2(n)
+    if close > upper_lvl.get_y2()
+        broken_res := true
+
+bFinalColor = color.yellow
+if ((bbDown or bbUp) and bUseBB)
+    bFinalColor := color.rgb(255, 0, 0)
+
+// Check if current candle is a proper wick or Bollinger Bands
+if (bVectorGreen and (close[0] == upClose[0] or close[1] == upClose[1] or close[2] == upClose[2] or close[3] == upClose[3]))
+    bGreenSignal := true
+plotshape(bGreenSignal and barstate.isconfirmed ? 1 : na, title="Reversal Approaching", style=shape.cross, location=location.abovebar, color=bFinalColor, size=size.tiny)
+
+if (bVectorRed and (close[0] == downClose[0] or close[1] == downClose[1] or close[2] == downClose[2] or close[3] == downClose[3]))
+    bRedSignal := true
+plotshape(bRedSignal and barstate.isconfirmed ? 1 : na, title="Reversal Approaching", style=shape.cross, location=location.belowbar, color=bFinalColor, size=size.tiny)
+ 

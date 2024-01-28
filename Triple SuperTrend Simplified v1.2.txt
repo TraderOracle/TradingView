@@ -1,0 +1,142 @@
+//@version=4
+study("Triple Supertrend Simplified v1.2", overlay = true, format=format.price, precision=2, resolution="")
+
+var crossoverBear = false
+var crossoverBull = false
+
+bStrictMode = input(false, title="Strict Mode (less result, but more reliable)", group="Basic Settings", tooltip = "Normally show when 2 out of 3 supertrends are active, but his mode requires 3/3 to be active")
+showsignals =  input(false, title="Show Plots", group="Basic Settings", tooltip = "Show the actual Supertrend lines")
+bEnableMACD = input(false, title="Filter using MACD", group="Basic Settings", tooltip = "Only show when MACD also lines up")
+adxThreshold = input(0, title="ADX Threshold", group="Basic Settings", tooltip="ADX value that must be reached in order for an indicator to display.  Larger numbers will filter out more noise")
+bShow200 = input(false, title="Show 200 EMA", group="Basic Settings")
+
+ema200 = ema(close, 200)
+plot(bShow200 ? ema200 : na, "200 EMA", color=color.rgb(151, 163, 162))
+
+fastMA = input(title="Fast moving average", type=input.integer, defval=12, minval=7, group="MACD")
+slowMA = input(title="Slow moving average", type=input.integer, defval=26, minval=7, group="MACD")
+
+// Average Directional Index
+adxlen = input(14, title="ADX Smoothing", group="ADX")
+dilen = input(14, title="DI Length", group="ADX")
+dirmov(len) =>
+	up = change(high)
+	down = -change(low)
+	plusDM = na(up) ? na : (up > down and up > 0 ? up : 0)
+	minusDM = na(down) ? na : (down > up and down > 0 ? down : 0)
+	truerange = rma(tr, len)
+	plus = fixnan(100 * rma(plusDM, len) / truerange)
+	minus = fixnan(100 * rma(minusDM, len) / truerange)
+	[plus, minus]
+adx(dilen, adxlen) =>
+	[plus, minus] = dirmov(dilen)
+	sum = plus + minus
+	adx = 100 * rma(abs(plus - minus) / (sum == 0 ? 1 : sum), adxlen)
+adxValue = adx(dilen, adxlen)
+
+// MACD
+signalLength = input(9,minval=1)
+[currMacd,_,_] = macd(close[0], fastMA, slowMA, signalLength)
+[prevMacd,_,_] = macd(close[1], fastMA, slowMA, signalLength)
+signal = ema(currMacd, signalLength)
+
+if (cross(currMacd, signal) and currMacd < signal and currMacd >= -2)
+	crossoverBear := true
+	crossoverBull := false
+
+if (cross(currMacd, signal) and currMacd > signal and currMacd <= 2 )
+	crossoverBull := true
+	crossoverBear := false
+
+atr2 = sma(tr, 10)
+atr= atr2
+up=hl2-(1*atr)
+up1 = nz(up[1],up)
+up := close[1] > up1 ? max(up,up1) : up
+dn=hl2+(1*atr)
+dn1 = nz(dn[1], dn)
+dn := close[1] < dn1 ? min(dn, dn1) : dn
+trend = 1
+trend := nz(trend[1], trend)
+trend := trend == -1 and close > dn1 ? 1 : trend == 1 and close < up1 ? -1 : trend
+upPlot = plot(showsignals and trend == 1 ? up : na, title="Up Trend", style=plot.style_linebr, linewidth=2, color=color.green)
+buySignal = trend == 1 and trend[1] == -1
+plotshape(showsignals and buySignal ? up : na, title="UpTrend Begins", location=location.absolute, style=shape.circle, size=size.tiny, color=color.green, transp=0)
+// plotshape( buySignal and showsignals ? up : na, title="Buy", text="Buy", location=location.absolute, style=shape.labelup, size=size.tiny, color=color.green, textcolor=color.white, transp=0)
+dnPlot = plot(showsignals and trend != 1 ? dn: na, title="Down Trend", style=plot.style_linebr, linewidth=2, color=color.red)
+sellSignal = trend == -1 and trend[1] == 1
+plotshape(showsignals and sellSignal ? dn : na, title="DownTrend Begins", location=location.absolute, style=shape.circle, size=size.tiny, color=color.red, transp=0)
+// plotshape(sellSignal and showsignals ? dn : na, title="Sell", text="Sell", location=location.absolute, style=shape.labeldown, size=size.tiny, color=color.red, textcolor=color.white, transp=0)
+mPlot = plot(showsignals ? ohlc4: na, title="", style=plot.style_circles, linewidth=0)
+changeCond = trend != trend[1]
+
+atr20 = sma(tr, 11)
+atr0 = atr20
+up0 =hl2-(2*atr)
+up10 = nz(up0[1],up0)
+up0 := close[1] > up10 ? max(up0,up10) : up0
+dn0=hl2+(2*atr)
+dn10 = nz(dn0[1], dn0)
+dn0 := close[1] < dn10 ? min(dn0, dn10) : dn0
+trend0 = 1
+trend0 := nz(trend0[1], trend0)
+trend0 := trend0 == -1 and close > dn10 ? 1 : trend0 == 1 and close < up10 ? -1 : trend0
+upPlot0 = plot(showsignals and trend0 == 1 ? up0 : na, title="Up Trend", style=plot.style_linebr, linewidth=2, color=color.green)
+buySignal0 = trend0 == 1 and trend0[1] == -1
+plotshape(showsignals and buySignal0 ? up0 : na, title="UpTrend Begins", location=location.absolute, style=shape.circle, size=size.tiny, color=color.green, transp=0)
+// plotshape(buySignal0 and showsignals ? up0 : na, title="Buy", text="Buy", location=location.absolute, style=shape.labelup, size=size.tiny, color=color.green, textcolor=color.white, transp=0)
+dnPlot0 = plot(showsignals and trend0 != 1 ? dn0 : na, title="Down Trend", style=plot.style_linebr, linewidth=2, color=color.red)
+sellSignal0 = trend0 == -1 and trend0[1] == 1
+plotshape(showsignals and sellSignal0 ? dn0 : na, title="DownTrend Begins", location=location.absolute, style=shape.circle, size=size.tiny, color=color.red, transp=0)
+// plotshape(sellSignal0 and showsignals ? dn : na, title="Sell", text="Sell", location=location.absolute, style=shape.labeldown, size=size.tiny, color=color.red, textcolor=color.white, transp=0)
+mPlot0 = plot(showsignals ? ohlc4: na, title="", style=plot.style_circles, linewidth=0)
+
+changeCond0 = trend0 != trend0[1]
+
+atr29 = sma(tr, 12)
+atr9 = atr29
+up9=hl2-(3*atr)
+up19 = nz(up9[1],up9)
+up9 := close[1] > up19 ? max(up9,up19) : up9
+dn9=hl2+(3*atr)
+dn19 = nz(dn9[1], dn9)
+dn9 := close[1] < dn19 ? min(dn9, dn19) : dn9
+trend9 = 1
+trend9 := nz(trend9[1], trend9)
+trend9 := trend9 == -1 and close > dn19 ? 1 : trend9 == 1 and close < up19 ? -1 : trend9
+upPlot9 = plot(showsignals and trend9 == 1 ? up9 : na, title="Up Trend", style=plot.style_linebr, linewidth=2, color=color.green)
+buySignal9 = trend9 == 1 and trend9[1] == -1
+plotshape(showsignals and buySignal9 ? up9 : na, title="UpTrend Begins", location=location.absolute, style=shape.circle, size=size.tiny, color=color.green, transp=0)
+// plotshape(buySignal9 and showsignals ? up9 : na, title="Buy", text="Buy", location=location.absolute, style=shape.labelup, size=size.tiny, color=color.green, textcolor=color.white, transp=0)
+dnPlot9 = plot(showsignals and trend9 != 1 ? dn9 : na, title="Down Trend", style=plot.style_linebr, linewidth=2, color=color.red)
+sellSignal9 = trend9 == -1 and trend9[1] == 1
+plotshape(showsignals and sellSignal9 ? dn9 : na, title="DownTrend Begins", location=location.absolute, style=shape.circle, size=size.tiny, color=color.red, transp=0)
+// plotshape(sellSignal9 and showsignals ? dn9 : na, title="Sell", text="Sell", location=location.absolute, style=shape.labeldown, size=size.tiny, color=color.red, textcolor=color.white, transp=0)
+mPlot9 = plot(showsignals ? ohlc4: na, title="", style=plot.style_circles, linewidth=0)
+
+changeCond9 = trend9 != trend9[1]
+
+var showUp = false 
+var showDn = false
+
+if (not bStrictMode)
+    showUp := (trend9==1 and up9 and trend==1 and up and trend0==1 and up0) or (trend9==1 and up9 and trend==1 and up) or (trend9==1 and up9 and trend0==1 and up0) or (trend==1 and up and trend0==1 and up0) 
+    showDn := (trend9!=1 and dn9 and trend!=1 and dn and trend0!=1 and dn0) or (trend9!=1 and dn9 and trend!=1 and dn) or (trend9!=1 and dn9 and trend0!=1 and dn0) or (trend!=1 and dn and trend0!=1 and dn0) 
+else
+    showUp := (trend9==1 and up9 and trend==1 and up and trend0==1 and up0)
+    showDn := (trend9!=1 and dn9 and trend!=1 and dn and trend0!=1 and dn0)
+
+if (bEnableMACD and not crossoverBull)
+    showUp := false
+
+if (bEnableMACD and not crossoverBear)
+    showDn := false
+
+displayUp = showUp and not showUp[1]
+displayDn = showDn and not showDn[1]
+
+plotshape(displayUp and adxValue > adxThreshold ? up : na, title="Buy", text="Buy", location=location.absolute, style=shape.labelup, size=size.tiny, color=color.green, textcolor=color.white)
+plotshape(displayDn and adxValue > adxThreshold ? dn : na, title="Sell", text="Sell", location=location.absolute, style=shape.labeldown, size=size.tiny, color=color.red, textcolor=color.white)
+
+//label.new(bar_index, high, text=tostring(iBuy) + " " + tostring(iSell))
+

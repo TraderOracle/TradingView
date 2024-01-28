@@ -1,0 +1,300 @@
+//@version=5
+
+indicator("The Defibrillator","The Defibrillator v1.1",true,max_bars_back=1000,max_lines_count=500)
+
+// Version 1.1:
+// - Added option for lines to be dotted, solid, etc
+// - Added option for line thickness
+
+tradeTimes = input.session("0930-0931", title="Hour after open, then plus one minute", tooltip="0930-0931 for CST, 10:30-10:31 for EST, etc")
+bShowVol  = input.bool(false, "Show Volume Profile")
+row       = input.int(100,'Row Size',tooltip='Determines the number of rows used for the calculation of the volume profile')
+width     = input.int(50,'Width (% of the box)',tooltip='Determines the length of the bars relative to the Lookback value')
+bar_width = input.int(2,'Bar Width',tooltip='Width of each bar')
+solid     = input.color(#0055c5,'Rows Color')
+poc_solid = input.color(#a50904,'POC Color')
+lWidth = input.int(1, "Line Width")
+lStyle = input.string(title="Line Style", options=["Solid", "Cross", "Circles"], defval="Solid")
+
+sStyle = lStyle=="Circles" ? plot.style_circles : lStyle=="Cross" ? plot.style_cross : plot.style_line
+
+// length = iChartTime=="1 Minute" ? 60 : iChartTime=="2 Minute" ? 30 : iChartTime=="3 Minute" ? 20 : iChartTime=="5 Minute" ? 12 : 60
+length = timeframe.period=="1" ? 60 : timeframe.period=="2" ? 30 : timeframe.period=="3" ? 20 : timeframe.period=="5" ? 12 : 60
+maxLineLen = timeframe.period=="1" ? 300 : timeframe.period=="2" ? 150 : timeframe.period=="3" ? 150 : timeframe.period=="5" ? 20 : 300
+
+MS_IN_1H = 1000 * 60 * 60
+//openHour = input.time(timestamp("0930"), title="Hour after open")
+// iss = time >= openHour and time < openHour + (6 * MS_IN_1H)
+
+InSession(sessionTimes) =>
+    not na(time(timeframe.period, sessionTimes))
+bool iss = InSession(tradeTimes)
+
+cRed = color.red
+cYellow = color.yellow
+cPurple = color.purple
+cGray = color.gray
+cGreen = color.green
+cBlue = color.blue
+
+var a = array.new_line()
+var b = array.new_line()
+
+if barstate.isfirst
+    for i = 0 to row-1
+        array.push(a,line.new(na,na,na,na,width=2))
+    array.push(b,line.new(na,na,na,na,width=2))
+
+n = bar_index
+src = close
+v = volume
+
+var Alvl = 0.
+var Blvl = 0.
+var current_num_conf = 0
+var current_num_cont = 0
+highest = ta.highest(length)
+lowest = ta.lowest(length)
+
+var bool lineExtend = false
+
+var float M050 = na
+var float B150 = na
+var float A113 = na
+var float B113 = na
+var float B100 = na
+var float M618 = na
+var float A1618 = na
+var float B1618 = na
+var float F1272 = na
+var float B200 = na
+var float B213 = na
+var float A213 = na
+var float F0272 = na
+var float F272 = na
+var float M236 = na
+var float F2272 = na
+var float B2618 = na
+var float A2618 = na
+var float A300 = na
+var float B300 = na
+var float A150 = na
+var float A100 = na
+var float A200 = na
+var float M786 = na
+var float A250 = na
+var float B250 = na
+var int lineLen = 0
+var int startBar = 0
+
+fibrange = highest - lowest
+r = math.abs(fibrange)
+
+if iss
+    lineExtend := true
+    lineLen := 0
+    startBar := bar_index
+
+    A300 := lowest + 3 * r
+    A2618 := lowest + 2.618 * r
+    A250 := lowest + 2.5 * r
+    A213 := lowest + 2.13 * r
+    A200 := lowest + 2 * r
+    A1618 := lowest + 1.618 * r
+    A150 := lowest + 1.5 * r
+    A113 := lowest + 1.13 * r
+    A100 := lowest + r
+
+    M236 := highest - 0.236 * r
+    M050 := highest - 0.5 * r
+    M618 := highest - 0.618 * r
+    M786 := highest - 0.786 * r
+
+    B100 := highest - r
+    B113 := highest - 1.13 * r
+    B150 := highest - 1.5 * r
+    B1618 := highest - 1.618 * r
+    B200 := highest - 2 * r
+    B213 := highest - 2.13 * r
+    B250 := highest - 2.5 * r
+    B2618 := highest - 2.618 * r
+    B300 := highest - 3 * r
+ 
+// line.new(startBar, close, startBar, close, extend = extend.right)
+
+if lineExtend
+    lineLen := lineLen + 1
+
+if lineLen > maxLineLen
+    lineExtend := false
+
+r_A300 = plot(high >= A2618 and lineExtend ? A300 : na, title='3', color=cPurple, style=sStyle, offset=0, linewidth=lWidth)
+l_A300 = label.new(startBar - 2, A300, "3", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+if (high >= A2618 and lineExtend)
+    label.set_x(l_A300, bar_index + 3)
+    label.delete(l_A300[1])
+
+r_A2618 = plot(high >= A250 and lineExtend ? A2618 : na, title='2.618', color=cGreen, style=sStyle, offset=0, linewidth=lWidth)
+l_A2618 = label.new(startBar - 2, A2618, "2.618", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+if (high >= A250 and lineExtend)
+    label.set_x(l_A2618, bar_index + 3)
+    label.delete(l_A2618[1])
+
+r_A250 = plot(high >= A200 and lineExtend ? A250 : na, title='2.5', color=cBlue, style=sStyle, offset=0, linewidth=lWidth)
+l_A250 = label.new(startBar - 2, A250, "2.5", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+if (high >= A200 and lineExtend)
+    label.set_x(l_A250, bar_index + 3)
+    label.delete(l_A250[1])
+
+r_A213 = plot(high >= A200 and lineExtend ? A213 : na, title='2.5', color=cBlue, style=sStyle, offset=0, linewidth=lWidth)
+l_A213 = label.new(startBar - 2, A213, "2.13", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+if (high >= A200 and lineExtend)
+    label.set_x(l_A213, bar_index + 3)
+    label.delete(l_A213[1])
+
+r_A200 = plot(high >= A1618 and lineExtend ? A200 : na, title='2', color=cRed, style=sStyle, offset=0, linewidth=lWidth)
+l_A200 = label.new(startBar - 2, A200, "2", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+if (high >= A1618 and lineExtend)
+    label.set_x(l_A200, bar_index + 3)
+    label.delete(l_A200[1])
+
+r_A1618 = plot(high >= A150 and lineExtend ? A1618 : na, title='1.618', color=cGreen, style=sStyle, offset=0, linewidth=lWidth)
+l_A1618 = label.new(startBar - 2, A1618, "1.618", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+if (high >= A113 and lineExtend)
+    label.set_x(l_A1618, bar_index + 3)
+    label.delete(l_A1618[1])
+
+r_A150 = plot(high >= A113 and lineExtend ? A150 : na, title='1.5', color=cBlue, style=sStyle, offset=0, linewidth=lWidth)
+l_A150 = label.new(startBar - 2, A150, "1.5", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+if (high >= A113 and lineExtend)
+    label.set_x(l_A150, bar_index + 3)
+    label.delete(l_A150[1])
+
+r_A113 = plot(high >= A100 and lineExtend ? A113 : na, title='1.13', color=cBlue, style=sStyle, offset=0, linewidth=lWidth)
+l_A113 = label.new(startBar - 2, A113, "1.13", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+if (high >= A100 and lineExtend)
+    label.set_x(l_A113, bar_index + 3)
+    label.delete(l_A113[1])
+
+r_A100 = plot(lineExtend ? A100 : na, title='1', color=cGray, style=sStyle, offset=0, linewidth=lWidth)
+l_A100 = label.new(startBar - 2, A100, "1", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+if (lineExtend)
+    label.set_x(l_A100, bar_index + 3)
+    label.delete(l_A100[1])
+
+// ----------------------------------------------------------------------------------------
+
+r_M236 = plot(low <= A100 and lineExtend ? M236 : na, title='.05', color=cGray, style=sStyle, offset=0, linewidth=lWidth)
+l_M236 = label.new(startBar - 2, M236, ".236", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+if (low <= A100 and lineExtend)
+    label.set_x(l_M236, bar_index + 3)
+    label.delete(l_M236[1])
+
+r_M050 = plot(low <= M236 and lineExtend ? M050 : na, title='.05', color=cBlue, style=sStyle, offset=0, linewidth=lWidth)
+l_M050 = label.new(startBar - 2, M050, "0.5", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+if (low <= M236 and lineExtend)
+    label.set_x(l_M050, bar_index + 3)
+    label.delete(l_M050[1])
+
+r_M618 = plot(low <= M050 and lineExtend ? M618 : na, title='.618', color=cGreen, style=sStyle, offset=0, linewidth=lWidth)
+l_M618 = label.new(startBar - 2, M618, "0.618", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+if (low <= M050 and lineExtend)
+    label.set_x(l_M618, bar_index + 3)
+    label.delete(l_M618[1])
+
+r_M786 = plot(low <= M618 and lineExtend ? M786 : na, title='.786', color=cGreen, style=sStyle, offset=0, linewidth=lWidth)
+l_M786 = label.new(startBar - 2, M786, "0.786", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+if (low <= M618 and lineExtend)
+    label.set_x(l_M786, bar_index + 3)
+    label.delete(l_M786[1])
+
+// -------------------------------------------------------
+
+r_B100 = plot(low <= M786 and lineExtend ? B100 : na, title='1', color=cGray, style=sStyle, offset=0, linewidth=lWidth)
+l_B100 = label.new(startBar - 2, B100, "1", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+if (low <= M786 and lineExtend)
+    label.set_x(l_B100, bar_index + 3)
+    label.delete(l_B100[1])
+
+r_B113 = plot(low <= B100 and lineExtend ? B113 : na, title='1.13', color=cBlue, style=sStyle, offset=0, linewidth=lWidth)
+l_B113 = label.new(startBar - 2, B113, "1.13", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+if (low <= B100 and lineExtend)
+    label.set_x(l_B113, bar_index + 3)
+    label.delete(l_B113[1])
+
+r_B150 = plot(low <= B100 and lineExtend ? B150 : na, title='1.5', color=cBlue, style=sStyle, offset=0, linewidth=lWidth)
+l_B150 = label.new(startBar - 2, B150, "1.5", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+if (low <= B100 and lineExtend)
+    label.set_x(l_B150, bar_index + 3)
+    label.delete(l_B150[1])
+
+r_B1618 = plot(low <= B150 and lineExtend ? B1618 : na, title='1.618', color=cGreen, style=sStyle, offset=0, linewidth=lWidth)
+l_B1618 = label.new(startBar - 2, B1618, "1.618", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+if (low <= B150 and lineExtend)
+    label.set_x(l_B1618, bar_index + 3)
+    label.delete(l_B1618[1])
+
+r_B200 = plot(low <= B1618 and lineExtend ? B200 : na, title='2', color=cRed, style=sStyle, offset=0, linewidth=lWidth)
+l_B200 = label.new(startBar - 2, B200, "2", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+if (low <= B1618 and lineExtend)
+    label.set_x(l_B200, bar_index + 3)
+    label.delete(l_B200[1])
+
+r_B213 = plot(low <= B200 and lineExtend ? B213 : na, title='2.13', color=cRed, style=sStyle, offset=0, linewidth=lWidth)
+l_B213 = label.new(startBar - 2, B213, "2.13", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+if (low <= B200 and lineExtend)
+    label.set_x(l_B213, bar_index + 3)
+    label.delete(l_B213[1])
+
+r_B250 = plot(low <= B200 and lineExtend ? B250 : na, title='2.5', color=cRed, style=sStyle, offset=0, linewidth=lWidth)
+l_B250 = label.new(startBar - 2, B250, "2.5", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+if (low <= B200 and lineExtend)
+    label.set_x(l_B250, bar_index + 3)
+    label.delete(l_B250[1])
+
+r_B2618 = plot(low <= B250 and lineExtend ? B2618 : na, title='2.618', color=cGreen, style=sStyle, offset=0, linewidth=lWidth)
+l_B2618 = label.new(startBar - 2, B2618, "2.618", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+if (low <= B250 and lineExtend)
+    label.set_x(l_B2618, bar_index + 3)
+    label.delete(l_B2618[1])
+
+r_B300 = plot(low <= B2618 and lineExtend ? B300 : na, title='3', color=cPurple, style=sStyle, offset=0, linewidth=lWidth)
+l_B300 = label.new(startBar - 2, B300, "3", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+if (low <= B2618 and lineExtend)
+    label.set_x(l_B300, bar_index + 3)
+    label.delete(l_B300[1])
+
+
+line l = na
+line poc = na
+levels = array.new_float(0)
+sumv = array.new_float(0)
+
+if iss
+    for i = 0 to row
+        array.push(levels,lowest + i/row*(highest-lowest))
+    for j = 0 to row-1
+        sum = 0.
+        for k = 0 to length-1
+            sum := high[k] > array.get(levels,j) and low[k] < array.get(levels,j+1) ?
+              sum + v[k] : sum
+        array.push(sumv,sum)
+    for j = 0 to row-1
+        mult = array.get(sumv,j)/array.max(sumv)
+        l := array.get(a,j)
+        get = array.get(levels,j)
+        if bShowVol
+            line.set_xy1(l,n-length+1,get)
+            line.set_xy2(l,n-length+math.round(length*width/100*mult),array.get(levels,j))
+            line.set_width(l,bar_width)
+            line.set_color(l,solid)
+        if mult == 1
+            poc := array.get(b,0)
+            avg = math.avg(get,array.get(levels,j+1))
+            if bShowVol
+                line.set_xy1(poc,n-length+1,avg)
+                line.set_xy2(poc,n,avg)
+                line.set_style(poc,line.style_dotted)
+                line.set_width(poc,bar_width)
+                line.set_color(poc,poc_solid)
+

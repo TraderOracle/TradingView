@@ -1,0 +1,273 @@
+ // @version=5
+
+indicator(title="John Wick v1", overlay=true, max_bars_back = 1000, max_lines_count = 500, max_labels_count = 500)
+
+sLabelUp = "" 
+sLabelDown = ""
+var uplabels = array.new_label(0)
+
+bUseEMA200 = input.bool(true, "Use EMA 200", group="Basic Settings")
+bUseVWAP = input.bool(true, "Use VWAP", group="Basic Settings")
+bUseVector = input.bool(true, "Use Institutional Candles", group="Basic Settings")
+bUseSqueeze = input.bool(true, "Use Squeeze", group="Basic Settings")
+bUseBB = input.bool(false, "Use Bollinger Bands", group="Basic Settings")
+bUseKC = input.bool(false, "Use Keltner Channels", group="Basic Settings")
+bUseRSI = input.bool(false, "Use RSI", group="Basic Settings")
+
+bUseEMA1 = input.bool(false, "Use Custom EMA 1", group="Custom EMA")
+iEMA1 = input.int(50, "Custom EMA 1 Value", minval=1, group="Custom EMA")
+bUseEMA2 = input.bool(false, "Use Custom EMA 2", group="Custom EMA")
+iEMA2 = input.int(70, "Custom EMA 2 Value",minval=1, group="Custom EMA")
+
+lengthBB = input.int(20, minval=1, group="Bollinger Bands")
+srcBB = input(close, title="Source", group="Bollinger Bands")
+multBB = input.float(2.5, minval=0.001, maxval=50, title="StdDev", group="Bollinger Bands")
+offsetBB = input.int(0, "Offset", minval = -500, maxval = 500, group="Bollinger Bands")
+
+rsiLower = input.int(30, "Lower Limit of RSI", minval = 1, maxval = 500, group="RSI")
+rsiUpper = input.int(70, "Upper Limit of RSI", minval = 1, maxval = 500, group="RSI")
+
+ema1 = ta.ema(close, iEMA1)
+ema2 = ta.ema(close, iEMA2)
+
+ema200 = ta.ema(close, 200)
+wapwap = ta.vwap(close)
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=  EVALUATE EMA REJECTIONS  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+cEMAColorUp = color.green
+cEMAColorDown = color.red
+
+plotshape(low <= ema200 and close >= ema200 and close < open and bUseEMA200 ? 1 : na, title="2", text="2", location=location.belowbar, style=shape.labelup, size=size.tiny, color=cEMAColorUp, textcolor=color.white)
+plotshape(high >= ema200 and close < ema200 and close > open and bUseEMA200 ? 1 : na, title="2", text="2", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=cEMAColorDown, textcolor=color.white)
+alertcondition(low <= ema200 and close >= ema200 and close < open and bUseEMA200, "EMA 200 Up", "EMA 200 Up")
+alertcondition(high >= ema200 and close < ema200 and close > open and bUseEMA200, "EMA 200 Down", "EMA 200 Down")
+if (low <= ema200 and close >= ema200 and close < open and bUseEMA200)
+    sLabelUp := sLabelUp + "2"
+if (high >= ema200 and close < ema200 and close > open and bUseEMA200)
+    sLabelDown := sLabelDown + "2"
+
+plotshape(low <= ema1 and close >= ema1 and close < open and bUseEMA1 ? 1 : na, title="C", text="C", location=location.belowbar, style=shape.labelup, size=size.tiny, color=cEMAColorUp, textcolor=color.white)
+plotshape(high >= ema1 and close < ema1 and close > open and bUseEMA1 ? 1 : na, title="C", text="C", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=cEMAColorDown, textcolor=color.white)
+alertcondition(low <= ema1 and close >= ema1 and close < open and bUseEMA1, "Custom EMA 1 Up", "Custom EMA 1 Up")
+alertcondition(high >= ema1 and close < ema1 and close > open and bUseEMA1, "Custom EMA 1 Down", "Custom EMA 1 Down")
+if (low <= ema1 and close >= ema1 and close < open and bUseEMA1)
+    sLabelUp := sLabelUp + "C"
+if (high >= ema1 and close < ema1 and close > open and bUseEMA1)
+    sLabelDown := sLabelDown + "C"
+
+plotshape(low <= ema2 and close >= ema2 and close < open and bUseEMA2 ? 1 : na, title="C", text="C", location=location.belowbar, style=shape.labelup, size=size.tiny, color=cEMAColorUp, textcolor=color.white)
+plotshape(high >= ema2 and close < ema2 and close > open and bUseEMA2 ? 1 : na, title="C", text="C", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=cEMAColorDown, textcolor=color.white)
+alertcondition(low <= ema2 and close >= ema2 and close < open and bUseEMA2, "Custom EMA 2 Up", "Custom EMA 2 Up")
+alertcondition(high >= ema2 and close < ema2 and close > open and bUseEMA2,  "Custom EMA 2 Down", "Custom EMA 2 Down")
+if (low <= ema2 and close >= ema2 and close < open and bUseEMA2)
+    sLabelUp := sLabelUp + "C"
+if (high >= ema2 and close < ema2 and close > open and bUseEMA2)
+    sLabelDown := sLabelDown + "C"
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=  EVALUATE VWAP REJECTIONS  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+cVWAPColorUp = color.green
+cVWAPColorDown = color.red
+
+plotshape(low <= wapwap and close >= wapwap and close < open and bUseVWAP ? 1 : na, title="V", text="V", location=location.belowbar, style=shape.labelup, size=size.tiny, color=cVWAPColorUp, textcolor=color.white)
+plotshape(high >= wapwap and close < wapwap and close > open and bUseVWAP ? 1 : na, title="V", text="V", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=cVWAPColorDown, textcolor=color.white)
+alertcondition(low <= wapwap and close >= wapwap and close < open and bUseVWAP, "VWAP Up", "VWAP Up")
+alertcondition(high >= wapwap and close < wapwap and close > open and bUseVWAP, "VWAP Down", "VWAP Down")
+if (low <= wapwap and close >= wapwap and close < open and bUseVWAP)
+    sLabelUp := sLabelUp + "V"
+if (high >= wapwap and close < wapwap and close > open and bUseVWAP)
+    sLabelDown := sLabelDown + "V"
+
+
+// BOLLINGER BANDS
+basisBB = ta.sma(srcBB, lengthBB)
+devBB = multBB * ta.stdev(srcBB, lengthBB)
+upperBB = basisBB + devBB
+lowerBB = basisBB - devBB
+downBB = low < lowerBB or high < lowerBB
+upBB = low > upperBB or high > upperBB
+bbw = (upperBB - lowerBB) / basisBB
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=  EVALUATE BOLLINGER BANDS REJECTIONS  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+cBBColorUp = color.green
+cBBColorDown = color.red
+
+plotshape(low <= lowerBB and close >= lowerBB and close < open and bUseBB ? 1 : na, title="B", text="B", location=location.belowbar, style=shape.labelup, size=size.tiny, color=cBBColorUp, textcolor=color.white)
+plotshape(high >= upperBB and close < upperBB and close > open and bUseBB ? 1 : na, title="B", text="B", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=cBBColorDown, textcolor=color.white)
+alertcondition(low <= lowerBB and close >= lowerBB and close < open and bUseBB, "Bollinger Bands Up", "Bollinger Bands Up")
+alertcondition(high >= upperBB and close < upperBB and close > open and bUseBB, "Bollinger Bands Down", "Bollinger Bands Down")
+if (low <= lowerBB and close >= lowerBB and close < open and bUseBB)
+    sLabelUp := sLabelUp + "B"
+if (high >= upperBB and close < upperBB and close > open and bUseBB)
+    sLabelDown := sLabelDown + "B"
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=   Squeeze Relaxer version 2.1  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+
+// Average Directional Index
+adxSqueeze = input.int(11, title="ADX Threshold for TTM Squeeze", group="Relaxing Settings", tooltip="Anything over 19 filters out low volume periods. Set to 11 as a default, feel free to increase to get less noise")
+
+adxlen = input(14, title="ADX Smoothing", group="ADX")
+dilen = input(14, title="DI Length", group="ADX")
+dirmov(len) =>
+	up5 = ta.change(high)
+	down5 = -ta.change(low)
+	plusDM = na(up5) ? na : (up5 > down5 and up5 > 0 ? up5 : 0)
+	minusDM = na(down5) ? na : (down5 > up5 and down5 > 0 ? down5 : 0)
+	truerange = ta.rma(ta.tr, len)
+	plus = fixnan(100 * ta.rma(plusDM, len) / truerange)
+	minus = fixnan(100 * ta.rma(minusDM, len) / truerange)
+	[plus, minus]
+adx(dilen, adxlen) =>
+	[plus, minus] = dirmov(dilen)
+	sum = plus + minus
+	adx = 100 * ta.rma(math.abs(plus - minus) / (sum == 0 ? 1 : sum), adxlen)
+adxValue = adx(dilen, adxlen)
+sigabove19 = adxValue > adxSqueeze
+
+var cGreen = 0
+var cRed = 0
+var pos = false 
+var neg = false 
+
+sqlength = 20
+multQ = 2.0
+lengthKC = 20
+multKC = 1.5
+
+useTrueRange = true
+source = close
+basis = ta.sma(source, sqlength)
+dev1 = multKC * ta.stdev(source, sqlength)
+upperBBsq = basis + dev1
+lowerBBsq = basis - dev1
+ma = ta.sma(source, lengthKC)
+rangeQ = high - low
+rangema = ta.sma(rangeQ, lengthKC)
+upperKC = ma + rangema * multKC
+lowerKC = ma - rangema * multKC
+sqzOn  = (lowerBBsq > lowerKC) and (upperBBsq < upperKC)
+sqzOff = (lowerBBsq < lowerKC) and (upperBBsq > upperKC)
+noSqz  = (sqzOn == false) and (sqzOff == false)
+
+avg1 = math.avg(ta.highest(high, lengthKC), ta.lowest(low, lengthKC))
+avg2 = math.avg(avg1, ta.sma(close, lengthKC))
+val = ta.linreg(close - avg2, lengthKC, 0)
+
+pos := false
+neg := false
+
+// if squeeze is bright RED, increment by one
+if (val < nz(val[1]) and val < 5 and not sqzOn)
+    cRed := cRed + 1   
+
+// if squeeze is bright GREEN, increment by one
+if (val > nz(val[1]) and val > 5 and not sqzOn)
+    cGreen := cGreen + 1   
+
+// if bright RED squeeze is now dim, momentum has changed.  Is ADX also above 19? - add a marker to chart
+if (val > nz(val[1]) and val < 5 and not pos[1] and sigabove19 == true)
+    cRed := 0
+    pos := true  
+
+// if bright GREEN squeeze is now dim, momentum has changed.  Is ADX also above 19? - add a marker to chart
+if (val < nz(val[1]) and val > 5 and not neg[1] and sigabove19 == true)
+    cGreen := 0
+    neg := true  
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=  EVALUATE SQUEEZE RELAXER NEEDLE SIZE  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+cSQColorUp = color.green
+cSQColorDown = color.red
+
+upWick50PercentLarger = close > open and math.abs(high - close) > math.abs(open - close)
+downWick50PercentLarger = close < open and math.abs(low - close) > math.abs(open - close)
+
+plotshape(upWick50PercentLarger and pos and bUseSqueeze ? 1 : na, title="S", text="S", location=location.belowbar, style=shape.labelup, size=size.tiny, color=cSQColorUp, textcolor=color.white)
+plotshape(downWick50PercentLarger and neg and bUseSqueeze ? 1 : na, title="S", text="S", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=cSQColorDown, textcolor=color.white)
+alertcondition(upWick50PercentLarger and pos and bUseSqueeze, "Squeeze Up", "Squeeze Up")
+alertcondition(downWick50PercentLarger and neg and bUseSqueeze, "Squeeze Down", "Squeeze Down")
+if (upWick50PercentLarger and pos and bUseSqueeze)
+    sLabelUp := sLabelUp + "SQ"
+if (high >= upperBB and close < upperBB and close > open and bUseBB)
+    sLabelDown := sLabelDown + "SQ"
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=   VECTOR CANDLES  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+
+import TradersReality/Traders_Reality_Lib/2 as trLib
+
+color redVectorColor = color.rgb(255, 0, 0)
+color greenVectorColor = color.rgb(0, 255, 132)
+color violetVectorColor = color.fuchsia
+color blueVectorColor = color.rgb(83, 144, 249)
+color regularCandleUpColor = color.new(#999999, 99)
+color regularCandleDownColor = color.new(#4d4d4d, 99)
+
+bool overrideSym = false
+string pvsraSym = 'INDEX:BTCUSD'
+bool colorOverride = true
+
+pvsraVolume(overrideSymbolX, pvsraSymbolX, tickerIdX) =>
+    request.security(overrideSymbolX ? pvsraSymbolX : tickerIdX, '', [volume,high,low,close,open], barmerge.gaps_off, barmerge.lookahead_off)
+
+[pvsraVolume, pvsraHigh, pvsraLow, pvsraClose, pvsraOpen]  = pvsraVolume(overrideSym, pvsraSym, syminfo.tickerid)
+
+[pvsraColor, alertFlag, averageVolume, volumeSpread, highestVolumeSpread] = trLib.calcPvsra(pvsraVolume, pvsraHigh, pvsraLow, pvsraClose, pvsraOpen, redVectorColor, greenVectorColor, violetVectorColor, blueVectorColor, regularCandleDownColor, regularCandleUpColor)
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=  EVALUATE VECTOR CANDLE WICK SIZE  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+cVecColorUp = color.green
+cVecColorDown = color.red
+
+plotshape((pvsraColor == greenVectorColor or pvsraColor == blueVectorColor) and close > open and math.abs(high - close) > math.abs(open - close) and bUseVector ? 1 : na, title="I", text="I", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=cVecColorDown, textcolor=color.white)
+plotshape((pvsraColor == redVectorColor or pvsraColor == violetVectorColor) and close < open and math.abs(low - close) > math.abs(open - close) and bUseVector ? 1 : na, title="I", text="I", location=location.belowbar, style=shape.labelup, size=size.tiny, color=cVecColorUp, textcolor=color.white)
+alertcondition((pvsraColor == greenVectorColor or pvsraColor == blueVectorColor) and close > open and math.abs(high - close) > math.abs(open - close) and bUseVector, "Institutional Candle", "Institutional Candle")
+alertcondition((pvsraColor == redVectorColor or pvsraColor == violetVectorColor) and close < open and math.abs(low - close) > math.abs(open - close) and bUseVector, "Institutional Candle", "Institutional Candle")
+if (pvsraColor == greenVectorColor and close > open and math.abs(high - close) > math.abs(open - close) and bUseVector)   
+    sLabelUp := sLabelUp + "I"
+if (pvsraColor == redVectorColor and close < open and math.abs(low - close) > math.abs(open - close) and bUseVector)
+    sLabelDown := sLabelDown + "I"
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=  CCI / RSI  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+
+lCCI = input.int(20, minval=1, group="CCI")
+srcCCI = input.source(hlc3, title="Source", group="CCI")
+ma2 = ta.sma(srcCCI, lCCI)
+cci = (srcCCI - ma2) / (0.015 * ta.dev(srcCCI, lCCI))
+cciColor = cci >= 100 ? #288a75 : cci <= -100 ? color.red : color.new(color.black, 100)
+Rsi2 = ta.rsi(close, 14)
+
+cRSIColorUp = color.green
+cRSIColorDown = color.red
+
+plotshape(upWick50PercentLarger and Rsi2 > rsiUpper and bUseRSI ? 1 : na, title="R", text="R", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=cRSIColorDown, textcolor=color.white)
+plotshape(downWick50PercentLarger and Rsi2 < rsiLower and bUseRSI ? 1 : na, title="R", text="R", location=location.belowbar, style=shape.labelup, size=size.tiny, color=cRSIColorUp, textcolor=color.white)
+alertcondition(upWick50PercentLarger and Rsi2 < 30 and bUseRSI, "RSI Up", "RSI Up")
+alertcondition(downWick50PercentLarger and Rsi2 > 70 and bUseRSI, "RSI Down", "RSI Down")
+if (upWick50PercentLarger and Rsi2 < rsiLower and bUseRSI)
+    sLabelUp := sLabelUp + "R"
+if (downWick50PercentLarger and Rsi2 > rsiUpper and bUseRSI)
+    sLabelDown := sLabelDown + "R"
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=  KELTNER CHANNEL  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+esma(sourceKC, lengthKC)=>
+	s = ta.sma(sourceKC, lengthKC)
+	e = ta.ema(sourceKC, lengthKC)
+	e
+maKC = esma(close, lengthKC)
+rangema2 = ta.tr(true) 
+upperKC2 = maKC + rangema2 * multKC
+lowerKC2 = maKC - rangema2 * multKC
+downKC2 = low < lowerKC2 or high < lowerKC2
+upKC2 = low > upperKC2 or high > upperKC2
+kcTrue = not upKC2 and not downKC2
+kcColor = upKC2 ? #288a75 : downKC2 ? color.red : color.new(color.black, 100)
+
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=  PAINT THE LABELS  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+
+// array.push(uplabels, label.new(bar_index, high, style=label.style_none, text=sLabelUp, textcolor=color.lime, yloc=yloc.abovebar))
+// label.new(bar_index, low, style=label.style_none, text=sLabelDown, textcolor=color.red, yloc=yloc.belowbar)
+// label.new(bar_index, high, style=label.style_none, text=sLabelUp, textcolor=color.lime, yloc=yloc.abovebar)

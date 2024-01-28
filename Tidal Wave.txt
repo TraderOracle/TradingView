@@ -1,0 +1,124 @@
+//@version=5
+indicator(title="Tidal Wave", shorttitle="Tidal Wave v1.1", overlay=true, max_bars_back=1000, max_labels_count=500, max_lines_count=500)
+
+bShowII = input.bool(false, "Show ii pattern")
+bShowIOI = input.bool(false, "Show iOi pattern")
+trendMarker = input.bool(false, "Show UpTrend markers")
+UseSession = input.bool(false, "Only show during NY session")
+tradeTimes = input.session("0830-1500", title="Trading Times")
+
+InSession(sessionTimes) =>
+    not na(time(timeframe.period, sessionTimes))
+bool iss = InSession(tradeTimes)
+if (not UseSession)
+    iss := true
+
+isInside() =>
+    bodyStatus = (close >= open) ? 1 : -1
+    isInsidePattern = high < high[1] and low > low[1]
+    isInsidePattern ? bodyStatus : 0
+
+isOutside() =>
+    bodyStatus = (close >= open) ? 1 : -1
+    isOutsidePattern = low < low[1] and high > high[1]
+    isOutsidePattern ? bodyStatus : 0
+
+const int upTrend = 1
+const int downTrend = 2
+
+var int waveState = na
+
+redCandle = close < open
+greenCandle = close > open
+noOverlapRed = false
+noOverlapGreen = false
+
+brightGreen = false
+brightRed = false
+
+if (iss and greenCandle and open > close[1] and greenCandle[1])
+    noOverlapGreen := true
+    waveState := upTrend
+
+if (iss and redCandle and open > close[1] and redCandle[1])
+    noOverlapRed := true
+    waveState := downTrend
+
+if (iss and greenCandle)
+    for i = 1 to 200
+        if (brightRed[i]) // if bright red candle, stop
+            break
+        else if (waveState==upTrend and redCandle[i]) // if we're in a uptrend, and the candle is red, stop
+            break
+        else if (waveState==downTrend and open > close[i] and greenCandle[i])
+            noOverlapGreen := true
+            waveState := upTrend
+            break
+
+if (iss and redCandle)
+    for i = 1 to 200
+        if (brightGreen[i]) // if bright green candle, stop
+            break
+        else if (waveState==downTrend and greenCandle[i]) // if we're in a downtrend, and the candle is green, stop
+            break
+        else if (waveState==upTrend and open < close[i] and redCandle[i])
+            noOverlapRed := true
+            waveState := downTrend
+            break
+
+gapGreen = false
+gapRed = false
+
+if (iss and redCandle)
+    if (redCandle[1] and open < close[1])
+        gapRed := true
+
+if (iss and greenCandle)
+    if (greenCandle[1] and open > close[1]) 
+        gapGreen := true
+
+barcolor(iss and gapRed ? color.rgb(236, 154, 30) : na, title="Intense Red")
+barcolor(iss and gapGreen ? color.rgb(86, 241, 255) : na, title="Intense Green") // color.rgb(134, 227, 255)
+barcolor(iss and noOverlapRed ? color.rgb(255, 0, 0) : iss and noOverlapGreen ? color.rgb(0, 255, 132) : na)
+
+if (iss and noOverlapGreen)
+    brightGreen := true
+
+if (iss and noOverlapRed)
+    brightRed := true
+
+//plotshape(bFirstGreenCandleFound and brightGreen ? 1 : na, style=shape.square, location = location.belowbar, color=color.yellow)
+//plotshape(bFirstRedCandleFound and brightRed ? 1 : na, style=shape.square, location = location.abovebar, color=color.yellow)
+
+plotchar(trendMarker and waveState==upTrend ? 1 : na, char="^", location = location.abovebar)
+
+InsideBar = isInside()
+OutsideBar = isOutside()
+plotchar(bShowII and InsideBar and InsideBar[1] ? 1 : na, char="⛄", location = location.abovebar, color=color.white, size=size.small)
+plotchar(bShowIOI and InsideBar and OutsideBar[1] and InsideBar[2] ? 1 : na, char="⌛", location = location.abovebar, color=color.white, size=size.tiny)
+
+//swing_high = ta.highest(20)
+//swing_low = ta.lowest(20)
+//high_when_swing_high = ta.valuewhen(swing_high > swing_high[1], high, 0)
+//low_when_swing_high = ta.valuewhen(swing_high > swing_high[1], low, 0)
+//_bar_index_swing_high = ta.valuewhen(swing_high > swing_high[1], bar_index, 0)
+//is_swing_high_found = close < low_when_swing_high ? 1 : 0
+//swing_high_bar_diff = if(is_swing_high_found)
+    //-1 * (bar_index - _bar_index_swing_high)
+
+//line.new(bar_index+swing_high_bar_diff-1, high_when_swing_high, bar_index+swing_high_bar_diff+1, high_when_swing_high, color=colorGreen, style=line.style_arrow_both)
+// label.new(bar_index+swing_high_bar_diff, high_when_swing_high, text="Wave", color=color.blue, textcolor=color.yellow)
+
+// Store current candle high/low
+
+//if (redCandle and not bFirstRedCandleFound and waveState == upTrend)
+//    prevRedLow := close
+//    bFirstRedCandleFound := true
+
+// if (redCandle and close > prevRedLow) // and waveState==downTrend)
+    //bFirstRedCandleFound := true
+    // prevRedLow := close
+
+//if (greenCandle and close < prevGreenHigh)
+    // prevGreenHigh := close
+

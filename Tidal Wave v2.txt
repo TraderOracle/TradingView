@@ -1,0 +1,136 @@
+//@version=5
+indicator(title="Tidal Wave", shorttitle="Tidal Wave v2.0", overlay=true, max_bars_back = 1000, max_lines_count = 500, max_labels_count = 500)
+
+// IMPORTANT: Credit to Aaron D for all ideas in this indicator
+// Go subscribe to him at https://www.youtube.com/@aarond98
+
+// Version 2.0:
+// - Added lines for gaps in price.  Functions similar to Fair Value Gaps, but with lines
+// - Added alerts
+// - Added ability to modify line thickness and type
+
+//bShowBuySell = input.bool(true, "Show buy/sell signals")
+
+bbY = input.bool(false, "PLEASE USE 1 MINUTE CHART WITH THIS INDICATOR!")
+
+bTrackBar = input.bool(false, "Track bar gaps like FVG", group="Basic Settings")
+iBarExtend = input.int(50, "Number of bars to extend line", maxval=500, minval=10, group="Basic Settings")
+lWidth = input.int(3, "Line Width", group="Basic Settings")
+lStyle = input.string(title="Line Style", options=["Solid", "Dotted", "Dashed"], defval="Dotted", group="Basic Settings")
+
+sStyle = lStyle=="Solid" ? line.style_solid : lStyle=="Dashed" ? line.style_dashed : line.style_dotted
+bExtend = lWidth==500 ? extend.right : extend.none
+
+bShowII = input.bool(false, "Show ii pattern", group="Advanced")
+bShowIOI = input.bool(false, "Show iOi pattern", group="Advanced")
+trendMarker = input.bool(false, "Show UpTrend markers", group="Advanced")
+
+UseSession = input.bool(false, "Only show during NY session", group="Session")
+tradeTimes = input.session("0830-1500", "Trading Times", group="Session")
+
+InSession(sessionTimes) =>
+    not na(time(timeframe.period, sessionTimes))
+bool iss = InSession(tradeTimes)
+if (not UseSession)
+    iss := true
+
+isInside() =>
+    bodyStatus = (close >= open) ? 1 : -1
+    isInsidePattern = high < high[1] and low > low[1]
+    isInsidePattern ? true : false
+
+isOutside() =>
+    bodyStatus = (close >= open) ? 1 : -1
+    isOutsidePattern = low < low[1] and high > high[1]
+    isOutsidePattern ? true : false
+
+const int upTrend = 1
+const int downTrend = 2
+
+var line[] ll = array.new_line()
+var int waveState = na
+
+redCandle = close < open
+greenCandle = close > open
+noOverlapRed = false
+noOverlapGreen = false
+
+brightGreen = false
+brightRed = false
+
+if iss
+    for [index, line] in ll
+        if (high > line.get_y1(line) and low < line.get_y1(line))
+            line.delete(array.get(ll, index))
+
+
+if (iss and greenCandle and open > close[1] and greenCandle[1])
+    noOverlapGreen := true
+    waveState := upTrend
+
+if (iss and redCandle and open > close[1] and redCandle[1])
+    noOverlapRed := true
+    waveState := downTrend
+
+if (iss and greenCandle)
+    for i = 1 to 200
+        if (brightRed[i]) // if bright red candle, stop
+            break
+        else if (waveState==upTrend and redCandle[i]) // if we're in a uptrend, and the candle is red, stop
+            break
+        else if (waveState==downTrend and open >= close[i] and greenCandle[i])
+            noOverlapGreen := true
+            waveState := upTrend
+            break
+
+if (iss and redCandle)
+    for i = 1 to 200
+        if (brightGreen[i]) // if bright green candle, stop
+            break
+        else if (waveState==downTrend and greenCandle[i]) // if we're in a downtrend, and the candle is green, stop
+            break
+        else if (waveState==upTrend and open <= close[i] and redCandle[i])
+            noOverlapRed := true
+            waveState := downTrend
+            break
+
+gapGreen = false
+gapRed = false
+bNewGap = false
+
+if (iss and redCandle and barstate.isconfirmed)
+    if (redCandle[1] and open < close[1])
+        gapRed := true
+        if bTrackBar
+            array.push(ll, line.new(bar_index, open, bar_index + iBarExtend, open, color=color.new(color.red, 50), width=lWidth, style=sStyle, extend=bExtend))
+            bNewGap := true
+
+if (iss and greenCandle and barstate.isconfirmed)
+    if (greenCandle[1] and open > close[1])
+        gapGreen := true
+        if bTrackBar
+            array.push(ll, line.new(bar_index, open, bar_index + iBarExtend, open, color=color.new(color.lime, 50), width=lWidth, style=sStyle, extend=bExtend))
+            bNewGap := true
+
+cCanColor = color.new(color.black, 100)
+if (iss and noOverlapGreen) or (iss and gapGreen) // and waveState == downTrend
+    cCanColor := color.lime
+if (iss and noOverlapRed) or (iss and gapRed) // and waveState == upTrend
+    cCanColor := color.red
+
+alertcondition(bNewGap, "Tidal Wave Candle Gap", "Tidal Wave Candle Gap")
+
+barcolor(cCanColor)
+
+if (iss and noOverlapGreen)
+    brightGreen := true
+
+if (iss and noOverlapRed)
+    brightRed := true
+
+plotchar(trendMarker and waveState==upTrend ? 1 : na, char="^", location = location.abovebar)
+
+InsideBar = isInside()
+OutsideBar = isOutside()
+plotchar(bShowII and InsideBar and InsideBar[1] ? 1 : na, char="⛄", location = location.abovebar, color=color.white, size=size.small)
+plotchar(bShowIOI and InsideBar and OutsideBar[1] and InsideBar[2] ? 1 : na, char="⌛", location = location.abovebar, color=color.white, size=size.tiny)

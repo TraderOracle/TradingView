@@ -1,0 +1,42 @@
+//@version=4
+study(title = "Green Hulk", overlay=true, format=format.price, precision=2)
+
+// Movivated by this video by Serious Backtester: https://www.youtube.com/watch?v=lXYGrhZcYBc
+// The Hulk has been many colors, other than green.  But this is entitled Green Hulk, due to only LONGs with this strategy
+// This strategy works best on DAILY candles.  One hour was ok, but anything lower than an hour candle performed poorly
+
+// MACD
+[currMacd,_,_] = macd(close[0], 12, 26, 9)
+[prevMacd,_,_] = macd(close[1], 12, 26, 9)
+signal = ema(currMacd, 9)
+
+// STOCHASTIC RSI
+rsiSR = rsi(close, 14)
+kSR = sma(stoch(rsiSR, rsiSR, rsiSR, 14), 3)
+dSR = sma(kSR, 3)
+
+// RSI with moving average
+up = rma(max(change(close), 0), 14)
+down = rma(-min(change(close), 0), 14)
+rsi = down == 0 ? 100 : up == 0 ? 0 : 100 - (100 / (1 + up / down))
+rsiMA = ema(rsi, 14)
+
+// If MACD is crossing up
+macdGood = (cross(currMacd, signal) and currMacd > signal and currMacd <= 2)
+// And Stochastic between 20 and 80
+stochGood = dSR > 19 and dSR < 80
+// And Stochastic recently below 20 (last 10 bars)
+stochRecent = dSR[1] < 20 or dSR[2] < 20 or dSR[3] < 20 or dSR[4] < 20 or dSR[5] < 20 or dSR[6] < 20 or dSR[7] < 20 or dSR[8] < 20 or dSR[9] < 20
+// And RSI above the MA
+rsiGood = rsi > rsiMA
+
+buySignal = macdGood and stochGood and stochRecent and rsiGood
+buyMe = buySignal and not buySignal[1]
+
+plotshape(buyMe ? close : na, title="Hulk", text="Hulk", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.rgb(40, 154, 71), textcolor=color.white)
+
+// Find swing low from past 10 candles
+low_10 = lowest(close, 10)
+// STOP = swing low, TP = 1.5 profit factor
+plotshape(buyMe ? abs(low - low_10) * 1.5 + high : na, title='ATR ceiling', color=color.lime, style=shape.xcross, size=size.tiny, location=location.absolute)
+plotshape(buyMe ? low_10 : na, title='ATR floor', color=color.red, style=shape.xcross, size=size.tiny, location=location.absolute)

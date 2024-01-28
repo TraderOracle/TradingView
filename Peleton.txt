@@ -1,0 +1,132 @@
+
+//@version=5
+indicator("Peloton", overlay=true)
+
+// based upon this video: https://www.youtube.com/watch?v=83QbGd1n2po
+// Video claims:
+// 76% win rate, 4.06 PF on BTC 5min candles
+
+ema21 = ta.ema(close, 21)
+ema50 = ta.ema(close, 50)
+ema144 = ta.ema(close, 144)
+
+bullishtrend = ema144 < ema50 and ema50 < ema21 ? true : false
+bearishtrend = ema144 > ema50 and ema50 > ema21 ? true : false
+
+EHMA(_src, _length) =>  ta.ema(2 * ta.ema(_src, _length / 2) - ta.ema(_src, _length), math.round(math.sqrt(_length)))
+
+// SWITCH
+Mode(modeSwitch, src, len) =>
+    EHMA(close, len)
+
+// OUT
+_hull = Mode("Ehma", close, int(34 * 2.0))
+hullColor = _hull > _hull[2] ? color.green : color.red
+
+
+//////////////////////////////////////////////////////////////
+
+greencolor = #2DD204
+redcolor = #D2042D 
+
+SM02 = 'Slope'
+SM03 = 'Middle Crosses'
+SM04 = 'Levels Crosses'
+
+_stepma(float sense, float size, float stepMulti, phigh, plow, pprice)=>
+    float trend = 0.
+    float out = 0.
+    float sensitivity = sense == 0 ? 0.0001 : sense
+    float stepSize = size == 0 ? 0.0001 : size
+    float sizea = sensitivity * stepSize
+    
+    float smax = phigh + 2.0 * sizea * stepMulti
+    float smin = plow - 2.0 * sizea * stepMulti
+    
+    trend := nz(trend[1])
+    if (pprice > nz(smax[1])) 
+        trend :=  1
+    if (pprice < nz(smin[1])) 
+        trend := -1
+    if (trend == 1) 
+        if (smin < nz(smin[1]))
+            smin := nz(smin[1])
+        out := smin + sizea * stepMulti 
+    if (trend == -1) 
+        if (smax > nz(smax[1])) 
+            smax := nz(smax[1])
+        out := smax - sizea * stepMulti
+    out
+    
+src = input(hlc3, title="Source", group = "Basic Settings")
+per = input.int(55, "Period", minval=1, group = "Basic Settings")
+
+Sensitivity = input.float(4, group = "Step MA Settings")
+StepSize    = input.float(5, group = "Step MA Settings")
+StepMultiplier = input.float(5, group = "Step MA Settings")
+
+lvlup = input.int(100, "Upper Level", group = "Levels Settings")
+lvldn = input.int(-100, "Bottom Level", group = "Levels Settings")
+
+sigtype = input.string(SM03, "Signal type", options = [SM02, SM03, SM04], group = "Signal Settings")
+
+colorbars = input.bool(true, "Color bars?", group= "UI Options")
+showSigs = input.bool(true, "Show signals?", group= "UI Options")
+
+cci = ta.cci(src, per)
+
+out = _stepma(Sensitivity, StepSize, StepMultiplier, cci, cci, cci)
+
+sig = out[1]
+mid = 0
+
+state = 0.
+if sigtype == SM02
+    if (out < sig) 
+        state :=-1
+    if (out > sig) 
+        state := 1
+else if sigtype == SM03
+    if (out < mid) 
+        state :=-1
+    if (out > mid)
+        state := 1
+else if sigtype == SM04
+    if (out < lvldn) 
+        state := -1
+    if (out > lvlup)
+        state := 1
+        
+colorout = state == 1 ? greencolor : state == -1 ? redcolor : color.gray
+
+//////////////////////////////////////////////////////////////
+
+txtcol=input.color(color.gray,'Text Color')
+[p,m,a]=ta.dmi(14,14)
+// plot(a,style = plot.style_area,color=color.red)
+m1=ta.ema(close,12)
+m2=ta.ema(close,50)
+mcolor=m1>m2?color.rgb(79, 163, 81):color.rgb(77, 23, 28)
+// plot(p,color=color.rgb(4, 104, 1),style = plot.style_columns,title='Buy')
+// plot(m,color=color.rgb(163, 2, 2),style = plot.style_columns,title='Sell')
+// barcolor(p>m and a>20?color.rgb(4, 104, 1):p<m and a>20?color.rgb(163, 2, 2):color.rgb(247, 222, 4))
+// plot(20,style = plot.style_area,color=mcolor,title='MA BAND')
+// plotshape(ta.crossover(p,m) and p>m?2:na,title = 'ADX up',color=color.rgb(3, 136, 8),location=location.absolute,style = shape.triangleup,size=size.tiny)
+// plotshape(ta.crossunder(p,m) and p<m?18:na,title = 'ADX Down',color=color.rgb(243, 38, 11),location=location.absolute,style = shape.triangledown,size=size.tiny)
+
+// status = table.new(position.top_right, 11, 20, border_width=1)
+emtrend=m1>m2?color.green:color.red
+adxdir=p>m?color.green:color.red
+adxstren=p>m and a>20?color.rgb(4, 104, 1):p<m and a>20?color.rgb(163, 2, 2):color.rgb(247, 222, 4)
+candle=open<close?color.green:color.red
+adxcx=ta.barssince(ta.cross(p,m))
+
+upwards = hullColor == color.green and state == 1 and p>m and a>20
+downwards = hullColor == color.red and state == -1 and p<m and a>20
+
+showUp = upwards and not upwards[1] 
+showDown = downwards and not downwards[1] 
+
+plotshape(showUp ? hl2 : na, title="P", text="P", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.green, textcolor=color.white)
+plotshape(showDown ? hl2 : na, title="P", text="P", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.red, textcolor=color.white)
+

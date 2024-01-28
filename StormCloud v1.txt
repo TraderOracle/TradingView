@@ -1,0 +1,51 @@
+//@version=5
+indicator(title="Storm Cloud v1", shorttitle="Storm Cloud", overlay=true)
+
+conversionPeriods = input.int(9, minval=1, title="Conversion Line Length")
+basePeriods = input.int(26, minval=1, title="Base Line Length")
+laggingSpan2Periods = input.int(52, minval=1, title="Leading Span B Length")
+displacement = input.int(26, minval=1, title="Lagging Span")
+bShowCloud = input.bool(false, title="Show Cloud")
+
+sStrategy = input.string(title="Choose Your Strategy", defval="Lines cross above/below CURRENT cloud", options=["Lines cross above/below CURRENT cloud","Lines cross above/below FUTURE cloud","Conversion crosses base ONLY","Price crosses FUTURE cloud"])  
+
+donchian(len) => math.avg(ta.lowest(len), ta.highest(len))
+
+conversionLine = donchian(conversionPeriods)
+baseLine = donchian(basePeriods)
+leadLine1 = math.avg(conversionLine, baseLine)
+leadLine2 = donchian(laggingSpan2Periods)
+
+bGreenCloudCurrent = leadLine1[displacement] > leadLine2[displacement]
+bRedCloudCurrent = not bGreenCloudCurrent
+bGreenCloudFuture = leadLine1 > leadLine2
+bRedCloudFuture = not bGreenCloudFuture
+
+p1 = plot(bShowCloud ? leadLine1 : na, offset = displacement - 1, color=color.new(color.black, 100), title="Leading Span A")
+p2 = plot(bShowCloud ? leadLine2 : na, offset = displacement - 1, color=color.new(color.black, 100), title="Leading Span B")
+fill(p1, p2, color = leadLine1 > leadLine2 ? color.rgb(67, 160, 71, 60) : color.rgb(244, 67, 54, 60))
+
+var upwards = false
+var downwards = false
+
+if sStrategy == "Lines cross above/below CURRENT cloud"
+    upwards := bGreenCloudCurrent and conversionLine > baseLine and close > leadLine1[displacement] and close > leadLine2[displacement]
+    downwards := bRedCloudCurrent and conversionLine < baseLine and close < leadLine1[displacement] and close < leadLine2[displacement]
+
+if sStrategy == "Lines cross above/below FUTURE cloud"
+    upwards := bGreenCloudFuture and conversionLine > baseLine and close > leadLine1 and close > leadLine2
+    downwards := bRedCloudFuture and conversionLine < baseLine and close < leadLine1 and close < leadLine2
+
+if sStrategy == "Price crosses FUTURE cloud"
+    upwards := bGreenCloudFuture and close > leadLine2 and (close > leadLine1 or close < leadLine2) and (close < leadLine1 or close > leadLine2)  
+    downwards := bRedCloudFuture and close < leadLine1 and (close < leadLine1 or close > leadLine2) and (close > leadLine1 or close < leadLine2) 
+
+if sStrategy == "Conversion crosses base ONLY"
+    upwards := conversionLine > baseLine
+    downwards := conversionLine < baseLine
+
+showUp = upwards and not upwards[1] and not upwards[2] and not upwards[3] and not upwards[4] and not upwards[5] and not upwards[6] and not upwards[7]
+showDown = downwards and not downwards[1] and not downwards[2] and not downwards[3] and not downwards[4] and not downwards[5] and not downwards[6] and not downwards[7]
+
+plotshape(showUp? hl2 : na, title="Cloud", text="Cloud", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.rgb(10, 118, 14), textcolor=color.white)
+plotshape(showDown ? hl2 : na, title="Cloud", text="Cloud", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.rgb(125, 6, 6), textcolor=color.white)

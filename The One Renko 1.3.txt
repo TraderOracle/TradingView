@@ -1,0 +1,384 @@
+//@version=4
+
+//
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=  THE ONE RENKO TO RULE THEM ALL  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+// Designed to be used on Renko 1s, Traditional 4.  I primary trade the US 100 PEPPERSTONE (which is NQ futures)
+// Version 1 created by TraderOracle 11/18/2023
+// Version 1.1 - Fixed flag and squeeze overlapping, plus changed colors to be more intuitive
+//
+
+study(title="The One Renko To Rule Them All", overlay=true, shorttitle="The One Renko 1.1")
+
+bShowFlags = input(false, title="Show Flags", group="Main Settings")
+bShowDots = input(false, title="Show Dots", group="Main Settings")
+bShowX = input(true, title="Show Big X for Buy/Sell", group="Main Settings")
+bUseDeadSimple = input(false, title="Use Dead Simple Reversal", group="Main Settings")
+bShowST = input(false, title="Use Triple Supertrend", group="Main Settings")
+
+bUpCurve = close > close[1] and close[1] > close[2] and close[2] > close[3] and close[3] < close[4] and close[4] < close[5] and close[5] < close[6] ? 1 : 0
+bDownCurve = close < close[1] and close[1] < close[2] and close[2] < close[3] and close[3] > close[4] and close[4] > close[5] and close[5] > close[6] ? 1 : 0
+
+//
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=  ULTIMATE REVERSAL 1.22  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+// These are volume patterns I noticed after backtesting reversals for many months
+// 
+
+var cColor = color.rgb(194, 196, 197)
+
+basis = sma(close, 30)
+dev = 2 * stdev(close, 30)
+upper = basis + dev
+lower = basis - dev
+
+is0Green = close > open
+is1Green = close[1] > open[1]
+is2Green = close[2] > open[2]
+is3Green = close[3] > open[3]
+is4Green = close[4] > open[4]
+is0Red = not is0Green
+is1Red = not is1Green
+is2Red = not is2Green
+is3Red = not is3Green
+is4Red = not is4Green
+
+// Pattern #1 - small red bar, larger red bar, small green bar
+up1 = (volume[1] > volume[2] and volume < volume[1] and is0Green and is1Red and is2Red)
+down1 = (volume[1] > volume[2] and volume < volume[1] and is0Red and is1Green and is2Green)
+
+// Pattern #2 - small red bar, larger red bar, even LARGER red bar, small green bar
+up2 = (volume[2] > volume[3] and volume[3] > volume[4] and volume[1] < volume[2] and volume < volume[2] and is0Green and is1Red and is2Red and is3Red and is4Red)
+down2 = (volume[2] > volume[3] and volume[3] > volume[4] and volume[1] < volume[2] and volume < volume[2] and is0Red and is1Green and is2Green and is3Green and is4Green)
+
+// Pattern #3 - 4 bars of the same color, then a different color bar that's larger than all 4 previous
+up3 = (is1Red and is2Red and is3Red and is4Red and is0Green and volume > volume[1] and volume > volume[2] and volume > volume[3] and volume > volume[4])
+down3 = (is1Green and is2Green and is3Green and is4Green and is0Red and volume > volume[1] and volume > volume[2] and volume > volume[3] and volume > volume[4])
+
+// snippet from Candlestick Reversal System by LonesomeTheDove
+pivotlbar = 5
+highleftempty = pivothigh(pivotlbar, 0)
+lowleftempty = pivotlow(pivotlbar, 0)
+wick_multiplier = 10
+body_percentage = 1
+
+O = open
+C = close
+H = high
+L = low
+
+Wlongsignal = (C > O) and (O - L) >= ((C - O) * wick_multiplier) and (H - C) <= ((H - L) * body_percentage) or
+   (C < O) and (C - L) >= ((O - C) * wick_multiplier) and (H - C) <= ((H - L) * body_percentage) or
+   (C == O and C != H) and (H - L) >= ((H - C) * wick_multiplier) and (H - C) <= ((H - L) * body_percentage) or
+   (O == H and C == H) and (H - L) >= sma((H - L), 50)
+
+Wshortsignal = (C < O) and (H - O) >= ((O - C) * wick_multiplier) and (C - L) <= ((H - L) * body_percentage) or
+   (C > O) and (H - C) >= ((C - O) * wick_multiplier) and (C - L) <= ((H -L) * body_percentage) or
+   (C == O and C != L) and (H - L) >= ((C - L) * wick_multiplier) and (C - L) <= ((H - L) * body_percentage) or
+   (O == L and C == L) and (H - L) >= sma((H - L), 50)
+
+// Candlestick pattern is technically Pattern #4
+up4 = lowleftempty and Wlongsignal
+down4 = highleftempty and Wshortsignal
+
+upsie1 = rma(max(change(close), 0), 14)
+downsie1 = rma(-min(change(close), 0), 14)
+MyRsi = downsie1 == 0 ? 100 : upsie1 == 0 ? 0 : 100 - (100 / (1 + upsie1 / downsie1))
+
+BollingerCross = false
+
+up99 = (up1 or up2 or up3 or up4)
+down99 = (down1 or down2 or down3 or down4)
+
+bColor = color.rgb(199, 197, 197)
+
+if (MyRsi < 60)
+    down99 := false
+if (MyRsi > 40)
+    up99 := false
+
+// version 1.21 - I wasn't showing Bollinger Bands/RSI unless it also was volume rules, which kinda ruins the point of the update.  Fixed...
+if (close < (lower - 2) or (lower - 2) and MyRsi < 30)
+    bColor := color.rgb(255, 53, 53)
+    up99 := true
+if (close > (upper + 2) or open > (upper + 2) and MyRsi > 80)
+    bColor := color.rgb(255, 53, 53)
+    down99 := true
+
+// eliminate dupes
+if (up99[1])
+    up99 := false
+if (down99[1])
+    down99 := false
+
+atr = atr(10)
+pos2 = high + (1.6 * atr)
+pos3 = low - (1.6 * atr)
+
+// My implementation of DEAD SIMPLE REVERSAL from PaidToFade
+q1 = close[1] < open[1] and close > open
+q2 = close > open[1]
+q3 = lowest(low,3) < lowest (low,50)[1] or lowest(low,3) < lowest(low,50)[2] or lowest(low,3) < lowest(low,50)[3]
+buyme = q1 and q2 and q3
+
+q4 = close[1] > open[1] and close < open
+q5 = close < open[1]
+q6 = highest(high,3) > highest (high,50)[1] or highest(high,3) > highest(high,50)[2] or highest(high,3) > highest(high,50)[3]
+sellme = q4 and q5 and q6
+
+if (buyme and bUseDeadSimple)
+    bColor := color.lime
+    //up99 := true
+if (sellme and bUseDeadSimple)
+    bColor := color.lime
+    //down99 := true
+
+plotshape(down99 and bShowFlags ? pos2 : na, title="Reversal Sell Signal", style=shape.flag, location=location.absolute, color=bColor, size=size.tiny)
+plotshape(up99 and bShowFlags ? pos3 : na, title="Reversal Buy Signal", style=shape.flag, location=location.absolute, color=bColor, size=size.tiny)
+
+
+//
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=  SQUEEZE MOMENTUM RELAXER 2.1  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+// This is an improper use of TTM Squeeze.  I capture the shift between a squeeze condition, and a relaxed condition
+// 
+
+var cGreen = 0
+var cRed = 0
+var pos = false 
+var neg = false 
+
+// Keltner Channel
+
+esma(close, length)=>
+	s = sma(close, 20)
+	e = ema(close, 20)
+	true ? e : s
+ma1 = esma(close, 20)
+rangema1 = atr(10)
+upper1 = ma1 + rangema1 * 2
+lower1 = ma1 - rangema1 * 2
+
+KeltnerCross = crossover(close, upper1) or crossover(close, lower1)
+
+// ADX
+
+upq4 = rma(max(change(close), 0), 14)
+downq4 = rma(-min(change(close), 0), 14)
+rsi = downq4 == 0 ? 100 : upq4 == 0 ? 0 : 100 - (100 / (1 + upq4 / downq4))
+
+dirmov(len) =>
+	up = change(high)
+	down = -change(low)
+	plusDM = na(up) ? na : (up > down and up > 0 ? up : 0)
+	minusDM = na(down) ? na : (down > up and down > 0 ? down : 0)
+	truerange = rma(tr, len)
+	plus = fixnan(100 * rma(plusDM, len) / truerange)
+	minus = fixnan(100 * rma(minusDM, len) / truerange)
+	[plus, minus]
+adx(dilen, adxlen) =>
+	[plus, minus] = dirmov(dilen)
+	sum = plus + minus
+	adx = 100 * rma(abs(plus - minus) / (sum == 0 ? 1 : sum), adxlen)
+sig = adx(14, 14) // ADX DI Length = 14, ADX Length. = 14
+sigabove11 = sig > 11 // ADX Value = 11
+
+// WAE Dead Zone 
+
+calc_macd(source, fastLength, slowLength) =>
+	fastMA = ema(source, fastLength)
+	slowMA = ema(source, slowLength)
+	fastMA - slowMA
+
+t1 = (calc_macd(close, 20, 40) - calc_macd(close[1], 20, 40))*150
+t2 = (calc_macd(close[2], 20, 40) - calc_macd(close[3], 20, 40))*150
+
+trendUp = (t1 >= 0) ? t1 : 0
+trendDown = (t1 < 0) ? (-1*t1) : 0
+
+// Squeeze Momentum
+
+useTrueRange = true
+source = close
+basis5 = sma(close, 20)
+dev1 = 1.5 * stdev(close, 20)
+upperBB = basis5 + dev1
+lowerBB = basis5 - dev1
+ma = sma(close, 20)
+rangeQ = useTrueRange ? tr : (high - low)
+rangema = sma(rangeQ, 20)
+upperKC = ma + rangema * 1.5
+lowerKC = ma - rangema * 1.5
+sqzOn  = (lowerBB > lowerKC) and (upperBB < upperKC)
+sqzOff = (lowerBB < lowerKC) and (upperBB > upperKC)
+noSqz  = (sqzOn == false) and (sqzOff == false)
+
+// Had to change this from the original
+avg1 = avg(highest(high, 20), lowest(low, 20))
+avg2 = avg(avg1, sma(close, 20))
+val = linreg(close - avg2, 20, 0)
+
+pos := false
+neg := false
+
+// if squeeze is bright RED, increment by one
+if (val < nz(val[1]) and val < 5 and not sqzOn)
+    cRed := cRed + 1   
+
+// if squeeze is bright GREEN, increment by one
+if (val > nz(val[1]) and val > 5 and not sqzOn)
+    cGreen := cGreen + 1   
+
+// if bright RED squeeze is now dim, momentum has changed.  Is ADX also above 11? - add a marker to chart
+if (val > nz(val[1]) and cRed > 1 and val < 5 and not pos[1] and sigabove11 == true)
+    cRed := 0
+    pos := true  
+
+// if bright GREEN squeeze is now dim, momentum has changed.  Is ADX also above 11? - add a marker to chart
+if (val < nz(val[1]) and cGreen > 1 and val > 5 and not neg[1] and sigabove11 == true)
+    cGreen := 0
+    neg := true  
+
+buySignal1 = pos 
+sellSignal1 = neg
+
+// Basic diamond color: Yellow as default, and Red is RSI is overbought or sold
+bColor4 = iff(rsi < 34 or rsi > 66, color.rgb(255, 0, 0), color.rgb(189, 189, 189)) // RSI Overbought Value = 34, RSI Oversold Value = 66
+
+// If we crossed Keltner channel, then color is Aqua
+// cColor4 = iff(KeltnerCross, color.rgb(50, 255, 67), bColor4)
+cColor4 = bColor4
+
+plotshape(buySignal1 and bShowDots ? pos : na, title="Squeeze Buy Signal", style=shape.diamond, location=location.belowbar, color=cColor4, size=size.tiny)
+plotshape(sellSignal1 and bShowDots ? neg : na, title="Squeeze Sell Signal", style=shape.diamond, location=location.abovebar, color=cColor, size=size.tiny)
+
+// BUY SELL SIGNALS
+
+//buySignals = 0
+//for history1 = 0 to iLookBack - 1
+//    if (buySignal1[history1])
+//        buySignals := buySignals + 1
+
+//sellSignals = 0
+//for history1 = 0 to iLookBack - 1
+//    if (sellSignals[history1])
+//        sellSignals := sellSignals + 1
+
+//upSignals = 0
+//for history1 = 0 to iLookBack - 1
+//    if (up99[history1])
+//        upSignals := upSignals + 1
+
+//downSignals = 0
+//for history1 = 0 to iLookBack - 1
+//    if (downSignals[history1])
+//        down99 := downSignals + 1
+
+bBuyFlag = buySignal1 or buySignal1[1] or buySignal1[2] or buySignal1[3] or buySignal1[4] or buySignal1[5] or buySignal1[6]
+bBuySqueeze = up99 or up99[1] or up99[2] or up99[3] or up99[4] or up99[5] or up99[6]
+
+bSellFlag = sellSignal1 or sellSignal1[1] or sellSignal1[2] or sellSignal1[3] or sellSignal1[4] or sellSignal1[5] or sellSignal1[6]
+bSellSqueeze = down99 or down99[1] or down99[2] or down99[3] or down99[4] or down99[5] or down99[6]
+
+plotshape(bUpCurve and bBuyFlag and bBuySqueeze and bShowX ? 1 : na, title="X Buy Signal", location=location.belowbar, style=shape.xcross, size=size.normal, color=color.rgb(11, 255, 141))
+plotshape(bDownCurve and bSellFlag and bSellSqueeze and bShowX ? 1 : na, title="X Sell Signal", location=location.abovebar, style=shape.xcross, size=size.normal, color=color.rgb(255, 12, 12)) 
+
+alertcondition(bUpCurve, title='One Renko BUY', message='One Renko BUY')
+alertcondition(bDownCurve, title='One Renko SELL', message='One Renko SELL')
+
+
+//
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=   TRIPLE SUPERTREND  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+// 
+
+var crossoverBear = false
+var crossoverBull = false
+
+bStrictMode = input(false, title="Strict Mode (less results)", group="Triple Supertrend Settings", tooltip = "Normally show when 2 out of 3 supertrends are active, but his mode requires 3/3 to be active")
+bEnableMACD = input(false, title="Filter using MACD", group="Triple Supertrend Settings", tooltip = "Only show when MACD also lines up")
+adxThreshold = input(30, title="ADX Threshold", group="Triple Supertrend Settings", tooltip="ADX value that must be reached in order for an indicator to display.  Larger numbers will filter out more noise")
+
+fastMA = input(title="Fast moving average", type=input.integer, defval=12, minval=7, group="MACD")
+slowMA = input(title="Slow moving average", type=input.integer, defval=26, minval=7, group="MACD")
+
+// Average Directional Index
+adxlen = input(14, title="ADX Smoothing", group="ADX")
+dilen = input(14, title="DI Length", group="ADX")
+adxValueST = adx(dilen, adxlen)
+
+// MACD
+signalLength = input(9,minval=1)
+[currMacd,_,_] = macd(close[0], fastMA, slowMA, signalLength)
+[prevMacd,_,_] = macd(close[1], fastMA, slowMA, signalLength)
+signal = ema(currMacd, signalLength)
+
+if (cross(currMacd, signal) and currMacd < signal and currMacd >= -2)
+	crossoverBear := true
+	crossoverBull := false
+
+if (cross(currMacd, signal) and currMacd > signal and currMacd <= 2 )
+	crossoverBull := true
+	crossoverBear := false
+
+atr2 = sma(tr, 10)
+atrST = atr2
+upST = hl2-(1*atrST)
+up1D = nz(upST[1],upST)
+upST := close[1] > up1D ? max(upST,up1D) : upST
+dnST = hl2+(1*atrST)
+dn1D = nz(dnST[1], dnST)
+dnST := close[1] < dn1D ? min(dnST, dn1D) : dnST
+trend = 1
+trend := nz(trend[1], trend)
+trend := trend == -1 and close > dn1D ? 1 : trend == 1 and close < up1D ? -1 : trend
+buySignal = trend == 1 and trend[1] == -1
+sellSignal = trend == -1 and trend[1] == 1
+changeCond = trend != trend[1]
+
+atr20 = sma(tr, 11)
+atr0 = atr20
+up0 =hl2-(2*atr)
+up10 = nz(up0[1],up0)
+up0 := close[1] > up10 ? max(up0,up10) : up0
+dn0=hl2+(2*atr)
+dn10 = nz(dn0[1], dn0)
+dn0 := close[1] < dn10 ? min(dn0, dn10) : dn0
+trend0 = 1
+trend0 := nz(trend0[1], trend0)
+trend0 := trend0 == -1 and close > dn10 ? 1 : trend0 == 1 and close < up10 ? -1 : trend0
+buySignal0 = trend0 == 1 and trend0[1] == -1
+changeCond0 = trend0 != trend0[1]
+
+atr29 = sma(tr, 12)
+atr9 = atr29
+up9=hl2-(3*atr)
+up19 = nz(up9[1],up9)
+up9 := close[1] > up19 ? max(up9,up19) : up9
+dn9=hl2+(3*atr)
+dn19 = nz(dn9[1], dn9)
+dn9 := close[1] < dn19 ? min(dn9, dn19) : dn9
+trend9 = 1
+trend9 := nz(trend9[1], trend9)
+trend9 := trend9 == -1 and close > dn19 ? 1 : trend9 == 1 and close < up19 ? -1 : trend9
+
+changeCond9 = trend9 != trend9[1]
+
+var showUp = false 
+var showDn = false
+
+if (not bStrictMode)
+    showUp := (trend9==1 and up9 and trend==1 and upST and trend0==1 and up0) or (trend9==1 and up9 and trend==1 and upST) or (trend9==1 and up9 and trend0==1 and up0) or (trend==1 and upST and trend0==1 and up0) 
+    showDn := (trend9!=1 and dn9 and trend!=1 and dnST and trend0!=1 and dn0) or (trend9!=1 and dn9 and trend!=1 and dnST) or (trend9!=1 and dn9 and trend0!=1 and dn0) or (trend!=1 and dnST and trend0!=1 and dn0) 
+else
+    showUp := (trend9==1 and up9 and trend==1 and upST and trend0==1 and up0)
+    showDn := (trend9!=1 and dn9 and trend!=1 and dnST and trend0!=1 and dn0)
+
+if (bEnableMACD and not crossoverBull)
+    showUp := false
+
+if (bEnableMACD and not crossoverBear)
+    showDn := false
+
+displayUp = showUp and not showUp[1]
+displayDn = showDn and not showDn[1]
+
+plotshape(bShowST and displayUp and adxValueST > adxThreshold ? 1 : na, title="Buy", text="Buy", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.green, textcolor=color.white)
+plotshape(bShowST and displayDn and adxValueST > adxThreshold ? 1 : na, title="Sell", text="Sell", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.red, textcolor=color.white)
+

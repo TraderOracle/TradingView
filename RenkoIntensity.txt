@@ -1,0 +1,234 @@
+//@version=4
+
+study("Renko Intensity", shorttitle="Renko Intensity", overlay=true)
+
+c1 = color.new(#2cff56, 0)
+c2 = color.new(#ff312d, 0)
+
+// WAE - Waddah Attar Explosion v1 by LazyBear
+threshold = input(120, title="Threshold to trigger (lower is more sensitive)", group="General Settings")
+
+sensitivity = input(150, title="Sensitivity", group="WAE")
+fastLength=input(20, title="FastEMA Length", group="WAE")
+slowLength=input(40, title="SlowEMA Length", group="WAE")
+channelLength=input(20, title="BB Channel Length", group="WAE")
+multWAE=input(2.0, title="BB Stdev Multiplier", group="WAE")
+
+calc_macd(source, fastLength, slowLength) =>
+    fastMA = ema(source, fastLength)
+    slowMA = ema(source, slowLength)
+    fastMA - slowMA
+
+calc_BBUpper(source, length, mult) => 
+    basis = sma(source, length)
+    dev = mult * stdev(source, length)
+    basis + dev
+
+calc_BBLower(source, length, mult) => 
+    basis = sma(source, length)
+    dev = mult * stdev(source, length)
+    basis - dev
+
+t1 = (calc_macd(close, fastLength, slowLength) - calc_macd(close[1], fastLength, slowLength))*sensitivity
+e1 = (calc_BBUpper(close, channelLength, multWAE) - calc_BBLower(close, channelLength, multWAE))
+
+trendUp = (t1 >= 0) ? t1 : 0
+trendDown = (t1 < 0) ? (-1*t1) : 0
+
+cColor = trendUp >= threshold ? color.rgb(0, 255, 132) : trendDown >= threshold ? color.rgb(255, 0, 0) : color.new(color.gray, 80)
+
+
+// PARAMETERS {
+
+// WaveTrend
+wtBuyShow = input(true, title = 'Show Buy dots', type = input.bool)
+wtGoldShow = input(true, title = 'Show Gold dots', type = input.bool)
+wtSellShow = input(true, title = 'Show Sell dots', type = input.bool)
+wtDivShow = input(true, title = 'Show Div. dots', type = input.bool)
+vwapShow = input(true, title = 'Show Fast WT', type = input.bool)
+wtChannelLen = input(9, title = 'WT Channel Length', type = input.integer)
+wtAverageLen = input(12, title = 'WT Average Length', type = input.integer)
+wtMASource = input(hlc3, title = 'WT MA Source', type = input.source)
+wtMALen = input(3, title = 'WT MA Length', type = input.integer)
+
+// WaveTrend Overbought & Oversold lines
+obLevel = input(53, title = 'WT Overbought Level 1', type = input.integer)
+osLevel = input(-53, title = 'WT Oversold Level 1', type = input.integer)
+
+// Divergence WT
+wtShowDiv = input(true, title = 'Show WT Regular Divergences', type = input.bool)
+wtShowHiddenDiv = input(false, title = 'Show WT Hidden Divergences', type = input.bool)
+showHiddenDiv_nl = input(true, title = 'Not apply OB/OS Limits on Hidden Divergences', type = input.bool)
+wtDivOBLevel = input(45, title = 'WT Bearish Divergence min', type = input.integer)
+wtDivOSLevel = input(-65, title = 'WT Bullish Divergence min', type = input.integer)
+
+// Divergence extra range
+wtDivOBLevel_addshow = input(true, title = 'Show 2nd WT Regular Divergences', type = input.bool)
+wtDivOBLevel_add = input(15, title = 'WT 2nd Bearish Divergence', type = input.integer)
+wtDivOSLevel_add = input(-40, title = 'WT 2nd Bullish Divergence 15 min', type = input.integer)
+
+// RSI+MFI
+rsiMFIShow = input(true, title = 'Show MFI', type = input.bool)
+rsiMFIperiod = input(60,title = 'MFI Period', type = input.integer)
+rsiMFIMultiplier = input(150, title = 'MFI Area multiplier', type = input.float)
+rsiMFIPosY = input(2.5, title = 'MFI Area Y Pos', type = input.float)
+
+// RSI
+rsiShow = input(false, title = 'Show RSI', type = input.bool)
+rsiSRC = input(close, title = 'RSI Source', type = input.source)
+rsiLen = input(14, title = 'RSI Length', type = input.integer)
+rsiOversold = input(30, title = 'RSI Oversold', minval = 50, maxval = 100, type = input.integer)
+rsiOverbought = input(60, title = 'RSI Overbought', minval = 0, maxval = 50, type = input.integer)
+
+// Divergence RSI
+rsiShowDiv = input(false, title = 'Show RSI Regular Divergences', type = input.bool)
+rsiShowHiddenDiv = input(false, title = 'Show RSI Hidden Divergences', type = input.bool)
+rsiDivOBLevel = input(60, title = 'RSI Bearish Divergence min', type = input.integer)
+rsiDivOSLevel = input(30, title = 'RSI Bullish Divergence min', type = input.integer)
+
+// RSI Stochastic
+stochShow = input(true, title = 'Show Stochastic RSI', type = input.bool)
+stochUseLog = input(true, title=' Use Log?', type = input.bool)
+stochAvg = input(false, title='Use Average of both K & D', type = input.bool)
+stochSRC = input(close, title = 'Stochastic RSI Source', type = input.source)
+stochLen = input(14, title = 'Stochastic RSI Length', type = input.integer)
+stochRsiLen = input(14, title = 'RSI Length ', type = input.integer)
+stochKSmooth = input(3, title = 'Stochastic RSI K Smooth', type = input.integer)
+stochDSmooth = input(3, title = 'Stochastic RSI D Smooth', type = input.integer)
+
+// Divergence stoch
+stochShowDiv = input(false, title = 'Show Stoch Regular Divergences', type = input.bool)
+stochShowHiddenDiv = input(false, title = 'Show Stoch Hidden Divergences', type = input.bool)
+
+// Colors
+colorRed = #ff0000
+colorGreen = #3fff00
+
+// } PARAMETERS
+
+
+// FUNCTIONS {
+  
+// Divergences 
+f_top_fractal(src) => src[4] < src[2] and src[3] < src[2] and src[2] > src[1] and src[2] > src[0]
+f_bot_fractal(src) => src[4] > src[2] and src[3] > src[2] and src[2] < src[1] and src[2] < src[0]
+f_fractalize(src) => f_top_fractal(src) ? 1 : f_bot_fractal(src) ? -1 : 0
+
+f_findDivs(src, topLimit, botLimit, useLimits) =>
+    fractalTop = f_fractalize(src) > 0 and (useLimits ? src[2] >= topLimit : true) ? src[2] : na
+    fractalBot = f_fractalize(src) < 0 and (useLimits ? src[2] <= botLimit : true) ? src[2] : na
+    highPrev = valuewhen(fractalTop, src[2], 0)[2]
+    highPrice = valuewhen(fractalTop, high[2], 0)[2]
+    lowPrev = valuewhen(fractalBot, src[2], 0)[2]
+    lowPrice = valuewhen(fractalBot, low[2], 0)[2]
+    bearSignal = fractalTop and high[2] > highPrice and src[2] < highPrev
+    bullSignal = fractalBot and low[2] < lowPrice and src[2] > lowPrev
+    bearDivHidden = fractalTop and high[2] < highPrice and src[2] > highPrev
+    bullDivHidden = fractalBot and low[2] > lowPrice and src[2] < lowPrev
+    [fractalTop, fractalBot, lowPrev, bearSignal, bullSignal, bearDivHidden, bullDivHidden]
+        
+// RSI+MFI
+f_rsimfi(_period, _multiplier, _tf) => security(syminfo.tickerid, _tf, sma(((close - open) / (high - low)) * _multiplier, _period) - rsiMFIPosY)
+   
+// WaveTrend
+f_wavetrend(src, chlen, avg, malen, tf) =>
+    tfsrc = security(syminfo.tickerid, tf, src)
+    esa = ema(tfsrc, chlen)
+    de = ema(abs(tfsrc - esa), chlen)
+    ci = (tfsrc - esa) / (0.015 * de)
+    wt1 = security(syminfo.tickerid, tf, ema(ci, avg))
+    wt2 = security(syminfo.tickerid, tf, sma(wt1, malen))
+    wtVwap = wt1 - wt2
+    wtOversold = wt2 <= osLevel
+    wtOverbought = wt2 >= obLevel
+    wtCross = cross(wt1, wt2)
+    wtCrossUp = wt2 - wt1 <= 0
+    wtCrossDown = wt2 - wt1 >= 0
+    wtCrosslast = cross(wt1[2], wt2[2])
+    wtCrossUplast = wt2[2] - wt1[2] <= 0
+    wtCrossDownlast = wt2[2] - wt1[2] >= 0
+    [wt1, wt2, wtOversold, wtOverbought, wtCross, wtCrossUp, wtCrossDown, wtCrosslast, wtCrossUplast, wtCrossDownlast, wtVwap]
+
+// Stochastic RSI
+f_stochrsi(_src, _stochlen, _rsilen, _smoothk, _smoothd, _log, _avg) =>
+    src = _log ? log(_src) : _src
+    rsi = rsi(src, _rsilen)
+    kk = sma(stoch(rsi, rsi, rsi, _stochlen), _smoothk)
+    d1 = sma(kk, _smoothd)
+    avg_1 = avg(kk, d1)
+    k = _avg ? avg_1 : kk
+    [k, d1]
+
+// } FUNCTIONS  
+
+// CALCULATE INDICATORS {
+
+// RSI
+rsi = rsi(rsiSRC, rsiLen)
+
+// RSI + MFI Area
+rsiMFI = f_rsimfi(rsiMFIperiod, rsiMFIMultiplier, timeframe.period)
+
+// Calculates WaveTrend
+[wt1, wt2, wtOversold, wtOverbought, wtCross, wtCrossUp, wtCrossDown, wtCross_last, wtCrossUp_last, wtCrossDown_last, wtVwap] = f_wavetrend(wtMASource, wtChannelLen, wtAverageLen, wtMALen, timeframe.period)
+ 
+// Stochastic RSI
+[stochK, stochD] = f_stochrsi(stochSRC, stochLen, stochRsiLen, stochKSmooth, stochDSmooth, stochUseLog, stochAvg)
+
+// WT Divergences
+[wtFractalTop, wtFractalBot, wtLow_prev, wtBearDiv, wtBullDiv, wtBearDivHidden, wtBullDivHidden] = f_findDivs(wt2, wtDivOBLevel, wtDivOSLevel, true)
+    
+[wtFractalTop_add, wtFractalBot_add, wtLow_prev_add, wtBearDiv_add, wtBullDiv_add, wtBearDivHidden_add, wtBullDivHidden_add] =  f_findDivs(wt2, wtDivOBLevel_add, wtDivOSLevel_add, true)
+[wtFractalTop_nl, wtFractalBot_nl, wtLow_prev_nl, wtBearDiv_nl, wtBullDiv_nl, wtBearDivHidden_nl, wtBullDivHidden_nl] =  f_findDivs(wt2, 0, 0, false)
+
+wtBearDivHidden_ = showHiddenDiv_nl ? wtBearDivHidden_nl : wtBearDivHidden
+wtBullDivHidden_ = showHiddenDiv_nl ? wtBullDivHidden_nl : wtBullDivHidden
+
+wtBearDivColor_add = (wtShowDiv and (wtDivOBLevel_addshow and wtBearDiv_add)) or (wtShowHiddenDiv and (wtDivOBLevel_addshow and wtBearDivHidden_add)) ? #9a0202 : na
+wtBullDivColor_add = (wtShowDiv and (wtDivOBLevel_addshow and wtBullDiv_add)) or (wtShowHiddenDiv and (wtDivOBLevel_addshow and wtBullDivHidden_add)) ? #1b5e20 : na
+
+// RSI Divergences
+[rsiFractalTop, rsiFractalBot, rsiLow_prev, rsiBearDiv, rsiBullDiv, rsiBearDivHidden, rsiBullDivHidden] = f_findDivs(rsi, rsiDivOBLevel, rsiDivOSLevel, true)
+[rsiFractalTop_nl, rsiFractalBot_nl, rsiLow_prev_nl, rsiBearDiv_nl, rsiBullDiv_nl, rsiBearDivHidden_nl, rsiBullDivHidden_nl] = f_findDivs(rsi, 0, 0, false)
+
+// Stoch Divergences
+[stochFractalTop, stochFractalBot, stochLow_prev, stochBearDiv, stochBullDiv, stochBearDivHidden, stochBullDivHidden] = f_findDivs(stochK, 0, 0, false)
+
+stochBearDivColor = (stochShowDiv and stochBearDiv) or (stochShowHiddenDiv and stochBearDivHidden) ? colorRed : na
+stochBullDivColor = (stochShowDiv and stochBullDiv) or (stochShowHiddenDiv and stochBullDivHidden) ? colorGreen : na
+
+// Buy signal.
+buySignal = wtCross and wtCrossUp and wtOversold
+
+buySignalDiv = (wtShowDiv and wtBullDiv) or 
+               (wtShowDiv and wtBullDiv_add) or 
+               (stochShowDiv and stochBullDiv) or 
+               (rsiShowDiv and rsiBullDiv)
+    
+
+// Sell signal
+sellSignal = wtCross and wtCrossDown and wtOverbought
+             
+sellSignalDiv = (wtShowDiv and wtBearDiv) or 
+               (wtShowDiv and wtBearDiv_add) or
+               (stochShowDiv and stochBearDiv) or
+               (rsiShowDiv and rsiBearDiv)
+
+// BOLLINGER BANDS
+basis = sma(close, 20)
+dev = 2.0 * stdev(close, 20)
+upper = basis + dev
+lower = basis - dev
+bbr = (close - lower)/(upper - lower)
+
+// CCI
+ma = sma(hlc3, 20)
+cci = (hlc3 - ma) / (0.015 * dev(hlc3, 20))
+
+cBlueColor = color.rgb(58, 196, 246) 
+
+cFinalColor = buySignal or buySignalDiv ? cBlueColor : sellSignal or sellSignalDiv ? color.rgb(221, 226, 53) : cColor
+
+cFinalBorderColor = (stochK >= 80 and rsi >= 65 and bbr >= 0.76 and cci >= 100) ? color.rgb(190, 44, 44) : (stochK <= 20 and rsi <= 35 and bbr <= 0.18 and cci <= -100) ? color.rgb(41, 179, 112) : color.new(color.black, 100)
+
+plotcandle(open, high, low, close, "", cFinalColor, color.black, false, 10000, cFinalBorderColor, display.all)

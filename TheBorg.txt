@@ -1,0 +1,398 @@
+//@version=5
+indicator("TheBorg v1.1", overlay=true)
+
+// Inspired by this video: https://www.youtube.com/watch?v=iiXEbXlh3oc&t=308
+
+
+// MACHINE LEARNING
+
+import chhagansinghmeena/BankNifty_CSM/16 as CSM
+
+rationalQuadratic(_src, _lookback, _relativeWeight, startAtBar) =>
+    _currentWeight = 0.0 // Initialize the current weight variable
+    _cumulativeWeight = 0.0 // Initialize the cumulative weight variable
+    _size = array.size(array.from(_src)) // Get the size of the input series
+    for i = 0 to _size + startAtBar // Iterate over the input series
+        y = _src[i] // Get the value at index i
+        w = math.pow(1 + (math.pow(i, 2) / ((math.pow(_lookback, 2) * 2 * _relativeWeight))), -_relativeWeight) 
+        _currentWeight += y * w // Add the weighted value to the current weight
+        _cumulativeWeight += w // Add the weight to the cumulative weight
+    rationalQuad = _currentWeight / _cumulativeWeight // Calculate the rational quadratic value
+    rationalQuad
+
+get_Linear_interpolation(series float src, float oldMax , simple int lookback=100) =>
+    minVal = ta.lowest(src,lookback)
+    (src - minVal) / (oldMax - minVal) 
+
+n_rsi(series float src, simple int n1, simple int n2) =>
+    get_Linear_interpolation(ta.ema(ta.rsi(src, n1), n2),100)
+
+calc_kst(series float src) =>
+    lengthROC1 = 10, lengthROC2 = 15, lengthROC3 = 20, lengthROC4 = 30
+    roc1 = ta.change(src, lengthROC1), roc2 = ta.change(src, lengthROC2), roc3 = ta.change(src, lengthROC3), roc4 = ta.change(src, lengthROC4)
+    smoothed1 = ta.sma(roc1, 3), smoothed2 = ta.sma(roc2, 3), smoothed3 = ta.sma(roc3, 3), smoothed4 = ta.sma(roc4, 3)
+    kstLine = smoothed1 + 2 * smoothed2 + 3 * smoothed3 + 4 * smoothed4
+    rsiKST = ta.rsi(kstLine, 14)
+    rsiKST
+
+get_linear_transformation(series float src = close, float min, float max, int lookback = 200) => 
+    _historicMin = ta.highest(nz(src), lookback) 
+    _historicMax = ta.lowest(nz(src), lookback) 
+    linearValue = min + (max - min) * (src - _historicMin) / math.max(_historicMax - _historicMin, 10e-10)
+    linearValue
+
+sigmoid(series float src, int lookback = 20, float relativeWeight = 8, int startAtBar = 25) =>
+    _currentWeight = 0.0
+    _cumulativeWeight = 0.0
+    _size = ta.barssince(startAtBar) + 1
+    for i = _size to math.max(startAtBar, lookback + startAtBar) - 1
+        y = src[i]
+        w = math.pow(1 + (math.pow(i - startAtBar, 2) / (math.pow(lookback, 2) * 2 * relativeWeight)), -relativeWeight)
+        _currentWeight += y * w
+        _cumulativeWeight += w
+    sigmoidValue = _currentWeight / _cumulativeWeight
+    sigmoidValue
+
+macd(series float src = close) =>
+    [macdLine, signalLine, _] = ta.macd(src, 12, 26, 9)
+    ma = get_linear_transformation(macdLine, 14, 1)
+    sa = get_linear_transformation(signalLine, 14, 1)
+    macd_val = math.avg(ma, sa)
+    macd_val
+
+historyLookBack = 2000
+nearest_Probable_Distance = 9
+trenSelection = 'RationalQuad'
+cpmaLength = 9
+frmaLength = 14
+enableFilter = true
+isRational = true
+isRationalSigma = true
+methodSelection = 'Cosine similarity'
+start = timestamp('01 Jan 2023 03:30 +0000')
+finish = timestamp('1 Jan 2099 15:30 +0000')
+
+CPMA = CSM.CSM_CPMA(length = cpmaLength)
+FRMA = CSM.frama_Calculation(close,length = frmaLength)
+
+type FeatureArrays
+    array<float> f1
+    array<float> f2
+    array<float> f3
+    array<float> f4
+    array<float> f5
+    array<float> f6
+
+type FeatureSeries
+    float f1
+    float f2
+    float f3
+    float f4
+    float f5
+    float f6
+
+series_from(feature_string, _close, _high, _low, _hlc3, f_paramA, f_paramB) =>
+    switch feature_string
+        "RSI" => n_rsi(_close, f_paramA, f_paramB)    
+        "KST" => get_Linear_interpolation(calc_kst(src = _close),100)
+        "CPMA"=> get_linear_transformation(CPMA,14,1)
+        "VWAP"=> get_linear_transformation(ta.vwap(_close),14,1)
+        "FRAMA"=> get_linear_transformation(FRMA,14,1) 
+        "MACD"=> macd(_close)     
+        
+featureSeries = 
+ FeatureSeries.new(
+   series_from("CPMA", close, high, low, hlc3, 0, 0), // f1
+   series_from("RSI", close, high, low, hlc3, 14, 1), // f2
+   series_from("VWAP", close, high, low, hlc3, 0, 0), // f3
+   series_from("KST", close, high, low, hlc3, 0, 0),  // f4
+   series_from("FRAMA", close, high, low, hlc3, 0, 0), // f5
+   series_from("MACD", close, high, low, hlc3, 0, 0)  // f6
+ )
+
+var f1Array = array.new_float()
+var f2Array = array.new_float()
+var f3Array = array.new_float()
+var f4Array = array.new_float()
+var f5Array = array.new_float()
+var f6Array = array.new_float()
+
+array.push(f1Array, featureSeries.f1)
+array.push(f2Array, featureSeries.f2)
+array.push(f3Array, featureSeries.f3)
+array.push(f4Array, featureSeries.f4)
+array.push(f5Array, featureSeries.f5)
+array.push(f6Array, featureSeries.f6)
+
+
+featureArrays = 
+ FeatureArrays.new(
+  f1Array, // f1
+  f2Array, // f2
+  f3Array, // f3
+  f4Array, // f4
+  f5Array,  // f5
+  f6Array  // f6
+ )
+
+rqkValue = isRationalSigma ? sigmoid(close) : rationalQuadratic(close, 8, 0.5, 25)
+get_euclidean_distance(int i, FeatureSeries featureSeries, FeatureArrays featureArrays) =>
+    distance = 0.0
+    distance += math.pow(featureSeries.f1 - array.get(featureArrays.f1, i), 2)
+    distance += math.pow(featureSeries.f2 - array.get(featureArrays.f2, i), 2)
+    distance += math.pow(featureSeries.f4 - array.get(featureArrays.f4, i), 2)
+    distance += math.pow(featureSeries.f5 - array.get(featureArrays.f5, i), 2)
+    distance += math.pow(featureSeries.f6 - array.get(featureArrays.f6, i), 2)
+    
+    if str.tonumber(timeframe.period) <= 20
+        distance += math.pow(featureSeries.f3 - array.get(featureArrays.f3, i), 2)
+
+    math.sqrt(distance)
+
+get_lorentzian_distance(int i, FeatureSeries featureSeries, FeatureArrays featureArrays) =>
+    distance = 0.0
+    distance += math.log(1+math.abs(featureSeries.f1 - array.get(featureArrays.f1, i)))
+    distance += math.log(1+math.abs(featureSeries.f2 - array.get(featureArrays.f2, i)))
+    distance += math.log(1+math.abs(featureSeries.f4 - array.get(featureArrays.f4, i)))
+    distance += math.log(1+math.abs(featureSeries.f5 - array.get(featureArrays.f5, i)))
+    distance += math.log(1+math.abs(featureSeries.f6 - array.get(featureArrays.f6, i)))
+    
+    if str.tonumber(timeframe.period) <= 20
+        distance += math.log(1+math.abs(featureSeries.f3 - array.get(featureArrays.f3, i)))
+
+    math.sqrt(distance)
+
+get_cosine_similarity(i, featureSeries, featureArrays) =>
+    dotProduct = 0.0
+    magnitudeSeries = 0.0
+    magnitudeArray = 0.0
+
+    dotProduct += featureSeries.f1 * array.get(featureArrays.f1, i)
+    dotProduct += featureSeries.f2 * array.get(featureArrays.f2, i)
+    dotProduct += featureSeries.f4 * array.get(featureArrays.f4, i)
+    dotProduct += featureSeries.f5 * array.get(featureArrays.f5, i)
+    dotProduct += featureSeries.f6 * array.get(featureArrays.f6, i)
+
+    magnitudeSeries +=  math.pow(featureSeries.f1, 2)
+    magnitudeSeries +=  math.pow(featureSeries.f2, 2)
+    magnitudeSeries +=  math.pow(featureSeries.f4, 2)
+    magnitudeSeries +=  math.pow(featureSeries.f5, 2)
+    magnitudeSeries +=  math.pow(featureSeries.f6, 2)
+
+    magnitudeArray += math.pow(array.get(featureArrays.f1, i), 2)
+    magnitudeArray += math.pow(array.get(featureArrays.f2, i), 2)
+    magnitudeArray += math.pow(array.get(featureArrays.f4, i), 2)
+    magnitudeArray += math.pow(array.get(featureArrays.f5, i), 2)
+    magnitudeArray += math.pow(array.get(featureArrays.f6, i), 2)
+
+    if str.tonumber(timeframe.period) <= 20
+        dotProduct += featureSeries.f3 * array.get(featureArrays.f3, i)
+        magnitudeSeries +=  math.pow(featureSeries.f3, 2)
+        magnitudeArray += math.pow(array.get(featureArrays.f3, i), 2)
+
+    magnitudeSeries := math.sqrt(magnitudeSeries)
+    magnitudeArray := math.sqrt(magnitudeArray)
+
+    if magnitudeSeries == 0.0 or magnitudeArray == 0.0
+        0.0
+    else
+        dotProduct / (magnitudeSeries * magnitudeArray)
+
+maxBarsBackIndex = last_bar_index >= historyLookBack ? last_bar_index - historyLookBack : 0
+
+src = close
+y_train_series = src[4] < src[0] ? -1 : src[4] > src[0] ? 1 : 0
+var y_train_array = array.new_int(0)
+
+var predictions = array.new_float(0)
+var prediction = 0.
+var signal = 0
+var distances = array.new_float(0)
+
+array.push(y_train_array, y_train_series)
+
+lastDistance = -1.0
+size = math.min(historyLookBack-1, array.size(y_train_array)-1)
+sizeLoop = math.min(historyLookBack-1, size)
+
+get_ML_Distance(i) =>
+    switch
+        methodSelection == 'Lorentzian' => get_lorentzian_distance(i, featureSeries, featureArrays)
+        methodSelection == 'Euclidean' => get_euclidean_distance(i, featureSeries, featureArrays)
+        methodSelection == 'Cosine similarity' => get_cosine_similarity(i, featureSeries, featureArrays)
+
+if bar_index >= maxBarsBackIndex
+    for i = 0 to sizeLoop
+        d = get_ML_Distance(i)
+        if d >= lastDistance and i % 4
+            lastDistance := d
+            array.push(distances, d)
+            array.push(predictions, math.round(array.get(y_train_array, i)))
+            if array.size(predictions) > nearest_Probable_Distance
+                lastDistance := array.get(distances, math.round(nearest_Probable_Distance * 3 / 4))
+                array.shift(distances)
+                array.shift(predictions)
+
+    prediction := array.sum(predictions)
+
+getTrend() =>
+    switch
+        trenSelection == 'CPMA' => isRational ? isRationalSigma ? sigmoid(CPMA) : rationalQuadratic(CPMA, 8, 0.5, 25) : CPMA
+        trenSelection == 'FRMA' => isRational ? isRationalSigma ? sigmoid(FRMA) : rationalQuadratic(FRMA, 8, 0.5, 25) : FRMA
+        trenSelection == 'RationalQuad' => rqkValue
+
+trend = getTrend()
+
+bool isBullishSmooth = close >= trend
+bool isBearishSmooth = close <= trend
+
+[avgrationalQuad, plotColor] = CSM.getGradientColor(isFirstbar = barstate.isfirst, src = trend, length = trenSelection == 'CPMA' ? cpmaLength : trenSelection == 'FRMA' ? frmaLength : 14, isSmoothed = false)
+// plot(avgrationalQuad, color=plotColor, linewidth=2, title="Trend")
+
+signal := prediction > 0 and (enableFilter ? isBullishSmooth : true) ? 1 : prediction < 0 and (enableFilter ? isBearishSmooth : true) ? -1 : nz(signal[1])
+isDifferentSignalType = ta.change(signal)
+isEarlySignalFlip = ta.change(signal) and (ta.change(signal[1]) or ta.change(signal[2]) or ta.change(signal[3]))
+isBuySignal = signal == 1
+isSellSignal = signal == -1
+// isNewBuySignal = isBuySignal and isDifferentSignalType
+// isNewSellSignal = isSellSignal and isDifferentSignalType
+
+
+// RedK Trader Pressure Index (TPX) V 5.0
+
+lengthRed  = 10
+smoothRed  = 3
+clevel  = 30
+pre_s   = false
+pre_sv  = 3
+R           = ta.highest(2) - ta.lowest(2)
+hiup        = math.max(ta.change(high), 0)
+loup        = math.max(ta.change(low), 0)
+bulls       = math.min((hiup + loup) / R, 1) * 100  //prevent big gaps causing a % over 100%
+avgbull     = ta.wma(nz(bulls), lengthRed)
+avgbulls    = pre_s ? ta.wma(avgbull, pre_sv) : avgbull
+hidn        = math.min(ta.change(high), 0)
+lodn        = math.min(ta.change(low), 0)
+bears       = math.max((hidn + lodn) / R, -1) * -100  //convert to positive value
+avgbear     = ta.wma(nz(bears), lengthRed)
+avgbears    = pre_s ? ta.wma(avgbear, pre_sv) : avgbear
+net         = avgbulls - avgbears
+TPX         = ta.wma(net, smoothRed)  // final smoothing
+
+TPXBullish  = TPX > 0
+
+// hline(0, color=col_level, linestyle=hline.style_solid, linewidth=1, editable=false)
+// hline(clevel, title='Control Level', color=col_level, linestyle=hline.style_dotted, linewidth=2)
+// plot(avgbulls,  title='Bull Pressure',  color=col_bulls, style=plot.style_area,     linewidth=3)
+// plot(avgbears,  title='Bear Pressure',  color=col_bears, style=plot.style_area,     linewidth=3)
+// plot(TPX,       title='Net Pressure',   color=TPXBullish ? col_TPXup : col_TPXdn,   linewidth=3)
+
+
+// Super 6x: RSI, MACD, Stoch, Loxxer, CCI, & Velocity [Loxx]
+
+_pulldat(src, res, rep)=>
+    out = request.security(syminfo.tickerid, res, src[rep ? 0 : barstate.isrealtime ? 1 : 0])[rep ? 0 : barstate.isrealtime ? 0 : 1]
+    out
+    
+_imom(src, length, powSlow, powFast)=>
+    suma = 0., sumwa=0.
+    sumb = 0., sumwb=0.
+    
+    for k = 0 to length 
+        weight = length-k
+        suma  += nz(src[k]) * math.pow(weight, powSlow)
+        sumb  += nz(src[k]) * math.pow(weight, powFast)
+        sumwa += math.pow(weight, powSlow)
+        sumwb += math.pow(weight, powFast)
+    out = (sumb/sumwb-suma/sumwa)
+    out
+
+_dm(per, res, rep)=>
+    highin =  _pulldat(high, res, rep)
+    lowin = _pulldat(low, res, rep)
+    demax = math.max(ta.change(highin), 0)
+    demin = -math.min(ta.change(lowin), 0)
+    maxma= ta.sma(demax, per)
+    minma = ta.sma(demin, per)
+    loxxer = 100 * maxma / (maxma + minma)
+    loxxer
+
+loxxper = 10
+loxxres = ""
+loxxrep = true
+
+macdsrcin = close
+fmacd = 11
+smacd = 26
+macdres = ""
+macdrep = false
+
+rsisrcin = close
+rsiper = 14
+rsires = ""
+rsirep = false
+
+velsrcin = close
+velper = 21
+velfast = 1
+velslow = 2
+velres = ""
+velrep = false
+
+ccisrcin = close
+cciper = 14
+ccires = ""
+ccirep = false
+
+periodK = 14
+smoothK = 1
+periodD = 3
+stochres = ""
+stochrep = false
+
+macdsrc = _pulldat(macdsrcin, macdres, macdrep) 
+rsisrc =  _pulldat(rsisrcin, rsires, rsirep)
+velsrc =  _pulldat(velsrcin, velres, velrep) 
+ccisrc = _pulldat(ccisrcin, ccires, ccirep) 
+stochhi =_pulldat(high, stochres, stochrep)   
+stochlo = _pulldat(low, stochres, stochrep)    
+stochclose = _pulldat(close, stochres, stochrep)
+
+dmark = _dm(loxxper, loxxres, loxxrep)
+[macd, _, _] = ta.macd(macdsrc, fmacd, smacd, 9)
+rsi = ta.rsi(rsisrc, rsiper)
+stoch = ta.sma(ta.stoch(stochclose, stochhi, stochlo, periodK), smoothK)
+cci = ta.cci(ccisrc, cciper)
+vel = _imom(velsrc, velper, velfast, velslow)
+
+// plotshape(1, color = dmark > 50 ? greencolor : redcolor, style = shape.circle, location = location.absolute)
+// plotshape(2, color = macd > 0 ? greencolor : redcolor, style = shape.circle, location = location.absolute)
+// plotshape(3, color = rsi > 50 ? greencolor : redcolor, style = shape.circle, location = location.absolute)
+// plotshape(4, color = stoch > 50 ? greencolor : redcolor, style = shape.circle, location = location.absolute)
+// plotshape(5, color = cci > 0 ? greencolor : redcolor, style = shape.circle, location = location.absolute)
+// plotshape(6, color = vel > 0 ? greencolor : redcolor, style = shape.circle, location = location.absolute)
+
+colorout = 
+     dmark > 50 and macd > 0 and rsi > 50 and stoch > 50 and cci > 0 and vel > 0 ? color.green : 
+     dmark < 50 and macd < 0 and rsi < 50 and stoch < 50 and cci < 0 and vel < 0  ? color.red : 
+     color.gray
+
+// plotshape(colorout == redcolor ? 7 : na, style = shape.triangledown, location = location.absolute, size = size.auto, color = color.fuchsia)
+// plotshape(colorout == greencolor ? 0 : na, style = shape.triangleup, location = location.absolute, size = size.auto, color = color.yellow)
+
+// FINALE
+
+upwards = isBuySignal and colorout == color.green and avgbulls > 29
+downwards = isSellSignal and colorout == color.red and avgbears > 29
+
+showUp = upwards and not upwards[1] 
+showDown = downwards and not downwards[1] 
+
+plotshape(showUp ? low : na, 'Buy', shape.labelup, location.belowbar, color=color.green, size=size.small, offset=0)  // Plot a 
+plotshape(showDown ? high : na, 'Sell', shape.labeldown, location.abovebar, color=color.red, size=size.small, offset=0)  // Plot a
+
+alertcondition(showUp, title='The Borg BUY', message='The Borg BUY')
+alertcondition(showDown, title='The Borg SELL', message='The Borg SELL')
+
+
+

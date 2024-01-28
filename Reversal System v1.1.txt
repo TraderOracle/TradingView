@@ -1,0 +1,124 @@
+//@version=4
+
+// Future ideas:
+// Declining stairs
+
+// Version 1.1
+// - Added an additional volume pattern
+// - Adjusted RSI logic so it works better
+// - Added candlestick detection
+// - Removed Keltner (redundant with RSI)
+// - Added option to turn off certain patterns
+
+var cColor = color.aqua
+study(title="Reversal Volume Patterns", overlay=true, shorttitle="Reversal Vol Patterns")
+
+show1Input = input(true, "Show Pattern #1", group="Basic Settings", tooltip = "small red bar, larger red bar, small green bar")
+show2Input = input(true, "Show Pattern #2", group="Basic Settings", tooltip = "small red bar, larger red bar, even LARGER red bar, small green bar")
+show3Input = input(true, "Show Pattern #3", group="Basic Settings", tooltip = "4 bars of the same color, then a different color bar that's larger than all 4 previous")
+show4Input = input(true, "Show Pattern #4", group="Basic Settings", tooltip = "candlestick patterns")
+rsiFilter = input(true, title="Filter using RSI", tooltip = "Only show if RSI is leaning towards overbought or oversold", group="Basic Settings")
+
+rsiOver = input(56, title="RSI Overbought Value", group="RSI Settings", tooltip = "Higher values filter out more flags")
+rsiUnder = input(44, title="RSI Oversold Value", group="RSI Settings", tooltip = "Lower values filter out more flags")
+rsiLengthInput = input(14, minval=1, title="RSI Length", group="RSI Settings")
+rsiSourceInput = input(close, "Source", group="RSI Settings")
+
+is0Green = close > open
+is1Green = close[1] > open[1]
+is2Green = close[2] > open[2]
+is3Green = close[3] > open[3]
+is4Green = close[4] > open[4]
+// I'm lazy with the syntax later, sue me
+is0Red = not is0Green
+is1Red = not is1Green
+is2Red = not is2Green
+is3Red = not is3Green
+is4Red = not is4Green
+
+// Pattern #1 - small red bar, larger red bar, small green bar
+up1 = (volume[1] > volume[2] and volume < volume[1] and is0Green and is1Red and is2Red)
+down1 = (volume[1] > volume[2] and volume < volume[1] and is0Red and is1Green and is2Green)
+
+// Pattern #2 - small red bar, larger red bar, even LARGER red bar, small green bar
+up2 = (volume[2] > volume[3] and volume[3] > volume[4] and volume[1] < volume[2] and volume < volume[2] and is0Green and is1Red and is2Red and is3Red and is4Red)
+down2 = (volume[2] > volume[3] and volume[3] > volume[4] and volume[1] < volume[2] and volume < volume[2] and is0Red and is1Green and is2Green and is3Green and is4Green)
+
+// Pattern #3 - 4 bars of the same color, then a different color bar that's larger than all 4 previous
+up3 = (is1Red and is2Red and is3Red and is4Red and is0Green and volume > volume[1] and volume > volume[2] and volume > volume[3] and volume > volume[4])
+down3 = (is1Green and is2Green and is3Green and is4Green and is0Red and volume > volume[1] and volume > volume[2] and volume > volume[3] and volume > volume[4])
+
+// snippet from Candlestick Reversal System by LonesomeTheDove
+
+pivotlbar = 5
+highleftempty = pivothigh(pivotlbar, 0)
+lowleftempty = pivotlow(pivotlbar, 0)
+wick_multiplier = 10
+body_percentage = 1
+
+O = open
+C = close
+H = high
+L = low
+
+Wlongsignal = (C > O) and (O - L) >= ((C - O) * wick_multiplier) and (H - C) <= ((H - L) * body_percentage) or
+   (C < O) and (C - L) >= ((O - C) * wick_multiplier) and (H - C) <= ((H - L) * body_percentage) or
+   (C == O and C != H) and (H - L) >= ((H - C) * wick_multiplier) and (H - C) <= ((H - L) * body_percentage) or
+   (O == H and C == H) and (H - L) >= sma((H - L), 50)
+
+Wshortsignal = (C < O) and (H - O) >= ((O - C) * wick_multiplier) and (C - L) <= ((H - L) * body_percentage) or
+   (C > O) and (H - C) >= ((C - O) * wick_multiplier) and (C - L) <= ((H -L) * body_percentage) or
+   (C == O and C != L) and (H - L) >= ((C - L) * wick_multiplier) and (C - L) <= ((H - L) * body_percentage) or
+   (O == L and C == L) and (H - L) >= sma((H - L), 50)
+
+// Candlestick pattern is technically Pattern #4
+up4 = lowleftempty and Wlongsignal
+down4 = highleftempty and Wshortsignal
+
+upsie1 = rma(max(change(rsiSourceInput), 0), rsiLengthInput)
+downsie1 = rma(-min(change(rsiSourceInput), 0), rsiLengthInput)
+rsi = downsie1 == 0 ? 100 : upsie1 == 0 ? 0 : 100 - (100 / (1 + upsie1 / downsie1))
+
+KeltnerCross = false
+
+// Debugging purposes
+if (up1 or down1)
+    cColor := color.fuchsia
+if (up2 or down2)
+    cColor := color.purple
+if (up3 or down3)
+    cColor := color.blue
+if (up4 or down4)
+    cColor := color.yellow
+
+if (not show1Input)
+    up1 := false
+    down1 := false
+if (not show2Input)
+    up2 := false
+    down2 := false
+if (not show3Input)
+    up3 := false
+    down3 := false
+if (not show4Input)
+    up4 := false
+    down4 := false
+
+up = (up1 or up2 or up3 or up4)
+down = (down1 or down2 or down3 or down4)
+
+// eliminate dupes
+if (up[1])
+    up := false
+if (down[1])
+    down := false
+
+if (rsiFilter and rsi < rsiOver)
+    down := false
+if (rsiFilter and rsi > rsiUnder)
+    up := false
+
+plotshape(down, title="Buy Signal", style=shape.flag, location=location.abovebar, color=color.blue, size=size.tiny)
+plotshape(up, title="Buy Signal", style=shape.flag, location=location.belowbar, color=color.blue, size=size.tiny)
+
+

@@ -1,0 +1,818 @@
+//@version=4
+study(title="TraderOracle v1.7.8", overlay=true, shorttitle="TraderOracle v1.7.8")
+
+var bColor = color.blue
+var cColor = color.aqua
+var crossoverBear = false
+var crossoverBull = false
+var isLong = false
+var isShort = false
+
+bShowSuper = input(true, title="Show Triple SuperTrend", group="Show/Hide Settings", tooltip = "Shows a BUY/SELL flag when 2 out of 3 supertrends are active")
+bShowRelax = input(false, title="Show Squeeze Momentum Relaxer", group="Show/Hide Settings", tooltip = "Shows a yellow or lime dot when momentum is changing")
+bShowBullRush = input(false, title="Show BullRush", group="Show/Hide Settings", tooltip="9/21/50 EMA calculation")
+bShowHalfTrend = input(false, title="Show HalfTrend", group="Show/Hide Settings")
+bShowCloud = input(false, title="Show Ichimoku Cloud", group="Show/Hide Settings")
+bShowTramp = input(false, title="Show Trampoline", group="Show/Hide Settings")
+bShowOrderBlocks = input(false, title="Show Order Blocks", group="Show/Hide Settings", tooltip = "Order blocks are areas where price is likely to come back to")
+bShowPivotPoints = input(false, title="Show Pivot Points", group="Show/Hide Settings", tooltip = "Pivot points are MANDATORY.  Price bounces off these so much it is insane")
+bShowMACDPsar = input(false, title="Show MACD/PSAR", group="Show/Hide Settings", tooltip = "MACD/PSAR is the greatest strategy ever made")
+bMACDSuperTrend = input(false, title="Combine MACD/PSAR and Triple Supertrend", group="Show/Hide Settings", tooltip = "Combine both strategies into a single buy/sell indicator")
+bShowHammer = input(false, title="Show Hammer and Hanging Man", group="Show/Hide Settings", tooltip="Show candlestick patterns with reversal leaning")
+bShowEMABands = input(false, title="Show EMA Bands", group="Show/Hide Settings")
+bShowMacTastic = input(false, title="Show MacTastic", group="Show/Hide Settings")
+
+bShow9 = input(false, title="Show 9 EMA", group="Show/Hide Settings")
+bShow21 = input(false, title="Show 21 EMA", group="Show/Hide Settings")
+bShow50 = input(false, title="Show 50 EMA", group="Show/Hide Settings")
+bShow200 = input(false, title="Show 200 EMA", group="Show/Hide Settings")
+bShow400 = input(false, title="Show 400 EMA", group="Show/Hide Settings")
+bShowVWAP = input(false, title="Show VWAP", group="Show/Hide Settings")
+
+fastMA = input(title="Fast moving average", type=input.integer, defval=12, minval=7, group="MACD / PSAR")
+slowMA = input(title="Slow moving average", type=input.integer, defval=26, minval=7, group="MACD / PSAR")
+psarStart = input(title="PSAR Start", type=input.float, step=0.001, defval=0.02, group="MACD / PSAR")
+psarIncrement = input(title="PSAR Increment", type=input.float, step=0.001, defval=0.02, group="MACD / PSAR")
+psarMaximum = input(title="PSAR Maximum", type=input.float, step=0.01, defval=0.2, group="MACD / PSAR")
+
+adxThreshold = input(0, title="ADX Threshold", group="Basic Settings", tooltip="ADX value that must be reached in order for an indicator to display.  Larger numbers will filter out more noise")
+filter200 = input(false, title="Filter MACD/PSAR by 200 EMA", group="Basic Settings", tooltip="Use 200 EMA to determine trend direction.  Only show SELL below it, only show BUY above it")
+filter850 = input(false, title="Filter MACD/PSAR by 8/50 EMA", group="Basic Settings", tooltip="Use 8/50 inverse combo to show BUY/SELL.  If 8 is above 50, then we're too high up and need to sell, thus only show SELL during that, and vice versa for BUY.  NOTE: This is INVERSE")
+
+rsiOver = input(56, title="RSI Overbought Value", group="RSI Settings", tooltip = "Higher values filter out more flags")
+rsiUnder = input(44, title="RSI Oversold Value", group="RSI Settings", tooltip = "Lower values filter out more flags")
+
+ignoreDots = input(false, title="Ignore dots on Squeeze Indicator", group="Relaxing Settings", tooltip="Any squeeze bar is counted, no matter if it has a white dot or not")
+sqTolerance = input(0, title="Squeeze Tolerance (lower = more sensitive)", group="Relaxing Settings", tooltip="How many bars to look back on the squeeze indicator")
+adxSqueeze = input(19, title="ADX Threshold for TTM Squeeze", group="Relaxing Settings", tooltip="Anything over 19 filters out low volume periods. Set to 11 as a default, feel free to increase to get less noise")
+adxSuper = input(13, title="ADX Threshold for Triple Supertrend", group="Relaxing Settings", tooltip="Anything over 19 filters out low volume periods. Set to 11 as a default, feel free to increase to get less noise")
+
+length2 = input(30, minval=1, group="Bollinger Bands")
+src = input(close, title="Source", group="Bollinger Bands")
+mult = input(2.0, minval=0.001, maxval=50, title="StdDev", group="Bollinger Bands")
+offset = input(0, "Offset", minval = -500, maxval = 500, group="Bollinger Bands")
+
+emaBandLength = input(32, title="EMA Band Length", minval=1, group="EMA Bands")
+tripEMALength = input(32, minval=1, title = "Triple EMA Length", group="EMA Bands")
+atrlen = input(500, minval=1, title = "ATR Length", group="EMA Bands")
+mult1 = input(3.2, minval=1, title = "Deviation multiplier 1", group="EMA Bands")
+mult2 = input(6.4, minval=1, title = "Deviation multiplier 2", group="EMA Bands")
+mult3 = input(9.5, minval=1, title = "Deviation multiplier 3", group="EMA Bands")
+
+iBBThreshold = input(0.0015, minval=0.0, title="Bollinger Lower Threshold", tooltip="0.003 for daily, 0.0015 for 30 min candles", group="General Settings")
+RSIThreshold = input(25, minval=1, title="RSI Lower Threshold", tooltip="Normally 25", group="General Settings")
+RSIDown = input(72, minval=1, title="RSI Upper Threshold", tooltip="Normally 75", group="General Settings")
+
+rsiLengthInput = input(14, minval=1, title="RSI Length", group="RSI Settings")
+rsiSourceInput = input(close, "Source", group="RSI Settings")
+lengthBB = input(20, minval=1, group="Bollinger Bands")
+srcBB = input(close, title="Source", group="Bollinger Bands")
+multBB = input(2.0, minval=0.001, maxval=50, title="StdDev", group="Bollinger Bands")
+offsetBB = input(0, "Offset", minval = -500, maxval = 500, group="Bollinger Bands")
+
+periodK = input(14, title="%K Length", minval=1, group="Stochastic")
+smoothK = input(1, title="%K Smoothing", minval=1, group="Stochastic")
+
+isRed = close < open
+isGreen = close > open
+
+// TRAMPOLINE
+basisBB = sma(srcBB, lengthBB)
+devBB = multBB * stdev(srcBB, lengthBB)
+upperBB1 = basisBB + devBB
+lowerBB1 = basisBB - devBB
+downBB = low < lowerBB1 or high < lowerBB1
+upBB = low > upperBB1 or high > upperBB1
+bbw = (upperBB1 - lowerBB1) / basisBB
+
+// RSI
+upTR = rma(max(change(rsiSourceInput), 0), rsiLengthInput)
+downTR = rma(-min(change(rsiSourceInput), 0), rsiLengthInput)
+rsiM = downTR == 0 ? 100 : upTR == 0 ? 0 : 100 - (100 / (1 + upTR / downTR))
+
+back1 = isRed[1] and rsiM[1] <= RSIThreshold and close[1] < lowerBB1[1] and bbw[1] > iBBThreshold
+back2 = isRed[2] and rsiM[2] <= RSIThreshold and close[2] < lowerBB1[2] and bbw[2] > iBBThreshold
+back3 = isRed[3] and rsiM[3] <= RSIThreshold and close[3] < lowerBB1[3] and bbw[3] > iBBThreshold
+back4 = isRed[4] and rsiM[4] <= RSIThreshold and close[4] < lowerBB1[4] and bbw[4] > iBBThreshold
+back5 = isRed[5] and rsiM[5] <= RSIThreshold and close[5] < lowerBB1[5] and bbw[5] > iBBThreshold
+
+for1 = isGreen[1] and rsiM[1] >= RSIDown and close[1] > upperBB1[1] and bbw[1] > iBBThreshold
+for2 = isGreen[2] and rsiM[2] >= RSIDown and close[2] > upperBB1[2] and bbw[2] > iBBThreshold
+for3 = isGreen[3] and rsiM[3] >= RSIDown and close[3] > upperBB1[3] and bbw[3] > iBBThreshold
+for4 = isGreen[4] and rsiM[4] >= RSIDown and close[4] > upperBB1[4] and bbw[4] > iBBThreshold
+for5 = isGreen[5] and rsiM[5] >= RSIDown and close[5] > upperBB1[5] and bbw[5] > iBBThreshold
+
+weGoUp = isGreen and (back1 or back2 or back3 or back4 or back5) and (high > high[1])
+upThrust = weGoUp and not weGoUp[1] and not weGoUp[2] and not weGoUp[3] and not weGoUp[4]
+weGoDown = isRed and (for1 or for2 or for3 or for4 or for5) and (low < low[1])
+downThrust = weGoDown and not weGoDown[1] and not weGoDown[2] and not weGoDown[3] and not weGoDown[4]
+
+plotshape(bShowTramp and upThrust ? hl2 : na, title="Tramp", text="Tramp", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.rgb(46, 173, 84), textcolor=color.white)
+plotshape(bShowTramp and downThrust ? hl2 : na, title="Tramp", text="Tramp", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.rgb(173, 46, 69), textcolor=color.white)
+
+
+// ICHIMOKU CLOUD
+conversionPeriods = input(9, minval=1, title="Conversion Line Length", group="Ichimoku Cloud")
+basePeriods = input(26, minval=1, title="Base Line Length", group="Ichimoku Cloud")
+laggingSpan2Periods = input(52, minval=1, title="Leading Span B Length", group="Ichimoku Cloud")
+displacement = input(26, minval=1, title="Lagging Span", group="Ichimoku Cloud")
+bShowCloudDetails = input(false, title="Show Cloud Details", group="Ichimoku Cloud")
+
+sStrategy = input(title="Choose Your Strategy", defval="Lines cross above/below CURRENT cloud", options=["Lines cross above/below CURRENT cloud","Lines cross above/below FUTURE cloud","Conversion crosses base ONLY","Price crosses FUTURE cloud"], group="Ichimoku Cloud")  
+
+donchian(len) => avg(lowest(len), highest(len))
+
+conversionLine = donchian(conversionPeriods)
+baseLine = donchian(basePeriods)
+leadLine1 = avg(conversionLine, baseLine)
+leadLine2 = donchian(laggingSpan2Periods)
+
+bGreenCloudCurrent = leadLine1[displacement] > leadLine2[displacement]
+bRedCloudCurrent = not bGreenCloudCurrent
+bGreenCloudFuture = leadLine1 > leadLine2
+bRedCloudFuture = not bGreenCloudFuture
+
+p1C = plot(bShowCloudDetails ? leadLine1 : na, offset = displacement - 1, color=color.new(color.black, 100), title="Leading Span A")
+p2C = plot(bShowCloudDetails ? leadLine2 : na, offset = displacement - 1, color=color.new(color.black, 100), title="Leading Span B")
+fill(p1C, p2C, color = leadLine1 > leadLine2 ? color.rgb(67, 160, 71, 60) : color.rgb(244, 67, 54, 60))
+
+var upwardsC = false
+var downwardsC = false
+
+if sStrategy == "Lines cross above/below CURRENT cloud"
+    upwardsC := bGreenCloudCurrent and conversionLine > baseLine and close > leadLine1[displacement] and close > leadLine2[displacement]
+    downwardsC := bRedCloudCurrent and conversionLine < baseLine and close < leadLine1[displacement] and close < leadLine2[displacement]
+
+if sStrategy == "Lines cross above/below FUTURE cloud"
+    upwardsC := bGreenCloudFuture and conversionLine > baseLine and close > leadLine1 and close > leadLine2
+    downwardsC := bRedCloudFuture and conversionLine < baseLine and close < leadLine1 and close < leadLine2
+
+if sStrategy == "Price crosses FUTURE cloud"
+    upwardsC := bGreenCloudFuture and close > leadLine2 and (close > leadLine1 or close < leadLine2) and (close < leadLine1 or close > leadLine2)  
+    downwardsC := bRedCloudFuture and close < leadLine1 and (close < leadLine1 or close > leadLine2) and (close > leadLine1 or close < leadLine2) 
+
+if sStrategy == "Conversion crosses base ONLY"
+    upwardsC := conversionLine > baseLine
+    downwardsC := conversionLine < baseLine
+
+showUpC = upwardsC and not upwardsC[1] and not upwardsC[2] and not upwardsC[3] and not upwardsC[4] and not upwardsC[5] and not upwardsC[6] and not upwardsC[7]
+showDownC = downwardsC and not downwardsC[1] and not downwardsC[2] and not downwardsC[3] and not downwardsC[4] and not downwardsC[5] and not downwardsC[6] and not downwardsC[7]
+
+plotshape(bShowCloud and showUpC ? hl2 : na, title="Cloud", text="Cloud", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.rgb(10, 118, 14), textcolor=color.white)
+plotshape(bShowCloud and showDownC ? hl2 : na, title="Cloud", text="Cloud", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.rgb(125, 6, 6), textcolor=color.white)
+
+
+ema9 = ema(close, 9)
+plot(bShow9 ? ema9 : na, "9 EMA", color=color.rgb(52, 145, 43), linewidth=2)
+ema21 = ema(close, 21)
+plot(bShow21 ? ema21 : na, "21 EMA", color=color.rgb(128, 34, 34), linewidth=2)
+ema50 = ema(close, 50)
+plot(bShow50 ? ema50 : na, "50 EMA", color=color.rgb(161, 161, 161), linewidth=2)
+e1 = ema(close, 200)
+plot(bShow200 ? e1 : na, "200 EMA", color=color.rgb(161, 161, 161), linewidth=2)
+ema400 = ema(close, 400)
+plot(bShow400 ? ema400 : na, "400 EMA", color=color.rgb(207, 218, 56), linewidth=3)
+plot(bShowVWAP ? vwap(close) : na, "VWAP", color=color.blue, linewidth=3)
+
+
+// BULL RUSH
+upwardsBR = (ema(close, 9) > ema(close, 21) and close > ema(close, 50) and open > ema(close, 50))
+downwardsBR = (ema(close, 9) < ema(close, 21) and close < ema(close, 50) and open < ema(close, 50))
+showUpBR = upwardsBR and not upwardsBR[1]
+showDownBR = downwardsBR and not downwardsBR[1]
+plotshape(showUpBR and bShowBullRush ? hl2 : na, title="Buy", text="BR", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.rgb(59, 72, 210), textcolor=color.white)
+plotshape(showDownBR and bShowBullRush ? hl2 : na, title="Sell", text="BR", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.rgb(216, 85, 233), textcolor=color.white)
+
+// EMA High/Low combo
+ema32H = ema(high, tripEMALength)
+ema32M = ema(close, tripEMALength)
+ema32L = ema(low, tripEMALength)
+plot(bShowEMABands ? ema32H : na, "High EMA Band", color=color.blue)
+plot(bShowEMABands ? ema32M : na, "Mid EMA Band", color=color.blue)
+plot(bShowEMABands ? ema32L : na, "Low EMA Band", color=color.blue)
+
+// EMA Bands
+Oma = ema(close, emaBandLength)
+Orange =  tr
+Orangema = ema(Orange, atrlen)
+up1 = Oma + Orangema * mult1
+up2 = Oma + Orangema * mult2
+up3 = Oma + Orangema * mult3
+dn1 = Oma - Orangema * mult1
+dn2 = Oma - Orangema * mult2
+dn3 = Oma - Orangema * mult3
+plot(bShowEMABands ? Oma : na, "Mid EMA Band", color = color.black)
+u4 = plot(bShowEMABands ? up1 : na, "Upper1 EMA Band", color = color.lime)
+u8 = plot(bShowEMABands ? up2 : na, "Upper2 EMA Band", color = color.orange)
+u12 = plot(bShowEMABands ? up3 : na, "Upper3 EMA Band", color = color.maroon)
+d4 = plot(bShowEMABands ? dn1 : na, "Lower1 EMA Band", color = color.lime)
+d8 = plot(bShowEMABands ? dn2 : na, "Lower2 EMA Band", color = color.orange)
+d12 = plot(bShowEMABands ? dn3 : na, "Lower3 EMA Band", color = color.maroon)
+
+// Average Directional Index
+adxlen = input(14, title="ADX Smoothing", group="ADX")
+dilen = input(14, title="DI Length", group="ADX")
+dirmov(len) =>
+	up = change(high)
+	down = -change(low)
+	plusDM = na(up) ? na : (up > down and up > 0 ? up : 0)
+	minusDM = na(down) ? na : (down > up and down > 0 ? down : 0)
+	truerange = rma(tr, len)
+	plus = fixnan(100 * rma(plusDM, len) / truerange)
+	minus = fixnan(100 * rma(minusDM, len) / truerange)
+	[plus, minus]
+adx(dilen, adxlen) =>
+	[plus, minus] = dirmov(dilen)
+	sum = plus + minus
+	adx = 100 * rma(abs(plus - minus) / (sum == 0 ? 1 : sum), adxlen)
+adxValue = adx(dilen, adxlen)
+sigabove19 = adxValue > adxSqueeze
+sigaboveTriple = adxValue > adxSuper
+
+// Parabolic SAR
+psar = sar(psarStart, psarIncrement, psarMaximum)
+psarDir = psar < close ? 1 : -1
+
+// MACD
+signalLength = input(9,minval=1)
+
+[currMacd,_,_] = macd(close[0], fastMA, slowMA, signalLength)
+[prevMacd,_,_] = macd(close[1], fastMA, slowMA, signalLength)
+signal = ema(currMacd, signalLength)
+
+if (cross(currMacd, signal) and currMacd < signal and currMacd >= -2)
+	crossoverBear := true
+	crossoverBull := false
+	
+if (cross(currMacd, signal) and currMacd > signal and currMacd <= 2 )
+	crossoverBull := true
+	crossoverBear := false
+
+iBuy = (crossoverBull and psar < close and adxValue > adxThreshold)
+iSell = (crossoverBear and psar > close and adxValue > adxThreshold)
+
+showBuy = iBuy and not iBuy[1]
+showSell = iSell and not iSell[1]
+
+filterBuy200 = (filter200 and ema(close,200) > close) or (filter850 and ema(close,8) > ema(close,50))
+filterSell200 = (filter200 and ema(close,200) < close) or (filter850 and ema(close,8) < ema(close,50))
+
+plotshape(not bMACDSuperTrend and bShowMACDPsar and showBuy and adxValue > adxThreshold and not filterBuy200 ? 1 : na, title="MACD Buy", text="M", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.rgb(37, 119, 79), textcolor=color.white)
+plotshape(not bMACDSuperTrend and bShowMACDPsar and showSell and adxValue > adxThreshold and not filterSell200 ? 1 : na, title="MACD Sell", text="M", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.rgb(127, 37, 37), textcolor=color.white)
+
+alertcondition(bShowMACDPsar and showBuy and adxValue > adxThreshold and not filterBuy200, title='MACD / PSAR BUY', message='MACD / PSAR has a BUY signal')
+alertcondition(bShowMACDPsar and showSell and adxValue > adxThreshold and not filterSell200, title='MACD / PSAR SELL', message='MACD / PSAR has a SELL signal')
+
+
+// STOCHASTIC - 80/20 upper/lower bands
+k = sma(stoch(close, high, low, periodK), smoothK)
+stochOS = k[1] <= 20 or k[2] <= 20 or k[3] <= 20 or k[4] <= 20 or k[5] <= 20 or k[6] <= 20 or k[7] <= 20 or k[8] <= 20 or k[9] <= 20 
+stochOB = k[1] >= 80 or k[2] >= 80 or k[3] >= 80 or k[4] >= 80 or k[5] >= 80 or k[6] >= 80 or k[7] >= 80 or k[8] >= 80 or k[9] >= 80  
+
+weGoUpMT = not isLong and rsiM >= 50 and currMacd > signal and stochOS
+weGoDownMT = not isShort and rsiM <= 50 and currMacd < signal and stochOB
+
+upThrustMT = weGoUpMT and not weGoUpMT[1] and not weGoUpMT[2] and not weGoUpMT[3] and not weGoUpMT[4]
+downThrustMT = weGoDownMT and not weGoDownMT[1] and not weGoDownMT[2] and not weGoDownMT[3] and not weGoDownMT[4]
+ 
+// PLOT THE THINGS
+plotshape(bShowMacTastic and upThrustMT ? hl2 : na, title="MacTastic", text="MT", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.rgb(56, 182, 93), textcolor=color.white)
+plotshape(bShowMacTastic and downThrustMT ? hl2 : na, title="MacTastic", text="MT", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.rgb(145, 42, 61), textcolor=color.white)
+
+if weGoUpMT
+    isLong := true
+    isShort := false
+
+if weGoDownMT
+    isLong := false
+    isShort := true
+
+
+// HALFTREND
+var int trend = 0
+var int nextTrend = 0
+var float maxLowPrice = nz(low[1], low)
+var float minHighPrice = nz(high[1], high)
+
+var float up = 0.0
+var float down = 0.0
+float atrHigh = 0.0
+float atrLow = 0.0
+float arrowUp = na
+float arrowDown = na
+
+atr2 = atr(100) / 2
+dev = 2 * atr2
+
+highPrice = high[abs(highestbars(2))]
+lowPrice = low[abs(lowestbars(2))]
+highma = sma(high, 2)
+lowma = sma(low, 2)
+
+if nextTrend == 1
+	maxLowPrice := max(lowPrice, maxLowPrice)
+
+	if highma < maxLowPrice and close < nz(low[1], low)
+		trend := 1
+		nextTrend := 0
+		minHighPrice := highPrice
+else
+	minHighPrice := min(highPrice, minHighPrice)
+
+	if lowma > minHighPrice and close > nz(high[1], high)
+		trend := 0
+		nextTrend := 1
+		maxLowPrice := lowPrice
+
+if trend == 0
+	if not na(trend[1]) and trend[1] != 0
+		up := na(down[1]) ? down : down[1]
+		arrowUp := up - atr2
+	else
+		up := na(up[1]) ? maxLowPrice : max(maxLowPrice, up[1])
+	atrHigh := up + dev
+	atrLow := up - dev
+else
+	if not na(trend[1]) and trend[1] != 1 
+		down := na(up[1]) ? up : up[1]
+		arrowDown := down + atr2
+	else
+		down := na(down[1]) ? minHighPrice : min(minHighPrice, down[1])
+	atrHigh := down + dev
+	atrLow := down - dev
+
+ht = trend == 0 ? up : down
+htColor = trend == 0 ? color.green : color.red
+htPlot = plot(bShowHalfTrend ? ht : na, title="HalfTrend", linewidth=2, color=htColor)
+
+// MACD / PSAR
+// plotchar(bShowMACDPsar and showBuy and adxValue > adxThreshold and not filterBuy200 ? 1 : na, title="MACD/PSAR Buy", char='❤', location=location.belowbar, color=color.lime, size=size.tiny)
+// plotchar(bShowMACDPsar and showSell and adxValue > adxThreshold and not filterSell200 ? 1 : na, char='❤', title="MACD/PSAR Sell", location=location.abovebar, color=color.orange, textcolor=color.white, size=size.tiny)
+
+// Bollinger Bands
+basis2 = sma(src, length2)
+dev3 = mult * stdev(src, length2)
+upper = basis2 + dev3
+lower = basis2 - dev3
+
+// EMA bands
+
+
+// TRIPLE SUPERTREND
+
+atr21 = sma(tr, 10)
+atr= atr21
+tx=hl2-(1*atr)
+tx1 = nz(tx[1],tx)
+tx := close[1] > tx1 ? max(tx,tx1) : tx
+ty=hl2+(1*atr)
+ty1 = nz(ty[1], ty)
+ty := close[1] < ty1 ? min(ty, ty1) : ty
+trend1 = 1
+trend1 := nz(trend1[1], trend1)
+trend1 := trend1 == -1 and close > ty1 ? 1 : trend1 == 1 and close < tx1 ? -1 : trend1
+// mPlot = plot(ohlc4, title="", style=plot.style_circles, linewidth=0)
+changeCond = trend1 != trend1[1]
+
+atr20 = sma(tr, 11)
+atr0 = atr20
+tx0 =hl2-(2*atr)
+tx10 = nz(tx0[1],tx0)
+tx0 := close[1] > tx10 ? max(tx0,tx10) : tx0
+ty0=hl2+(2*atr)
+ty10 = nz(ty0[1], ty0)
+ty0 := close[1] < ty10 ? min(ty0, ty10) : ty0
+trend0 = 1
+trend0 := nz(trend0[1], trend0)
+trend0 := trend0 == -1 and close > ty10 ? 1 : trend0 == 1 and close < tx10 ? -1 : trend0
+// mPlot0 = plot(ohlc4, title="", style=plot.style_circles, linewidth=0)
+changeCond0 = trend0 != trend0[1]
+
+atr29 = sma(tr, 12)
+atr9 = atr29
+tx9=hl2-(3*atr)
+tx19 = nz(tx9[1],tx9)
+tx9 := close[1] > tx19 ? max(tx9,tx19) : tx9
+ty9=hl2+(3*atr)
+ty19 = nz(ty9[1], ty9)
+ty9 := close[1] < ty19 ? min(ty9, ty19) : ty9
+trend9 = 1
+trend9 := nz(trend9[1], trend9)
+trend9 := trend9 == -1 and close > ty19 ? 1 : trend9 == 1 and close < tx19 ? -1 : trend9
+// mPlot9 = plot(ohlc4, title="", style=plot.style_circles, linewidth=0)
+changeCond9 = trend9 != trend9[1]
+
+var showtx = false
+var showty = false
+
+showtx := (trend9==1 and tx9 and trend==1 and tx and trend0==1 and tx0) or (trend9==1 and tx9 and trend==1 and tx) or (trend9==1 and tx9 and trend0==1 and tx0) or (trend==1 and tx and trend0==1 and tx0) 
+displaytx = showtx and not showtx[1]
+
+showty := (trend9!=1 and ty9 and trend!=1 and ty and trend0!=1 and ty0) or (trend9!=1 and ty9 and trend!=1 and ty) or (trend9!=1 and ty9 and trend0!=1 and ty0) or (trend!=1 and ty and trend0!=1 and ty0) 
+displayty = showty and not showty[1]
+
+plotshape(not bMACDSuperTrend and sigaboveTriple and bShowSuper and displaytx ? tx : na, title="Triple SuperTrend Buy", text="ST", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.rgb(29, 138, 32), textcolor=color.white)
+plotshape(not bMACDSuperTrend and sigaboveTriple and bShowSuper and displayty ? ty : na, title="Triple SuperTrend Sell", text="ST", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.rgb(177, 39, 39), textcolor=color.white)
+
+plotshape(bMACDSuperTrend and iBuy and sigaboveTriple and displaytx ? tx : na, title="MACD / Triple SuperTrend Buy", text="Buy", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.rgb(29, 138, 32), textcolor=color.white)
+plotshape(bMACDSuperTrend and iSell and sigaboveTriple and displayty ? ty : na, title="MACD / Triple SuperTrend Sell", text="Sell", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.rgb(177, 39, 39), textcolor=color.white)
+
+alertcondition(sigaboveTriple and bShowSuper and displaytx, title='Triple SuperTrend BUY', message='Triple SuperTrend has a BUY signal')
+alertcondition(sigaboveTriple and bShowSuper and displaytx, title='Triple SuperTrend SELL', message='Triple SuperTrend has a SELL signal')
+
+//label.new(bar_index, high, text=tostring(iBuy) + " " + tostring(iSell))
+
+// HAMMER HANGING MAN
+high_h = high[1]
+low_h = low[1]
+open_h = open[1]
+close_h = close[1]
+
+shadow_h = high_h - low_h
+body_h = abs(open_h - close_h)
+bodyMid_h = 0.5 * (open_h + close_h) - low_h
+
+shadow = high - low
+body = abs(open - close)
+bodyMid = 0.5 * (open + close) - low
+bodyRed = open > close and body > (0.3 * shadow)
+bodyGreen = close > open and body > (0.3 * shadow)
+
+bodyTop =  bodyMid_h > (0.7 * shadow_h)
+bodyBottom =  bodyMid_h < (0.3 * shadow_h)
+hammerShape = body_h < (0.5 * shadow_h)
+
+hangingMan = bodyRed and hammerShape and bodyTop ? high_h : na
+hammer = bodyGreen and hammerShape and bodyTop ? high_h : na
+
+shootingStar = bodyRed and hammerShape and bodyBottom ? low_h : na
+invertedHammer = bodyGreen and hammerShape and bodyBottom ? low_h : na
+
+plot( bShowHammer ? hangingMan : na , title="Hanging man", style=plot.style_cross, linewidth=4,color=color.red, offset = -1)
+plot( bShowHammer ? hammer : na  , title="Hammer", style=plot.style_cross, linewidth=4,color=color.green, offset = -1)
+plot( bShowHammer ? shootingStar : na  , title="Shooting star", style=plot.style_cross, linewidth=4,color=color.red, offset = -1)
+plot( bShowHammer ? invertedHammer : na  , title="Inverted hammer", style=plot.style_cross, linewidth=4,color=color.green, offset = -1)
+
+// IMBALANCE BOXES (order blocks)
+
+adboxcount = input(50, "Maximum Imbalance Displayed", group = "Order Flow Imbalance")
+boxcolor = input(color.new(color.gray, 65), "Imbalance Box Color", inline = "customcolor", group = "Order Flow Imbalance")
+var box[] imbboxarray = array.new_box()
+
+topimbalance = low[2] <= open[1] and high[0] >= close[1]
+topimbalancesize = low[2] - high[0]
+bottomimbalance = high[2] >= open[1] and low[0] <= close[1]
+bottomimbalancesize = low[0] - high[2]
+
+f_choppedoffimb(imbboxarray) =>
+    if array.size(imbboxarray) > 0 and bShowOrderBlocks
+        for i = array.size(imbboxarray) - 1 to 0 by 1
+            cutbox = array.get(imbboxarray, i)
+            boxhighzone = box.get_top(cutbox)
+            boxlowzone = box.get_bottom(cutbox)
+            boxrightzone = box.get_right(cutbox)
+            if na or bar_index - 1 == boxrightzone and not(high > boxlowzone and low < boxlowzone or high > boxhighzone and low < boxhighzone)
+                box.set_right(array.get(imbboxarray, i), bar_index)
+
+if topimbalance and topimbalancesize > 0 or bottomimbalance and bottomimbalancesize > 0
+    boxhighzone = topimbalance and topimbalancesize > 0 ? low[2] : low[0]
+    boxlowzone = topimbalance and topimbalancesize > 0 ? high[0] : high[2]
+    imbbox = box.new(bar_index, boxhighzone, bar_index, boxlowzone, boxcolor, border_style = line.style_dashed, bgcolor = boxcolor)
+    if array.size(imbboxarray) > adboxcount
+        box.delete(array.shift(imbboxarray))
+    array.push(imbboxarray, imbbox)
+f_choppedoffimb(imbboxarray)
+
+// SQUEEZE RELAXER
+
+var cGreen = 0
+var cRed = 0
+var pos = false 
+var neg = false 
+
+// Squeeze Momentum
+
+length = 20
+multQ = 2.0
+lengthKC = 20
+multKC = 1.5
+
+useTrueRange = true
+source = close
+basis = sma(source, length)
+dev1 = multKC * stdev(source, length)
+upperBB = basis + dev1
+lowerBB = basis - dev1
+ma = sma(source, lengthKC)
+rangeQ = useTrueRange ? tr : (high - low)
+rangema = sma(rangeQ, lengthKC)
+upperKC = ma + rangema * multKC
+lowerKC = ma - rangema * multKC
+sqzOn  = iff(ignoreDots, false, (lowerBB > lowerKC) and (upperBB < upperKC))
+sqzOff = (lowerBB < lowerKC) and (upperBB > upperKC)
+noSqz  = (sqzOn == false) and (sqzOff == false)
+
+// Had to change this from the original
+avg1 = avg(highest(high, lengthKC), lowest(low, lengthKC))
+avg2 = avg(avg1, sma(close,lengthKC))
+val = linreg(close - avg2, lengthKC, 0)
+
+pos := false
+neg := false
+
+// if squeeze is bright RED, increment by one
+if (val < nz(val[1]) and val < 5 and not sqzOn)
+    cRed := cRed + 1   
+
+// if squeeze is bright GREEN, increment by one
+if (val > nz(val[1]) and val > 5 and not sqzOn)
+    cGreen := cGreen + 1   
+
+// if bright RED squeeze is now dim, momentum has changed.  Is ADX also above 19? - add a marker to chart
+if (val > nz(val[1]) and cRed > sqTolerance and val < 5 and not pos[1] and sigabove19 == true)
+    cRed := 0
+    pos := true  
+
+// if bright GREEN squeeze is now dim, momentum has changed.  Is ADX also above 19? - add a marker to chart
+if (val < nz(val[1]) and cGreen > sqTolerance and val > 5 and not neg[1] and sigabove19 == true)
+    cGreen := 0
+    neg := true  
+
+upsie1 = rma(max(change(rsiSourceInput), 0), rsiLengthInput)
+downsie1 = rma(-min(change(rsiSourceInput), 0), rsiLengthInput)
+rsi = downsie1 == 0 ? 100 : upsie1 == 0 ? 0 : 100 - (100 / (1 + upsie1 / downsie1))
+
+buySignal1 = pos 
+sellSignal1 = neg
+
+bColor := color.yellow
+if (rsi < rsiUnder)
+	bColor := color.orange
+if (rsi > rsiOver)
+	bColor := color.rgb(155, 241, 200)
+ 
+plotshape(bShowRelax and buySignal1 ? pos : na, title="Squeeze Buy Signal", style=shape.diamond, location=location.belowbar, color=bColor, size=size.tiny)
+plotshape(bShowRelax and sellSignal1 ? neg : na, title="Squeeze Sell Signal", style=shape.diamond, location=location.abovebar, color=bColor, size=size.tiny)
+
+
+// PIVOT POINTS STANDARD
+
+AUTO = "Auto"
+DAILY = "Daily"
+WEEKLY = "Weekly"
+MONTHLY = "Monthly"
+QUARTERLY = "Quarterly"
+YEARLY = "Yearly"
+BIYEARLY = "Biyearly"
+TRIYEARLY = "Triyearly"
+QUINQUENNIALLY = "Quinquennially"
+DECENNIALLY = "Decennially"
+
+TRADITIONAL = "Traditional"
+
+custom_years_divisor = 2
+
+kind = TRADITIONAL
+pivot_time_frame = AUTO
+look_back = 15
+is_daily_based = true
+show_labels = false
+show_prices = false
+position_labels = "Left"
+line_width = 1
+
+var DEF_COLOR = #bb9057
+var arr_time = array.new_int()
+var p = array.new_float()
+var r1 = array.new_float()
+var s1 = array.new_float()
+var r2 = array.new_float()
+var s2 = array.new_float()
+var r3 = array.new_float()
+var s3 = array.new_float()
+var r4 = array.new_float()
+var s4 = array.new_float()
+var r5 = array.new_float()
+var s5 = array.new_float()
+pivotX_open = float(na)
+pivotX_open := nz(pivotX_open[1], open)
+pivotX_high = float(na)
+pivotX_high := nz(pivotX_high[1], high)
+pivotX_low = float(na)
+pivotX_low := nz(pivotX_low[1], low)
+pivotX_prev_open = float(na)
+pivotX_prev_open := nz(pivotX_prev_open[1])
+pivotX_prev_high = float(na)
+pivotX_prev_high := nz(pivotX_prev_high[1])
+pivotX_prev_low = float(na)
+pivotX_prev_low := nz(pivotX_prev_low[1])
+pivotX_prev_close = float(na)
+pivotX_prev_close := nz(pivotX_prev_close[1])
+
+get_pivot_resolution() =>
+    timeframe.multiplier <= 15 ? "D" : "W"
+
+var lines = array.new_line()
+var labels = array.new_label()
+
+draw_line(i, pivot, col) =>
+    if array.size(arr_time) > 1
+        array.push(lines, line.new(array.get(arr_time, i), array.get(pivot, i), array.get(arr_time, i + 1), array.get(pivot, i), color=col, xloc=xloc.bar_time, width=line_width))
+
+traditional() =>
+    pivotX_Median = (pivotX_prev_high + pivotX_prev_low + pivotX_prev_close) / 3
+    array.push(p, pivotX_Median)
+    array.push(r1, pivotX_Median * 2 - pivotX_prev_low)
+    array.push(s1, pivotX_Median * 2 - pivotX_prev_high)
+    array.push(r2, pivotX_Median + 1 * (pivotX_prev_high - pivotX_prev_low))
+    array.push(s2, pivotX_Median - 1 * (pivotX_prev_high - pivotX_prev_low))
+    array.push(r3, pivotX_Median * 2 + (pivotX_prev_high - 2 * pivotX_prev_low))
+    array.push(s3, pivotX_Median * 2 - (2 * pivotX_prev_high - pivotX_prev_low))
+    array.push(r4, pivotX_Median * 3 + (pivotX_prev_high - 3 * pivotX_prev_low))
+    array.push(s4, pivotX_Median * 3 - (3 * pivotX_prev_high - pivotX_prev_low))
+    array.push(r5, pivotX_Median * 4 + (pivotX_prev_high - 4 * pivotX_prev_low))
+    array.push(s5, pivotX_Median * 4 - (4 * pivotX_prev_high - pivotX_prev_low))
+
+calc_pivot() =>
+    traditional()
+
+resolution = get_pivot_resolution()
+
+SIMPLE_DIVISOR = 2
+
+calc_high(prev, curr) =>
+    if na(prev) or na(curr)
+        nz(prev, nz(curr, na))
+    else
+        max(prev, curr)
+    
+calc_low(prev, curr) =>
+    if not na(prev) and not na(curr)
+        min(prev, curr)
+    else
+        nz(prev, nz(curr, na))
+
+calc_OHLC_for_pivot(custom_years_divisor) =>
+    if custom_years_divisor == SIMPLE_DIVISOR 
+        [open, high, low, close, open[1], high[1], low[1], close[1], time[1], time_close]
+    else
+        var prev_sec_open = float(na)
+        var prev_sec_high = float(na)
+        var prev_sec_low = float(na)
+        var prev_sec_close = float(na)
+        var prev_sec_time = int(na)
+        var curr_sec_open = float(na)
+        var curr_sec_high = float(na)
+        var curr_sec_low = float(na)
+        var curr_sec_close = float(na)
+        if year(time_close) % custom_years_divisor == 0
+        	curr_sec_open := open
+			curr_sec_high := high
+			curr_sec_low := low
+			curr_sec_close := close
+            prev_sec_high := high[1]
+            prev_sec_low := low[1]
+            prev_sec_close := close[1]
+            prev_sec_time := time[1]
+            for i = 2 to custom_years_divisor
+                prev_sec_open :=  nz(open[i], prev_sec_open)
+                prev_sec_high := calc_high(prev_sec_high, high[i])
+                prev_sec_low := calc_low(prev_sec_low, low[i])
+                prev_sec_time := nz(time[i], prev_sec_time)
+        [curr_sec_open, curr_sec_high, curr_sec_low, curr_sec_close, prev_sec_open, prev_sec_high, prev_sec_low, prev_sec_close, prev_sec_time, time_close]
+
+[sec_open, sec_high, sec_low, sec_close, prev_sec_open, prev_sec_high, prev_sec_low, prev_sec_close, prev_sec_time, sec_time] = security(syminfo.tickerid, resolution, calc_OHLC_for_pivot(custom_years_divisor), lookahead = barmerge.lookahead_on)
+sec_open_gaps_on = security(syminfo.tickerid, resolution, open, gaps = barmerge.gaps_on, lookahead = barmerge.lookahead_on)
+
+is_change_years = false
+var is_change = false
+var uses_current_bar = false
+var change_time = int(na)
+is_time_change = false
+
+var start_time = time
+var was_last_premarket = false
+var start_calculate_in_premarket = false
+
+is_last_premarket = barstate.islast and session.ispremarket and time_close > sec_time and not was_last_premarket
+
+if is_last_premarket
+    was_last_premarket := true
+    start_calculate_in_premarket := true
+if session.ismarket
+    was_last_premarket := false
+    
+without_time_change = barstate.islast and array.size(arr_time) == 0
+is_can_calc_pivot = (not uses_current_bar and is_time_change and session.ismarket) or (change(sec_open) and not start_calculate_in_premarket) or is_last_premarket or (uses_current_bar and not na(sec_open_gaps_on)) or without_time_change
+enough_bars_for_calculate = prev_sec_time >= start_time or is_daily_based
+
+if is_can_calc_pivot and enough_bars_for_calculate 
+    if array.size(arr_time) == 0 and is_daily_based
+        pivotX_prev_open := prev_sec_open[1]
+        pivotX_prev_high := prev_sec_high[1]
+        pivotX_prev_low := prev_sec_low[1]
+        pivotX_prev_close := prev_sec_close[1]
+        pivotX_open := sec_open[1]
+        pivotX_high := sec_high[1]
+        pivotX_low := sec_low[1]
+        array.push(arr_time, start_time)
+        calc_pivot()
+    
+    if is_daily_based
+    	if is_last_premarket
+            pivotX_prev_open := sec_open
+            pivotX_prev_high := sec_high
+            pivotX_prev_low := sec_low
+            pivotX_prev_close := sec_close
+            pivotX_open := open
+            pivotX_high := high
+            pivotX_low := low
+        else
+			pivotX_prev_open := prev_sec_open
+			pivotX_prev_high := prev_sec_high
+			pivotX_prev_low := prev_sec_low
+			pivotX_prev_close := prev_sec_close
+			pivotX_open := sec_open
+			pivotX_high := sec_high
+			pivotX_low := sec_low
+    else
+        pivotX_prev_high := pivotX_high
+        pivotX_prev_low := pivotX_low
+        pivotX_prev_open := pivotX_open
+        pivotX_prev_close := close[1]
+        pivotX_open := open
+        pivotX_high := high
+        pivotX_low := low
+
+    if barstate.islast and not is_change and array.size(arr_time) > 0 and not without_time_change
+        array.set(arr_time, array.size(arr_time) - 1, change_time)
+    else if without_time_change
+        array.push(arr_time, start_time)
+    else
+        array.push(arr_time, nz(change_time, time))
+
+    calc_pivot()
+
+    if array.size(arr_time) > look_back
+        if array.size(arr_time) > 0
+            array.shift(arr_time)
+        if array.size(p) > 0 
+            array.shift(p)
+        if array.size(r1) > 0 
+            array.shift(r1)
+        if array.size(s1) > 0 
+            array.shift(s1)
+        if array.size(r2) > 0 
+            array.shift(r2)
+        if array.size(s2) > 0 
+            array.shift(s2)
+        if array.size(r3) > 0 
+            array.shift(r3)
+        if array.size(s3) > 0
+            array.shift(s3)
+        if array.size(r4) > 0 
+            array.shift(r4)
+        if array.size(s4) > 0 
+            array.shift(s4)
+        if array.size(r5) > 0
+            array.shift(r5)
+        if array.size(s5) > 0
+            array.shift(s5)
+    is_change := true
+else if not is_daily_based
+    pivotX_high := max(pivotX_high, high)
+    pivotX_low := min(pivotX_low, low)
+
+if barstate.islast and array.size(arr_time) > 0 and is_change
+    is_change := false
+    array.push(arr_time, time_close(resolution))
+
+    for i = 0 to array.size(lines) - 1
+        if array.size(lines) > 0
+            line.delete(array.shift(lines))
+        if array.size(labels) > 0
+            label.delete(array.shift(labels))
+
+    for i = 0 to array.size(arr_time) - 2
+        if array.size(p) > 0 and bShowPivotPoints
+            draw_line(i, p, DEF_COLOR)
+        if array.size(r1) > 0 and bShowPivotPoints 
+            draw_line(i, r1, DEF_COLOR)
+        if array.size(s1) > 0 and bShowPivotPoints
+            draw_line(i, s1, DEF_COLOR)
+        if array.size(r2) > 0 and bShowPivotPoints
+            draw_line(i, r2, DEF_COLOR)
+        if array.size(s2) > 0 and bShowPivotPoints
+            draw_line(i, s2, DEF_COLOR)
+        if array.size(r3) > 0 and bShowPivotPoints
+            draw_line(i, r3, DEF_COLOR)
+        if array.size(s3) > 0 and bShowPivotPoints
+            draw_line(i, s3, DEF_COLOR)
+        if array.size(r4) > 0 and bShowPivotPoints
+            draw_line(i, r4, DEF_COLOR)
+        if array.size(s4) > 0 and bShowPivotPoints
+            draw_line(i, s4, DEF_COLOR)
+        if array.size(r5) > 0 and bShowPivotPoints
+            draw_line(i, r5, DEF_COLOR)
+        if array.size(s5) > 0 and bShowPivotPoints
+            draw_line(i, s5, DEF_COLOR)
