@@ -4,7 +4,7 @@ indicator("Linda MACD", shorttitle="Linda MACD", overlay=false)
 res           = input.timeframe("",  "Indicator TimeFrame")
 fastMA = input.int(title="Fast moving average", defval=3)
 slowMA = input.int(title="Slow moving average", defval=10)
-signalLength = input.int(title="Slow moving average", defval=26)
+signalLength = input.int(title="Slow moving average", defval=16)
 
 fast_ma = request.security(syminfo.tickerid, res, ta.ema(close, fastMA))
 slow_ma = request.security(syminfo.tickerid, res, ta.ema(close, slowMA))
