@@ -1,0 +1,19 @@
+//@version=5
+indicator("Linda MACD", shorttitle="Linda MACD", overlay=false)
+
+res           = input.timeframe("",  "Indicator TimeFrame")
+fastMA = input.int(title="Fast moving average", defval=3)
+slowMA = input.int(title="Slow moving average", defval=10)
+signalLength = input.int(title="Slow moving average", defval=26)
+
+fast_ma = request.security(syminfo.tickerid, res, ta.ema(close, fastMA))
+slow_ma = request.security(syminfo.tickerid, res, ta.ema(close, slowMA))
+macd = fast_ma - slow_ma
+signal = request.security(syminfo.tickerid, res, ta.ema(macd, signalLength))
+t1 = macd - signal
+
+trendUp = (t1 >= 0) ? t1 : 0
+trendDown = (t1 < 0) ? (-1*t1) : 0
+
+plot(trendUp, style=plot.style_columns, linewidth=1, color=(trendUp<trendUp[1])? color.rgb(0, 255, 132) : color.rgb(49, 212, 55), transp=25, title="UpTrend")
+plot(trendDown, style=plot.style_columns, linewidth=1, color=(trendDown<trendDown[1]) ? color.rgb(255, 153, 0) : color.rgb(255, 0, 0), transp=25, title="DownTrend")
