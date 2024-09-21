@@ -1,0 +1,29 @@
+//@version=5
+indicator("GexBot", overlay=true, max_boxes_count = 500)
+zones = input.text_area("", "Paste Gex values here") 
+ 
+sFontSize = input.string(title="Font Size: ", options=["Tiny", "Small", "Normal", "Large"], defval="Normal", group="Lines")
+lWidth = input.int(1, "Line Width", group="Lines")
+iBoxTrans = input.int(50, "Line Transparency", group="Lines")
+
+colLong = input.color(color.rgb(0, 255, 0), "Positive color", group="Colors")
+colShort = input.color(color.rgb(255, 0, 0), "Negative color", group="Colors")
+left_edge = chart.left_visible_bar_time
+
+if (barstate.islast)
+    string[] _pair = str.split(zones, "\n")
+        
+    for s in _pair
+        log.info("s " + s)
+        string[] comma = str.split(s, ",")
+        sPrice = array.get(comma, 0)
+        sVol = array.get(comma, 1)
+        //log.info("sVol " + sVol)
+        fVol = str.tonumber(sVol) * 9000000
+        sOI = array.get(comma, 2)
+        log.info("sOI " + sOI)
+        fOI = str.tonumber(sOI) * 2000000
+        oispot = math.round(left_edge + math.abs(fOI))
+        //log.info("oispot " + str.tostring(oispot))
+        colors = fOI > 0 ? colLong : colShort
+        line.new(left_edge, str.tonumber(sPrice), oispot, str.tonumber(sPrice), xloc=xloc.bar_time, width=1, color=colors)
