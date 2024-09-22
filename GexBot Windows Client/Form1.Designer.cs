@@ -144,7 +144,6 @@
             this.cbVolOI.Name = "cbVolOI";
             this.cbVolOI.Size = new Size(135, 28);
             this.cbVolOI.TabIndex = 9;
-            this.cbVolOI.SelectedIndexChanged += this.cbVolOI_SelectedIndexChanged;
             // 
             // chkState
             // 
