@@ -41,11 +41,13 @@
             this.chkState = new CheckBox();
             this.label5 = new Label();
             this.txtKey = new TextBox();
+            this.cbGreek = new ComboBox();
+            this.label6 = new Label();
             this.SuspendLayout();
             // 
             // button1
             // 
-            this.button1.Location = new Point(111, 299);
+            this.button1.Location = new Point(111, 358);
             this.button1.Margin = new Padding(2);
             this.button1.Name = "button1";
             this.button1.Size = new Size(107, 29);
@@ -108,7 +110,7 @@
             // label3
             // 
             this.label3.AutoSize = true;
-            this.label3.Location = new Point(42, 194);
+            this.label3.Location = new Point(42, 234);
             this.label3.Margin = new Padding(2, 0, 2, 0);
             this.label3.Name = "label3";
             this.label3.Size = new Size(85, 20);
@@ -117,7 +119,7 @@
             // 
             // txtConversion
             // 
-            this.txtConversion.Location = new Point(143, 191);
+            this.txtConversion.Location = new Point(143, 231);
             this.txtConversion.Margin = new Padding(2);
             this.txtConversion.Name = "txtConversion";
             this.txtConversion.Size = new Size(75, 27);
@@ -148,7 +150,7 @@
             // chkState
             // 
             this.chkState.AutoSize = true;
-            this.chkState.Location = new Point(143, 240);
+            this.chkState.Location = new Point(143, 275);
             this.chkState.Name = "chkState";
             this.chkState.Size = new Size(65, 24);
             this.chkState.TabIndex = 10;
@@ -158,7 +160,7 @@
             // label5
             // 
             this.label5.AutoSize = true;
-            this.label5.Location = new Point(11, 141);
+            this.label5.Location = new Point(11, 185);
             this.label5.Margin = new Padding(2, 0, 2, 0);
             this.label5.Name = "label5";
             this.label5.Size = new Size(62, 20);
@@ -167,17 +169,40 @@
             // 
             // txtKey
             // 
-            this.txtKey.Location = new Point(84, 138);
+            this.txtKey.Location = new Point(84, 182);
             this.txtKey.Name = "txtKey";
             this.txtKey.Size = new Size(134, 27);
             this.txtKey.TabIndex = 12;
             this.txtKey.Text = "A4HghGHZ62YB";
+            // 
+            // cbGreek
+            // 
+            this.cbGreek.DropDownStyle = ComboBoxStyle.DropDownList;
+            this.cbGreek.FormattingEnabled = true;
+            this.cbGreek.Items.AddRange(new object[] { "none", "Delta 0day", "Gamma 0day", "Charm 0day", "Vanna 0day", "Delta 1dte", "Gamma 1dte", "Charm 1dte", "Vanna 1dte" });
+            this.cbGreek.Location = new Point(83, 137);
+            this.cbGreek.Margin = new Padding(2);
+            this.cbGreek.Name = "cbGreek";
+            this.cbGreek.Size = new Size(135, 28);
+            this.cbGreek.TabIndex = 14;
+            // 
+            // label6
+            // 
+            this.label6.AutoSize = true;
+            this.label6.Location = new Point(17, 140);
+            this.label6.Margin = new Padding(2, 0, 2, 0);
+            this.label6.Name = "label6";
+            this.label6.Size = new Size(50, 20);
+            this.label6.TabIndex = 13;
+            this.label6.Text = "Greek:";
             // 
             // Form1
             // 
             this.AutoScaleDimensions = new SizeF(8F, 20F);
             this.AutoScaleMode = AutoScaleMode.Font;
             this.ClientSize = new Size(704, 683);
+            this.Controls.Add(this.cbGreek);
+            this.Controls.Add(this.label6);
             this.Controls.Add(this.txtKey);
             this.Controls.Add(this.label5);
             this.Controls.Add(this.chkState);
@@ -216,5 +241,7 @@
         private CheckBox chkState;
         private Label label5;
         private TextBox txtKey;
+        private ComboBox cbGreek;
+        private Label label6;
     }
 }

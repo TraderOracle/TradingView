@@ -1,6 +1,5 @@
 using Newtonsoft.Json.Linq;
 
-
 namespace GrabGex
 {
     public partial class Form1 : Form
@@ -11,28 +10,34 @@ namespace GrabGex
             cbType.SelectedIndex = 0;
             cbSymbol.SelectedIndex = 3;
             cbVolOI.SelectedIndex = 1;
+            cbGreek.SelectedIndex = 0;
         }
 
         public async Task GetIt()
         {
-            string Greek = "none";
-            string sCS = chkState.Checked ? "state" : "classic";
+            string Greek = cbGreek.Items[cbGreek.SelectedIndex].ToString().ToLower().Split(' ')[0];
+            if (cbGreek.SelectedIndex > 3)
+                Greek = "one" + Greek;
+            if (Greek.Equals("none"))
+                Greek = cbType.Items[cbType.SelectedIndex].ToString();
+            string sCS = chkState.Checked || cbGreek.SelectedIndex != 0 ? "state" : "classic";
+            string sSection = Greek.Equals("none") ? "strikes" : "mini_contracts";
 
             HttpClient http = new HttpClient();
-            HttpResponseMessage response = await http.GetAsync("https://api.gexbot.com/" +
+            string toSend = "https://api.gexbot.com/" +
                     cbSymbol.Items[cbSymbol.SelectedIndex] + "/" +
                     sCS + "/" +
-                    cbType.Items[cbType.SelectedIndex] + "?key=" +
-                    txtKey.Text.Trim());
+                    Greek + "?key=" +
+                    txtKey.Text.Trim();
+            HttpResponseMessage response = await http.GetAsync(toSend);
             response.EnsureSuccessStatusCode();
             string jsonResponse = await response.Content.ReadAsStringAsync();
             JObject jo = JObject.Parse(jsonResponse);
-            string sSection = "strikes";
             var clientarray = jo[sSection].Value<JArray>();
             richTextBox1.Clear();
             int ix = 1;
             foreach (JArray item in clientarray)
-                if (Greek.Equals("none") && !item[1].Equals("0.0"))
+                if (Greek.Equals("none"))
                 {
                     double dd = Convert.ToDouble(item[0]) * Convert.ToDouble(txtConversion.Text);
                     string pr = $"{dd:0.0}";
@@ -40,15 +45,32 @@ namespace GrabGex
                     string one = $"{d1:0.00}";
                     double d2 = Convert.ToDouble(item[2]) * Convert.ToDouble(txtConversion.Text);
                     string two = $"{d2:0.00}";
-                    if (cbVolOI.SelectedIndex == 0)
+                    if (cbVolOI.SelectedIndex == 0 && d1 != 0)
                     {
                         if (ix > 1) richTextBox1.Text += "\n";
                         richTextBox1.Text += Encode(pr) + "," + Encode(one);
                     }
-                    else
+                    else if (d2 != 0)
                     {
                         if (ix > 1) richTextBox1.Text += "\n";
                         richTextBox1.Text += Encode(pr) + "," + Encode(two);
+                    }
+                    ix++;
+                }
+            else
+                {
+                    double dd = Convert.ToDouble(item[0]) * Convert.ToDouble(txtConversion.Text);
+                    string pr = $"{dd:0.0}";
+                    double d1 = Convert.ToDouble(item[1]) * Convert.ToDouble(txtConversion.Text);
+                    string one = $"{d1:0.00}";
+                    double d2 = Convert.ToDouble(item[2]) * Convert.ToDouble(txtConversion.Text);
+                    string two = $"{d2:0.00}";
+                    double d3 = Convert.ToDouble(item[3]) * Convert.ToDouble(txtConversion.Text);
+                    string three = $"{d3:0.00}";
+                    if (d3 != 0)
+                    {
+                        if (ix > 1) richTextBox1.Text += "\n";
+                        richTextBox1.Text += Encode(pr) + "," + Encode(three);
                     }
                     ix++;
                 }
@@ -70,7 +92,8 @@ namespace GrabGex
                 .Replace("22", "=")
                 .Replace(".35", "")
                 .Replace("0.0", "~")
-                .Replace("-0.", ":");
+                .Replace("-0.", ":")
+                .Replace(".1", "E");
         }
 
         private void button1_Click(object sender, EventArgs e)
