@@ -1,0 +1,80 @@
+// @version=6
+indicator("Killpips Scanner", overlay=true)
+import TradingView/ta/9
+
+es11Symbol = input.symbol("CME_MINI:ES1!", "ES", inline="symbols", group="Futures List")
+es12Symbol = input.symbol("CME_MINI:NQ1!", "NQ", inline="symbols", group="Futures List")
+vixSymbol = input.symbol("TVC:VIX", "VIX", inline="symbols", group="Futures List")
+es1Symbol = input.symbol("CBOT_MINI:YM1!", "Dow Jones", inline="symbols", group="Futures List")
+ndxSymbol = input.symbol("NASDAQ:NDX", "NDX", inline="symbols", group="Futures List")
+rtySymbol = input.symbol("CME_MINI:RTY1!", "RTY", inline="symbols", group="Futures List")
+fdaxSymbol = input.symbol("EUREX:FDAX1!", "FDAX", inline="symbols", group="Futures List")
+
+goldSymbol = input.symbol("COMEX:GC1!", "Gold", inline="symbols", group="Commodities List")
+oilSymbol = input.symbol("NYMEX:CL1!", "Oil", inline="symbols", group="Commodities List")
+silverSymbol = input.symbol("COMEX:SI1!", "Silver", inline="symbols", group="Commodities List")
+copperSymbol = input.symbol("COMEX:HG1!", "Copper", inline="symbols", group="Commodities List")
+
+stLength = input.int(11, "Length", minval=1, group="SuperTrend")
+stMultiplier = input.float(2.0, "Multiplier", minval=0.1, step=0.1, group="SuperTrend")
+
+bbLength = input.int(20, "Bollinger Length", minval=1, group="Bollinger Bands")
+bbMultiplier = input.float(2.0, "Bollinger Multiplier", minval=0.1, step=0.1, group="Bollinger Bands")
+BBtouchTolerance = input.float(0.05, "Touch Tolerance (%)", minval=0, step=0.01, group="Bollinger Bands") / 100
+
+bg = color.new(color.black, 100)
+
+if barstate.islast
+    extraTXT = ""
+
+    es1Close = request.security(es1Symbol, timeframe.period, close)
+    es1DayOpen = request.security(es1Symbol, "1D", open)
+    es1Ema = request.security(es1Symbol, timeframe.period, ta.ema(close, 21))
+    es1Ema200 = request.security(es1Symbol, timeframe.period, ta.ema(close, 200))
+    es1Sar = request.security(es1Symbol, timeframe.period, ta.sar(start = 0.02, inc = 0.02, max=0.2))
+    es1VWAP = request.security(es1Symbol, timeframe.period, ta.vwap(close))
+    [es1M1, es1M2, es1MacdHist] = request.security(es1Symbol, timeframe.period, ta.macd(close, 12, 26, 9))
+    [es1STPrice, es1ST] = request.security(es1Symbol, timeframe.period, ta.supertrend(stLength, stMultiplier))
+    [es1BBMiddle, es1BBUpper, es1BBLower] = request.security(es1Symbol, timeframe.period, ta.bb(close, bbLength, bbMultiplier))
+    es1TouchingUpperBB = math.abs(es1Close - es1BBUpper) <= es1BBUpper // * BBtouchTolerance
+    es1TouchingLowerBB = math.abs(es1Close - es1BBLower) <= es1BBLower // * BBtouchTolerance
+    es1TouchingBB = es1TouchingUpperBB or es1TouchingLowerBB
+
+    bbtouch = label.new(x=bar_index + 5, y=low, text="     ", color=bg, style=label.style_label_down, textcolor=bg, size=size.normal)
+
+    if (es1TouchingBB)
+        sC = es1TouchingUpperBB ? color.lime : color.red
+        label.set_text(bbtouch, "BB Touch")
+        label.set_textcolor(bbtouch, sC)
+    else
+        label.set_text(bbtouch, "     ")
+        label.set_textcolor(bbtouch, bg)
+
+    sC = es1Close > es1VWAP ? color.lime : color.red
+    label.new(x=bar_index + 10, y=low, text="VWAP", color=bg, style=label.style_label_down, textcolor=sC, size=size.normal)
+
+    sC := es1MacdHist > 0 ? color.lime : color.red
+    label.new(x=bar_index + 15, y=low, text="MACD", color=bg, style=label.style_label_down, textcolor=sC, size=size.normal)
+
+    sC := es1Sar < es1Close ? color.lime : color.red
+    label.new(x=bar_index + 20, y=low, text="PSar", color=bg, style=label.style_label_down, textcolor=sC, size=size.normal)
+
+    sC := es1Close > es1Ema ? color.lime : color.red
+    label.new(x=bar_index + 25, y=low, text="21 EMA", color=bg, style=label.style_label_down, textcolor=sC, size=size.normal)
+
+    sC := es1Close > es1Ema200 ? color.lime : color.red
+    label.new(x=bar_index + 30, y=low, text="200 EMA", color=bg, style=label.style_label_down, textcolor=sC, size=size.normal)
+
+    percentChange = ta.changePercent(es1Close, es1DayOpen)
+    sC := percentChange > 0 ? color.lime : color.red
+    label.new(x=bar_index + 35, y=low, text="CH: " + str.tostring(percentChange, "#.##"), color=bg, style=label.style_label_down, textcolor=sC, size=size.normal)
+
+    sC := es1ST < 0 ? color.lime : color.red
+    label.new(x=bar_index + 40, y=low, text="SuperTrend", color=bg, style=label.style_label_down, textcolor=sC, size=size.normal)
+
+
+
+    //label.set_xy(statusLabel, bar_index, high)
+    //label.set_text(statusLabel, statusText)
+    //label.set_textcolor(statusLabel, statusColor)
+
