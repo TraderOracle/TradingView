@@ -2,50 +2,114 @@
 indicator("Killpips Scanner", overlay=true)
 import TradingView/ta/9
 
-es11Symbol = input.symbol("CME_MINI:ES1!", "ES", inline="symbols", group="Futures List")
-es12Symbol = input.symbol("CME_MINI:NQ1!", "NQ", inline="symbols", group="Futures List")
-vixSymbol = input.symbol("TVC:VIX", "VIX", inline="symbols", group="Futures List")
-es1Symbol = input.symbol("CBOT_MINI:YM1!", "Dow Jones", inline="symbols", group="Futures List")
-ndxSymbol = input.symbol("NASDAQ:NDX", "NDX", inline="symbols", group="Futures List")
-rtySymbol = input.symbol("CME_MINI:RTY1!", "RTY", inline="symbols", group="Futures List")
-fdaxSymbol = input.symbol("EUREX:FDAX1!", "FDAX", inline="symbols", group="Futures List")
+showKill = input.bool(true, "Show Killpips Status", group="Settings")
+smEMA = input.int(21, "Standard EMA", minval=1, group="Settings")
+bigEMA = input.int(200, "Longer EMA", minval=1, group="Settings")
+stLength = input.int(11, "RSI Length", minval=1, group="Settings")
+rsiOB = input.int(80, "RSI Overbought Value", minval=1, group="Settings")
+rsiOS = input.int(20, "RSI Oversold Value", minval=1, group="Settings")
+stMultiplier = input.int(2, "SuperTrend Multiplier", minval=0, step=1, group="Settings")
+rsiLen = input.int(11, "SuperTrend Length", minval=1, group="Settings")
 
-goldSymbol = input.symbol("COMEX:GC1!", "Gold", inline="symbols", group="Commodities List")
-oilSymbol = input.symbol("NYMEX:CL1!", "Oil", inline="symbols", group="Commodities List")
-silverSymbol = input.symbol("COMEX:SI1!", "Silver", inline="symbols", group="Commodities List")
-copperSymbol = input.symbol("COMEX:HG1!", "Copper", inline="symbols", group="Commodities List")
+useExtendedSession = input.bool(false, "Use Extended Session", group="Opening Range")
+sessionTimeInput = input.session("0930-1600", "Regular Trading Hours", group="Opening Range")
+rangeMin = input.int(15, "Opening Range Minutes", minval=1, maxval=60, group="Opening Range")
 
-stLength = input.int(11, "Length", minval=1, group="SuperTrend")
-stMultiplier = input.float(2.0, "Multiplier", minval=0.1, step=0.1, group="SuperTrend")
+bool useES = input.bool(true, "Use ES", group="Futures List")
+bool useNQ = input.bool(true, "Use NQ", group="Futures List")
+bool useVIX = input.bool(true, "Use VIX", group="Futures List")
+bool useYM = input.bool(true, "Use YM",  group="Futures List")
+bool useNDX = input.bool(true, "Use NDX",  group="Futures List")
+bool useRTY = input.bool(true, "Use RTY",  group="Futures List")
+bool useFDAX = input.bool(true, "Use FDAX",  group="Futures List")
 
-bbLength = input.int(20, "Bollinger Length", minval=1, group="Bollinger Bands")
-bbMultiplier = input.float(2.0, "Bollinger Multiplier", minval=0.1, step=0.1, group="Bollinger Bands")
+bool useGC = input.bool(true, "Use Gold",  group="Commodities List")
+bool useSI = input.bool(true, "Use Silver",  group="Commodities List")
+bool useHG = input.bool(true, "Use Copper",  group="Commodities List")
+bool useCL = input.bool(true, "Use Oil",  group="Commodities List")
+
+macd1 = input.int(12, "Short",  minval=1, group="MACD")
+macd2 = input.int(26, "Long",  minval=1, group="MACD")
+macd3 = input.int(9, "Period",  minval=1, group="MACD")
+
+bbLength = input.int(20, "Bollinger Length",  minval=1, group="Bollinger Bands")
+bbMultiplier = input.float(2, "Bollinger Multiplier", minval=0.1, step=0.1, group="Bollinger Bands")
 BBtouchTolerance = input.float(0.05, "Touch Tolerance (%)", minval=0, step=0.01, group="Bollinger Bands") / 100
+
+esSymbol = "CME_MINI:ES1!"
+nqSymbol = "CME_MINI:NQ1!"
+vixSymbol = "TVC:VIX"
+es1Symbol = "CBOT_MINI:YM1!"
+ndxSymbol = "NASDAQ:NDX"
+rtySymbol = "CME_MINI:RTY1!"
+fdaxSymbol = "EUREX:FDAX1!"
+goldSymbol = "COMEX:GC1!"
+oilSymbol = "NYMEX:CL1!"
+silverSymbol = "COMEX:SI1!"
+copperSymbol = "COMEX:HG1!"
+
+var float rangeHigh = na
+var float rangeLow = na
+var int rangeStartBar = na
+var bool rangeSet = false
+var sessionFound = false
+
+isNewSession() =>
+    t = time("", sessionTimeInput)
+    timeframe.isintraday and (not na(t) and na(t[1]))
+
+if isNewSession()
+    rangeHigh := na
+    rangeLow := na
+    rangeStartBar := bar_index
+    rangeSet := false
+    sessionFound := true
+
+getMinutesFromOpen(isNewSession) =>
+    if isNewSession
+        0
+    else
+        mins = 0
+        if timeframe.isminutes
+            mins := mins + timeframe.multiplier
+        else if timeframe.isseconds
+            mins := mins + (timeframe.multiplier / 60)
+        else if timeframe.isdaily or timeframe.isweekly or timeframe.ismonthly
+            mins := 1000  // Just a large number to indicate we're past opening range
+        
+        na(mins[1]) ? mins : mins[1] + mins
+
+if sessionFound and not rangeSet and minutesFromOpen <= rangeMin
+    rangeLow := na(rangeLow) ? low : math.min(rangeLow, low)
+    rangeHigh := na(rangeHigh) ? high : math.max(rangeHigh, high)
+    // When opening range period completes, mark it as set
+    if minutesFromOpen == rangeMin
+        rangeSet := true
 
 bg = color.new(color.black, 100)
 
-if barstate.islast
-    extraTXT = ""
+createTableWithParam(es1Symbol) =>
 
     es1Close = request.security(es1Symbol, timeframe.period, close)
     es1DayOpen = request.security(es1Symbol, "1D", open)
-    es1Ema = request.security(es1Symbol, timeframe.period, ta.ema(close, 21))
-    es1Ema200 = request.security(es1Symbol, timeframe.period, ta.ema(close, 200))
+    es1RSI = request.security(es1Symbol, timeframe.period, ta.rsi(close, rsiLen))
+    es1Ema = request.security(es1Symbol, timeframe.period, ta.ema(close, smEMA))
+    es1Ema200 = request.security(es1Symbol, timeframe.period, ta.ema(close, bigEMA))
     es1Sar = request.security(es1Symbol, timeframe.period, ta.sar(start = 0.02, inc = 0.02, max=0.2))
     es1VWAP = request.security(es1Symbol, timeframe.period, ta.vwap(close))
-    [es1M1, es1M2, es1MacdHist] = request.security(es1Symbol, timeframe.period, ta.macd(close, 12, 26, 9))
+    [es1M1, es1M2, es1MacdHist] = request.security(es1Symbol, timeframe.period, ta.macd(close, macd1, macd2, macd3))
     [es1STPrice, es1ST] = request.security(es1Symbol, timeframe.period, ta.supertrend(stLength, stMultiplier))
     [es1BBMiddle, es1BBUpper, es1BBLower] = request.security(es1Symbol, timeframe.period, ta.bb(close, bbLength, bbMultiplier))
-    es1TouchingUpperBB = math.abs(es1Close - es1BBUpper) <= es1BBUpper // * BBtouchTolerance
-    es1TouchingLowerBB = math.abs(es1Close - es1BBLower) <= es1BBLower // * BBtouchTolerance
+    es1TouchingUpperBB = math.abs(es1Close - es1BBUpper) <= es1BBUpper * BBtouchTolerance
+    es1TouchingLowerBB = math.abs(es1Close - es1BBLower) <= es1BBLower * BBtouchTolerance
     es1TouchingBB = es1TouchingUpperBB or es1TouchingLowerBB
 
     bbtouch = label.new(x=bar_index + 5, y=low, text="     ", color=bg, style=label.style_label_down, textcolor=bg, size=size.normal)
 
     if (es1TouchingBB)
-        sC = es1TouchingUpperBB ? color.lime : color.red
+        sBB = es1TouchingUpperBB ? color.lime : color.red
         label.set_text(bbtouch, "BB Touch")
-        label.set_textcolor(bbtouch, sC)
+        label.set_textcolor(bbtouch, sBB)
     else
         label.set_text(bbtouch, "     ")
         label.set_textcolor(bbtouch, bg)
@@ -72,9 +136,10 @@ if barstate.islast
     sC := es1ST < 0 ? color.lime : color.red
     label.new(x=bar_index + 40, y=low, text="SuperTrend", color=bg, style=label.style_label_down, textcolor=sC, size=size.normal)
 
+    sC := es1RSI > rsiOB ? color.lime : es1RSI < rsiOS ? color.red : color.white
+    label.new(x=bar_index + 45, y=low, text="RSI", color=bg, style=label.style_label_down, textcolor=sC, size=size.normal)
 
 
-    //label.set_xy(statusLabel, bar_index, high)
-    //label.set_text(statusLabel, statusText)
-    //label.set_textcolor(statusLabel, statusColor)
-
+if barstate.islast
+    extraTXT = ""
+    createTableWithParam(esSymbol)
