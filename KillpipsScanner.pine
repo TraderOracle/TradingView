@@ -39,7 +39,7 @@ BBtouchTolerance = input.float(0.05, "Touch Tolerance (%)", minval=0, step=0.01,
 esSymbol = "CME_MINI:ES1!"
 nqSymbol = "CME_MINI:NQ1!"
 vixSymbol = "TVC:VIX"
-es1Symbol = "CBOT_MINI:YM1!"
+ymSymbol = "CBOT_MINI:YM1!"
 ndxSymbol = "NASDAQ:NDX"
 rtySymbol = "CME_MINI:RTY1!"
 fdaxSymbol = "EUREX:FDAX1!"
@@ -51,8 +51,11 @@ copperSymbol = "COMEX:HG1!"
 var float rangeHigh = na
 var float rangeLow = na
 var int rangeStartBar = na
+var int minutesFromOpen = na
 var bool rangeSet = false
 var sessionFound = false
+var row = 1
+var table myTable = table.new(position.top_center, 13, 8, bgcolor = color.new(color.black, 100), frame_width = 1, frame_color = color.gray, border_width = 1, border_color = color.gray)
 
 isNewSession() =>
     t = time("", sessionTimeInput)
@@ -88,58 +91,70 @@ if sessionFound and not rangeSet and minutesFromOpen <= rangeMin
 
 bg = color.new(color.black, 100)
 
-createTableWithParam(es1Symbol) =>
+updateTable(sym) =>
+    tf = timeframe.period
+    tickClose = request.security(sym, tf, close)
+    tickDayOpen = request.security(sym, "1D", open)
+    tickRSI = request.security(sym, tf, ta.rsi(close, rsiLen))
+    tickEma = request.security(sym, tf, ta.ema(close, smEMA))
+    tickEma200 = request.security(sym, tf, ta.ema(close, bigEMA))
+    tickSar = request.security(sym, tf, ta.sar(start = 0.02, inc = 0.02, max=0.2))
+    tickVWAP = request.security(sym, tf, ta.vwap(close))
+    [tickM1, tickM2, tickMacdHist] = request.security(sym, tf, ta.macd(close, macd1, macd2, macd3))
+    [tickSTPrice, tickST] = request.security(sym, tf, ta.supertrend(stLength, stMultiplier))
+    [tickBBMiddle, tickBBUpper, tickBBLower] = request.security(sym, tf, ta.bb(close, bbLength, bbMultiplier))
+    tickTouchingUpperBB = math.abs(tickClose - tickBBUpper) <= tickBBUpper * BBtouchTolerance
+    tickTouchingLowerBB = math.abs(tickClose - tickBBLower) <= tickBBLower * BBtouchTolerance
+    tickTouchingBB = tickTouchingUpperBB or tickTouchingLowerBB
 
-    es1Close = request.security(es1Symbol, timeframe.period, close)
-    es1DayOpen = request.security(es1Symbol, "1D", open)
-    es1RSI = request.security(es1Symbol, timeframe.period, ta.rsi(close, rsiLen))
-    es1Ema = request.security(es1Symbol, timeframe.period, ta.ema(close, smEMA))
-    es1Ema200 = request.security(es1Symbol, timeframe.period, ta.ema(close, bigEMA))
-    es1Sar = request.security(es1Symbol, timeframe.period, ta.sar(start = 0.02, inc = 0.02, max=0.2))
-    es1VWAP = request.security(es1Symbol, timeframe.period, ta.vwap(close))
-    [es1M1, es1M2, es1MacdHist] = request.security(es1Symbol, timeframe.period, ta.macd(close, macd1, macd2, macd3))
-    [es1STPrice, es1ST] = request.security(es1Symbol, timeframe.period, ta.supertrend(stLength, stMultiplier))
-    [es1BBMiddle, es1BBUpper, es1BBLower] = request.security(es1Symbol, timeframe.period, ta.bb(close, bbLength, bbMultiplier))
-    es1TouchingUpperBB = math.abs(es1Close - es1BBUpper) <= es1BBUpper * BBtouchTolerance
-    es1TouchingLowerBB = math.abs(es1Close - es1BBLower) <= es1BBLower * BBtouchTolerance
-    es1TouchingBB = es1TouchingUpperBB or es1TouchingLowerBB
+    // ES | Killpips LONG | last alert | supertrend macd psar ema ema200 vwap BB RSI change %  
 
-    bbtouch = label.new(x=bar_index + 5, y=low, text="     ", color=bg, style=label.style_label_down, textcolor=bg, size=size.normal)
+    table.cell(myTable, 1, row, sym, text_color=color.white, bgcolor=bg, text_size=size.small)
+    table.cell(myTable, 2, row, "🡅🡅 Killpips LONG 2", text_color=color.white, bgcolor=bg, text_size=size.small)
+    table.cell(myTable, 3, row, "🡅 Long Signal - 1m ago", text_color=color.white, bgcolor=bg, text_size=size.small)
 
-    if (es1TouchingBB)
-        sBB = es1TouchingUpperBB ? color.lime : color.red
-        label.set_text(bbtouch, "BB Touch")
-        label.set_textcolor(bbtouch, sBB)
+    sC = tickClose > tickVWAP ? color.green : color.maroon
+    table.cell(myTable, 4, row, "VWAP", text_color=color.white, bgcolor=sC, text_size=size.small)
+
+    sC := tickMacdHist > 0 ? color.green : color.maroon
+    table.cell(myTable, 5, row, "MACD", text_color=color.white, bgcolor=sC, text_size=size.small)
+
+    sC := tickSar < tickClose ? color.green : color.maroon
+    table.cell(myTable, 6, row, "PSar", text_color=color.white, bgcolor=sC, text_size=size.small)
+
+    sC := tickClose > tickEma ? color.green : color.maroon
+    table.cell(myTable, 7, row, "21 EMA", text_color=color.white, bgcolor=sC, text_size=size.small)
+
+    sC := tickClose > tickEma200 ? color.green : color.maroon
+    table.cell(myTable, 8, row, "200 EMA", text_color=color.white, bgcolor=sC, text_size=size.small)
+
+    percentChange = ta.changePercent(tickClose, tickDayOpen)
+    sC := percentChange > 0 ? color.green : color.maroon
+    table.cell(myTable, 9, row, "CH: " + str.tostring(percentChange, "#.##"), text_color=color.white, bgcolor=sC, text_size=size.small)
+
+    sC := tickST < 0 ? color.green : color.maroon
+    table.cell(myTable, 10, row, "SuperTrend", text_color=color.white, bgcolor=sC, text_size=size.small)
+
+    sC := tickRSI > rsiOB ? color.green : tickRSI < rsiOS ? color.maroon : color.gray
+    table.cell(myTable, 11, row, "RSI", text_color=color.white, bgcolor=sC, text_size=size.small)
+
+    if (tickTouchingBB)
+        sC1 = tickTouchingUpperBB ? color.green : color.maroon
+        table.cell(myTable, 12, row, "BB Touch", text_color=color.white, bgcolor=sC1, text_size=size.small)
     else
-        label.set_text(bbtouch, "     ")
-        label.set_textcolor(bbtouch, bg)
-
-    sC = es1Close > es1VWAP ? color.lime : color.red
-    label.new(x=bar_index + 10, y=low, text="VWAP", color=bg, style=label.style_label_down, textcolor=sC, size=size.normal)
-
-    sC := es1MacdHist > 0 ? color.lime : color.red
-    label.new(x=bar_index + 15, y=low, text="MACD", color=bg, style=label.style_label_down, textcolor=sC, size=size.normal)
-
-    sC := es1Sar < es1Close ? color.lime : color.red
-    label.new(x=bar_index + 20, y=low, text="PSar", color=bg, style=label.style_label_down, textcolor=sC, size=size.normal)
-
-    sC := es1Close > es1Ema ? color.lime : color.red
-    label.new(x=bar_index + 25, y=low, text="21 EMA", color=bg, style=label.style_label_down, textcolor=sC, size=size.normal)
-
-    sC := es1Close > es1Ema200 ? color.lime : color.red
-    label.new(x=bar_index + 30, y=low, text="200 EMA", color=bg, style=label.style_label_down, textcolor=sC, size=size.normal)
-
-    percentChange = ta.changePercent(es1Close, es1DayOpen)
-    sC := percentChange > 0 ? color.lime : color.red
-    label.new(x=bar_index + 35, y=low, text="CH: " + str.tostring(percentChange, "#.##"), color=bg, style=label.style_label_down, textcolor=sC, size=size.normal)
-
-    sC := es1ST < 0 ? color.lime : color.red
-    label.new(x=bar_index + 40, y=low, text="SuperTrend", color=bg, style=label.style_label_down, textcolor=sC, size=size.normal)
-
-    sC := es1RSI > rsiOB ? color.lime : es1RSI < rsiOS ? color.red : color.white
-    label.new(x=bar_index + 45, y=low, text="RSI", color=bg, style=label.style_label_down, textcolor=sC, size=size.normal)
-
+        table.cell(myTable, 12, row, "BB Touch", text_color=bg, bgcolor=bg, text_size=size.small)
 
 if barstate.islast
-    extraTXT = ""
-    createTableWithParam(esSymbol)
+    row := 1
+    updateTable(esSymbol)
+    row := row + 1
+    updateTable(nqSymbol)
+    row := row + 1
+    updateTable(ymSymbol)
+    row := row + 1
+    updateTable(vixSymbol)
+    row := row + 1
+    updateTable(oilSymbol)
+    row := row + 1
+    updateTable(goldSymbol)
+
