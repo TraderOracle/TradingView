@@ -17,7 +17,7 @@ bool showMACDPsar = input.bool(true, "Show MACD/Psar Status",  group="Show Optio
 bool showEMAs = input.bool(true, "Show EMA Status",  group="Show Options")
 bool showCH = input.bool(true, "Show Change Percent",  group="Show Options")
 bool showRSI = input.bool(false, "Show RSI Status",  group="Show Options")
-//bool showBB = input.bool(false, "Show Bollinger Band Touch Status",  group="Show Options")
+bool showBB = input.bool(false, "Show Bollinger Band Touches",  group="Show Options")
 
 bool useES = input.bool(true, "Scan S&P 500 Futures", group="Scan List")
 bool useNQ = input.bool(true, "Scan NASDAQ Futures", group="Scan List")
@@ -71,23 +71,99 @@ var table myTable = table.new(tPos, 17, 8, bgcolor = color.new(color.black, 100)
 //table.cell(myTable, 2, 1, "Killpips Level", text_color=txtC, bgcolor=bg, text_size=myFont)
 //table.cell(myTable, 3, 1, "Latest Alert", text_color=txtC, bgcolor=bg, text_size=myFont)
 
+loadUpMap(comma) =>
+    map.clear(mapC)
+    for i = 0 to array.size(comma) - 2 by 2
+        key = str.trim(array.get(comma, i))
+        valueStr = str.trim(array.get(comma, i+1))
+        valueNum = str.tonumber(valueStr)
+        map.put(mapC, key, valueNum)
+
+lookMap(string a) =>
+    result = 0.0
+    if map.contains(mapC, a)
+        result := map.get(mapC, a)
+    result
+
+getKillStatus(float fuc) =>
+    string result = ""
+    log.info("KillStatus float = " + str.tostring(fuc))
+    if (fuc > lookMap("HV") and fuc < lookMap("RD0"))
+        result := "Long"
+    if (fuc > lookMap("RD0") and fuc < lookMap("RD1"))
+        result := "🡅 Long "
+    if (fuc > lookMap("RD1") and fuc < lookMap("RD2"))
+        result := "🡅🡅 Long "  
+    if (fuc > lookMap("RD2") and fuc < lookMap("vix r1"))
+        result := "🡅🡅🡅 Long "
+    if (fuc > lookMap("vix r1") and fuc < lookMap("vix r2"))
+        result := "😧 Extreme Long 😧"
+    if (fuc > lookMap("vix r2") and fuc < lookMap("VAH"))
+        result := "⛔ Absolute TOP ⛔"
+    if (fuc < lookMap("HV") and fuc > lookMap("SD0"))
+        result := "Short"
+    if (fuc < lookMap("SD0") and fuc > lookMap("SD1"))
+        result := "🡇 Short "
+    if (fuc < lookMap("SD1") and fuc > lookMap("SD2"))
+        result := "🡇🡇 Short "  
+    if (fuc < lookMap("SD2") and fuc > lookMap("vix s1"))
+        result := "🡇🡇🡇 Short "  
+    if (fuc < lookMap("vix s1") and fuc > lookMap("vix s2"))
+        result := "😧 Extreme Short 😧"
+    if (fuc < lookMap("vix s2") and fuc > lookMap("VAL"))
+        result := "⛔ Absolute BOTTOM ⛔"
+    result
+
+parseKillStatus(sTicker, Close) =>
+    log.info("parseKillStatus = '" + sTicker + "'" + str.tostring(Close) + "'")
+    string[] _pair = str.split(zones, "\n")
+    string sw = ""
+    string commas = ""
+    string result = ""
+
+    for s in _pair
+        sw := s
+        if str.contains(s, "setting ")
+            string[] parts = str.split(s, "setting ")
+            sw := array.get(parts, 0)
+        if str.contains(sw, ":")
+            string[] parts = str.split(sw, ":")
+            // SD2, 5.0530, HV, 5.1130, VAH, 5.2195, VAL, 5.0060  setting 5k - 41k
+            sw := array.get(parts, 1)
+            // $HG1!: 
+            sTick = array.get(parts, 0)
+            if str.contains(sTick, sTicker)
+                sw := str.trim(sw)
+                string[] comma = str.split(sw, ", ")
+                // vix r1, 5788, vix r2, 5793, vix s1, 5637, vix s2, 5632, RD0, 5727, RD1, 5740, RD2, 5768
+                loadUpMap(comma)
+                log.info("Map contains " + str.tostring(map.size(mapC)))
+                result := getKillStatus(Close)
+                log.info("result 2 = " + result)
+    result
+
 updateTable(sym) =>
     row = rowG
     tf = timeframe.period
     string[] xxx = str.split(sym, ":")
     sins = str.replace_all(array.get(xxx, 1), "1!", "") 
 
+    tickClose = request.security(sym, tf, close)
     [yaa, tickST] = request.security(sym, tf, ta.supertrend(stLength, stMultiplier))
     //[yab, tickST15m] = request.security(sym, "15", ta.supertrend(stLength, stMultiplier))
     //[yac, tickST30m] = request.security(sym, "30", ta.supertrend(stLength, stMultiplier))
     //[yad, tickST1h] = request.security(sym, "60", ta.supertrend(stLength, stMultiplier))
 
+    log.info("ticker '" + str.tostring(sins) + "' , tickClose " + str.tostring(tickClose))
+    sKillStatus = parseKillStatus(sins, tickClose)
+    log.info("sKillStatus '" + sKillStatus + "'")
     table.cell(myTable, 1, row, sins, text_color=txtC, bgcolor=bg, text_size=myFont)
-    table.cell(myTable, 2, row, "🡅🡅 Killpips LONG 2", text_color=txtC, bgcolor=bg, text_size=myFont)
-    table.cell(myTable, 3, row, "🡅 Long Signal - 1m ago", text_color=txtC, bgcolor=bg, text_size=myFont)
 
-    sC = tickST < 0 ? greenC : redC
-    table.cell(myTable, 4, row, "Trend", text_color=txtC, bgcolor=sC, text_size=myFont)
+    sC = str.contains(sKillStatus, "LONG") ? greenC : str.contains(sKillStatus, "Long") ? greenC : str.contains(sKillStatus, "SHORT") ? redC : str.contains(sKillStatus, "Short") ? redC : bg
+    table.cell(myTable, 2, row, sKillStatus, text_color=txtC, bgcolor=sC , text_size=myFont)
+
+    sC := tickST < 0 ? greenC : redC
+    table.cell(myTable, 3, row, "Trend", text_color=txtC, bgcolor=sC, text_size=myFont)
     //sC := tickST15m < 0 ? greenC : redC
     //table.cell(myTable, 5, row, "15m", text_color=txtC, bgcolor=sC, text_size=myFont)
     //sC := tickST30m < 0 ? greenC : redC
@@ -95,7 +171,7 @@ updateTable(sym) =>
     //sC := tickST1h < 0 ? greenC : redC
     //table.cell(myTable, 7, row, "1H", text_color=txtC, bgcolor=sC, text_size=myFont)
 
-    col = 4
+    col = 3
 
     if (showVWAP)
         tickVWAP = request.security(sym, tf, ta.vwap(close))
@@ -124,7 +200,6 @@ updateTable(sym) =>
         table.cell(myTable, col, row, "200 EMA", text_color=txtC, bgcolor=sC, text_size=myFont)
 
     if (showCH)    
-        tickClose = request.security(sym, tf, close)
         tickDayOpen = request.security(sym, "1D", open)
         col := col + 1
         percentChange = ta.changePercent(tickClose, tickDayOpen)
@@ -134,82 +209,25 @@ updateTable(sym) =>
     if (showRSI)
         tickRSI = request.security(sym, tf, ta.rsi(close, rsiLen))
         col := col + 1
-        sC := tickRSI > rsiOB ? greenC : tickRSI < rsiOS ? redC : color.gray
-        table.cell(myTable, col, row, "RSI", text_color=txtC, bgcolor=sC, text_size=myFont)
+        sC := tickRSI > rsiOB ? greenC : tickRSI < rsiOS ? redC : bg
+        colTTT = tickRSI > rsiOB ? txtC : tickRSI < rsiOS ? txtC : color.new(color.gray, 10)
+        table.cell(myTable, col, row, "RSI", text_color=colTTT, bgcolor=sC, text_size=myFont)
 
-//        table.cell(myTable, col, row, "BB Touch", text_color=bg, bgcolor=bg, text_size=myFont)
-    //[tickBBMiddle, tickBBUpper, tickBBLower] = request.security(sym, tf, ta.bb(close, bbLength, bbMultiplier))
-    //tickTouchingUpperBB = math.abs(tickClose - tickBBUpper) <= tickBBUpper * BBtouchTolerance
-    //tickTouchingLowerBB = math.abs(tickClose - tickBBLower) <= tickBBLower * BBtouchTolerance
-    //tickTouchingBB = tickTouchingUpperBB or tickTouchingLowerBB
-
-loadUpMap(comma) =>
-    for i = 0 to array.size(comma) - 2 by 2
-        key = str.trim(array.get(comma, i))
-        valueStr = str.trim(array.get(comma, i+1))
-        valueNum = str.tonumber(valueStr)
-        map.put(mapC, key, valueNum)
-
-lookMap(string a) =>
-    result = 0.0
-    if map.contains(mapC, a)
-        result := map.get(mapC, a)
-    result
-
-getKillStatus(float fuc) =>
-    if (fuc > lookMap("HV") and fuc < lookMap("RD0"))
-        "Long from Middle"
-    if (fuc > lookMap("RD0") and fuc < lookMap("RD1"))
-        "🡅 Long 1"
-    if (fuc > lookMap("RD1") and fuc < lookMap("RD2"))
-        "🡅🡅 Long 2"  
-    if (fuc > lookMap("RD2") and fuc < lookMap("vix r1"))
-        "🡅🡅🡅 Long 3"
-    if (fuc > lookMap("vix r1") and fuc < lookMap("vix r2"))
-        "😧 Extreme Long 😧"
-    if (fuc > lookMap("vix r2") and fuc < lookMap("VAH"))
-        "⛔ Absolute TOP ⛔"
-
-    if (fuc < lookMap("HV") and fuc > lookMap("SD0"))
-        "Short from Middle"
-    if (fuc < lookMap("SD0") and fuc > lookMap("SD1"))
-        "🡇 Short 1"
-    if (fuc < lookMap("SD1") and fuc > lookMap("SD2"))
-        "🡇🡇 Short 2"  
-    if (fuc < lookMap("SD2") and fuc > lookMap("vix s1"))
-        "🡇🡇🡇 Short 3"  
-    if (fuc < lookMap("vix s1") and fuc > lookMap("vix s2"))
-        "😧 Extreme Short 😧"
-    if (fuc < lookMap("vix s2") and fuc > lookMap("VAL"))
-        "⛔ Absolute BOTTOM ⛔"
+    if (showBB)
+        [tickBBMiddle, tickBBUpper, tickBBLower] = request.security(sym, tf, ta.bb(close, bbLength, bbMultiplier))
+        col := col + 1
+        tickTouchingUpperBB = math.abs(tickClose - tickBBUpper) <= tickBBUpper * BBtouchTolerance
+        tickTouchingLowerBB = math.abs(tickClose - tickBBLower) <= tickBBLower * BBtouchTolerance
+        tickTouchingBB = tickTouchingUpperBB or tickTouchingLowerBB
+        sC := tickTouchingUpperBB ? greenC : tickTouchingLowerBB ? redC : bg
+        colTTT = tickTouchingBB ? txtC : color.new(color.gray, 10)
+        table.cell(myTable, col, row, "BB Touch", text_color=colTTT, bgcolor=sC, text_size=myFont)
 
 
 if barstate.islast
     string[] _pair = str.split(zones, "\n")
     string sw = ""
     string commas = ""
-    var tickClose = close
-
-    for s in _pair
-        sw := s
-        // $HG1!: SD2, 5.0530, HV, 5.1130, VAH, 5.2195, VAL, 5.0060  setting 5k - 41k
-        if str.contains(s, "setting ")
-            string[] parts = str.split(s, "setting ")
-            sw := array.get(parts, 0)
-        if str.contains(sw, ":")
-            string[] parts = str.split(sw, ":")
-            // SD2, 5.0530, HV, 5.1130, VAH, 5.2195, VAL, 5.0060  setting 5k - 41k
-            sw := array.get(parts, 1)
-            // $HG1!: 
-            sTick = array.get(parts, 0)
-            if str.contains(sTick, syminfo.ticker)
-                sw := str.trim(sw)
-                string[] comma = str.split(sw, ", ")
-                // vix r1, 5788, vix r2, 5793, vix s1, 5637, vix s2, 5632, RD0, 5727, RD1, 5740, RD2, 5768
-                loadUpMap(comma)
-
-                log.info(getKillStatus(tickClose))
-
 
     rowG := 0
     if(useES) // = input.bool(true, "Scan S&P 500 Futures", group="Scan List")
