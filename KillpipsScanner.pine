@@ -2,39 +2,48 @@
 indicator("Killpips Scanner", overlay=true)
 import TradingView/ta/9
 
-showKill = input.bool(true, "Show Killpips Status", group="Settings")
-smEMA = input.int(21, "Standard EMA", minval=1, group="Settings")
-bigEMA = input.int(200, "Longer EMA", minval=1, group="Settings")
-stLength = input.int(11, "RSI Length", minval=1, group="Settings")
-rsiOB = input.int(80, "RSI Overbought Value", minval=1, group="Settings")
-rsiOS = input.int(20, "RSI Oversold Value", minval=1, group="Settings")
-stMultiplier = input.int(2, "SuperTrend Multiplier", minval=0, step=1, group="Settings")
-rsiLen = input.int(11, "SuperTrend Length", minval=1, group="Settings")
+zones = input.text_area("", "Paste Killpips values here")
 
-useExtendedSession = input.bool(false, "Use Extended Session", group="Opening Range")
-sessionTimeInput = input.session("0930-1600", "Regular Trading Hours", group="Opening Range")
-rangeMin = input.int(15, "Opening Range Minutes", minval=1, maxval=60, group="Opening Range")
+tP = input.string("Top Right", "Table Position", options=["Top Center","Bottom Center","Top Right", "Top Left", "Bottom Right", "Bottom Left"], group="Settings")
+sFontSize = input.string(title="Font Size: ", options=["Tiny", "Small", "Normal", "Large"], defval="Small", group="Settings")
+txtC = input.color(defval=color.new(color.white, 20),title = "Text Color", group="Settings") 
+greenC = input.color(defval=color.new(color.green, 50),title = "Green Color", group="Settings") 
+redC = input.color(defval=color.new(color.red, 50),title = "Red Color", group="Settings") 
+yellowC = input.color(defval=color.new(color.yellow, 50),title = "Yellow Color", group="Settings") 
 
-bool useES = input.bool(true, "Use ES", group="Futures List")
-bool useNQ = input.bool(true, "Use NQ", group="Futures List")
-bool useVIX = input.bool(true, "Use VIX", group="Futures List")
-bool useYM = input.bool(true, "Use YM",  group="Futures List")
-bool useNDX = input.bool(true, "Use NDX",  group="Futures List")
-bool useRTY = input.bool(true, "Use RTY",  group="Futures List")
-bool useFDAX = input.bool(true, "Use FDAX",  group="Futures List")
+bool showKill = input.bool(true, "Show Killpips Status", group="Show Options")
+bool showVWAP = input.bool(false, "Show VWAP Status",  group="Show Options")
+bool showMACDPsar = input.bool(true, "Show MACD/Psar Status",  group="Show Options")
+bool showEMAs = input.bool(true, "Show EMA Status",  group="Show Options")
+bool showCH = input.bool(true, "Show Change Percent",  group="Show Options")
+bool showRSI = input.bool(false, "Show RSI Status",  group="Show Options")
+//bool showBB = input.bool(false, "Show Bollinger Band Touch Status",  group="Show Options")
 
-bool useGC = input.bool(true, "Use Gold",  group="Commodities List")
-bool useSI = input.bool(true, "Use Silver",  group="Commodities List")
-bool useHG = input.bool(true, "Use Copper",  group="Commodities List")
-bool useCL = input.bool(true, "Use Oil",  group="Commodities List")
+bool useES = input.bool(true, "Scan S&P 500 Futures", group="Scan List")
+bool useNQ = input.bool(true, "Scan NASDAQ Futures", group="Scan List")
+bool useVIX = input.bool(true, "Scan VIX", group="Scan List")
+bool useYM = input.bool(true, "Scan Dow Jones Futures",  group="Scan List")
+bool useNDX = input.bool(false, "Scan NDX",  group="Scan List")
+bool useRTY = input.bool(false, "Scan RTY",  group="Scan List")
+bool useFDAX = input.bool(false, "Scan FDAX",  group="Scan List")
+bool useGC = input.bool(false, "Scan Gold Futures",  group="Scan List")
+bool useSI = input.bool(false, "Scan Silver Futures",  group="Scan List")
+bool useHG = input.bool(false, "Scan Copper Futures",  group="Scan List")
+bool useCL = input.bool(false, "Scan Oil Futures",  group="Scan List")
 
-macd1 = input.int(12, "Short",  minval=1, group="MACD")
-macd2 = input.int(26, "Long",  minval=1, group="MACD")
-macd3 = input.int(9, "Period",  minval=1, group="MACD")
-
-bbLength = input.int(20, "Bollinger Length",  minval=1, group="Bollinger Bands")
-bbMultiplier = input.float(2, "Bollinger Multiplier", minval=0.1, step=0.1, group="Bollinger Bands")
-BBtouchTolerance = input.float(0.05, "Touch Tolerance (%)", minval=0, step=0.01, group="Bollinger Bands") / 100
+smEMA = input.int(21, "Standard EMA", minval=1, group="Indicator Settings")
+bigEMA = input.int(200, "Longer EMA", minval=1, group="Indicator Settings")
+stLength = input.int(11, "RSI Length", minval=1, group="Indicator Settings")
+rsiOB = input.int(80, "RSI Overbought Value", minval=1, group="Indicator Settings")
+rsiOS = input.int(20, "RSI Oversold Value", minval=1, group="Indicator Settings")
+stMultiplier = input.int(2, "SuperTrend Multiplier", minval=0, step=1, group="Indicator Settings")
+rsiLen = input.int(11, "SuperTrend Length", minval=1, group="Indicator Settings")
+macd1 = input.int(12, "MACD Short",  minval=1, group="Indicator Settings")
+macd2 = input.int(26, "MACD Long",  minval=1, group="Indicator Settings")
+macd3 = input.int(9, "MACD Period",  minval=1, group="Indicator Settings")
+bbLength = input.int(20, "Bollinger Length",  minval=1, group="Indicator Settings")
+bbMultiplier = input.float(2, "Bollinger Multiplier", minval=0.1, step=0.1, group="Indicator Settings")
+BBtouchTolerance = input.float(0.05, "BB Touch Tolerance (%)", minval=0, step=0.01, group="Indicator Settings") / 100
 
 esSymbol = "CME_MINI:ES1!"
 nqSymbol = "CME_MINI:NQ1!"
@@ -48,113 +57,192 @@ oilSymbol = "NYMEX:CL1!"
 silverSymbol = "COMEX:SI1!"
 copperSymbol = "COMEX:HG1!"
 
-var float rangeHigh = na
-var float rangeLow = na
-var int rangeStartBar = na
-var int minutesFromOpen = na
-var bool rangeSet = false
-var sessionFound = false
-var row = 1
-var table myTable = table.new(position.top_center, 13, 8, bgcolor = color.new(color.black, 100), frame_width = 1, frame_color = color.gray, border_width = 1, border_color = color.gray)
-
-isNewSession() =>
-    t = time("", sessionTimeInput)
-    timeframe.isintraday and (not na(t) and na(t[1]))
-
-if isNewSession()
-    rangeHigh := na
-    rangeLow := na
-    rangeStartBar := bar_index
-    rangeSet := false
-    sessionFound := true
-
-getMinutesFromOpen(isNewSession) =>
-    if isNewSession
-        0
-    else
-        mins = 0
-        if timeframe.isminutes
-            mins := mins + timeframe.multiplier
-        else if timeframe.isseconds
-            mins := mins + (timeframe.multiplier / 60)
-        else if timeframe.isdaily or timeframe.isweekly or timeframe.ismonthly
-            mins := 1000  // Just a large number to indicate we're past opening range
-        
-        na(mins[1]) ? mins : mins[1] + mins
-
-if sessionFound and not rangeSet and minutesFromOpen <= rangeMin
-    rangeLow := na(rangeLow) ? low : math.min(rangeLow, low)
-    rangeHigh := na(rangeHigh) ? high : math.max(rangeHigh, high)
-    // When opening range period completes, mark it as set
-    if minutesFromOpen == rangeMin
-        rangeSet := true
-
+mapC = map.new<string, float>()
+rowG = 1
 bg = color.new(color.black, 100)
 
+tPos = tP == "Top Left" ? position.top_left : tP == "Bottom Right" ? position.bottom_right : tP == "Bottom Left" ? position.bottom_left : tP == "Top Center" ? position.top_center : tP == "Bottom Center" ? position.bottom_center : position.top_right
+myFont = sFontSize == "Tiny" ? size.tiny : sFontSize == "Small" ? size.small : sFontSize == "Normal" ? size.normal : sFontSize == "Large" ? size.large : size.auto
+
+// Create Table
+var table myTable = table.new(tPos, 17, 8, bgcolor = color.new(color.black, 100), frame_width = 1, frame_color = color.gray, border_width = 1, border_color = color.gray)
+// Header
+//table.cell(myTable, 1, 1, "Ticker", text_color=txtC, bgcolor=bg, text_size=myFont)
+//table.cell(myTable, 2, 1, "Killpips Level", text_color=txtC, bgcolor=bg, text_size=myFont)
+//table.cell(myTable, 3, 1, "Latest Alert", text_color=txtC, bgcolor=bg, text_size=myFont)
+
 updateTable(sym) =>
+    row = rowG
     tf = timeframe.period
-    tickClose = request.security(sym, tf, close)
-    tickDayOpen = request.security(sym, "1D", open)
-    tickRSI = request.security(sym, tf, ta.rsi(close, rsiLen))
-    tickEma = request.security(sym, tf, ta.ema(close, smEMA))
-    tickEma200 = request.security(sym, tf, ta.ema(close, bigEMA))
-    tickSar = request.security(sym, tf, ta.sar(start = 0.02, inc = 0.02, max=0.2))
-    tickVWAP = request.security(sym, tf, ta.vwap(close))
-    [tickM1, tickM2, tickMacdHist] = request.security(sym, tf, ta.macd(close, macd1, macd2, macd3))
-    [tickSTPrice, tickST] = request.security(sym, tf, ta.supertrend(stLength, stMultiplier))
-    [tickBBMiddle, tickBBUpper, tickBBLower] = request.security(sym, tf, ta.bb(close, bbLength, bbMultiplier))
-    tickTouchingUpperBB = math.abs(tickClose - tickBBUpper) <= tickBBUpper * BBtouchTolerance
-    tickTouchingLowerBB = math.abs(tickClose - tickBBLower) <= tickBBLower * BBtouchTolerance
-    tickTouchingBB = tickTouchingUpperBB or tickTouchingLowerBB
+    string[] xxx = str.split(sym, ":")
+    sins = str.replace_all(array.get(xxx, 1), "1!", "") 
 
-    // ES | Killpips LONG | last alert | supertrend macd psar ema ema200 vwap BB RSI change %  
+    [yaa, tickST] = request.security(sym, tf, ta.supertrend(stLength, stMultiplier))
+    //[yab, tickST15m] = request.security(sym, "15", ta.supertrend(stLength, stMultiplier))
+    //[yac, tickST30m] = request.security(sym, "30", ta.supertrend(stLength, stMultiplier))
+    //[yad, tickST1h] = request.security(sym, "60", ta.supertrend(stLength, stMultiplier))
 
-    table.cell(myTable, 1, row, sym, text_color=color.white, bgcolor=bg, text_size=size.small)
-    table.cell(myTable, 2, row, "🡅🡅 Killpips LONG 2", text_color=color.white, bgcolor=bg, text_size=size.small)
-    table.cell(myTable, 3, row, "🡅 Long Signal - 1m ago", text_color=color.white, bgcolor=bg, text_size=size.small)
+    table.cell(myTable, 1, row, sins, text_color=txtC, bgcolor=bg, text_size=myFont)
+    table.cell(myTable, 2, row, "🡅🡅 Killpips LONG 2", text_color=txtC, bgcolor=bg, text_size=myFont)
+    table.cell(myTable, 3, row, "🡅 Long Signal - 1m ago", text_color=txtC, bgcolor=bg, text_size=myFont)
 
-    sC = tickClose > tickVWAP ? color.green : color.maroon
-    table.cell(myTable, 4, row, "VWAP", text_color=color.white, bgcolor=sC, text_size=size.small)
+    sC = tickST < 0 ? greenC : redC
+    table.cell(myTable, 4, row, "Trend", text_color=txtC, bgcolor=sC, text_size=myFont)
+    //sC := tickST15m < 0 ? greenC : redC
+    //table.cell(myTable, 5, row, "15m", text_color=txtC, bgcolor=sC, text_size=myFont)
+    //sC := tickST30m < 0 ? greenC : redC
+    //table.cell(myTable, 6, row, "30m", text_color=txtC, bgcolor=sC, text_size=myFont)
+    //sC := tickST1h < 0 ? greenC : redC
+    //table.cell(myTable, 7, row, "1H", text_color=txtC, bgcolor=sC, text_size=myFont)
 
-    sC := tickMacdHist > 0 ? color.green : color.maroon
-    table.cell(myTable, 5, row, "MACD", text_color=color.white, bgcolor=sC, text_size=size.small)
+    col = 4
 
-    sC := tickSar < tickClose ? color.green : color.maroon
-    table.cell(myTable, 6, row, "PSar", text_color=color.white, bgcolor=sC, text_size=size.small)
+    if (showVWAP)
+        tickVWAP = request.security(sym, tf, ta.vwap(close))
+        col := col + 1
+        sC := close > tickVWAP ? greenC : redC
+        table.cell(myTable, col, row, "VWAP", text_color=txtC, bgcolor=sC, text_size=myFont)
 
-    sC := tickClose > tickEma ? color.green : color.maroon
-    table.cell(myTable, 7, row, "21 EMA", text_color=color.white, bgcolor=sC, text_size=size.small)
+    if (showMACDPsar)
+        tickSar = request.security(sym, tf, ta.sar(start = 0.02, inc = 0.02, max=0.2))
+        [tickM1, tickM2, tickMacdHist] = request.security(sym, tf, ta.macd(close, macd1, macd2, macd3))
+        col := col + 1
+        sC := tickMacdHist > 0 ? greenC : redC
+        table.cell(myTable, 5, row, "MACD", text_color=txtC, bgcolor=sC, text_size=myFont)
+        col := col + 1
+        sC := tickSar < close ? greenC : redC
+        table.cell(myTable, col, row, "PSar", text_color=txtC, bgcolor=sC, text_size=myFont)
 
-    sC := tickClose > tickEma200 ? color.green : color.maroon
-    table.cell(myTable, 8, row, "200 EMA", text_color=color.white, bgcolor=sC, text_size=size.small)
+    if (showEMAs)
+        col := col + 1
+        tickEma = request.security(sym, tf, ta.ema(close, smEMA) + ta.ema(close, bigEMA))
+        tickEma200 = request.security(sym, tf, ta.ema(close, bigEMA))
+        sC := close > tickEma ? greenC : redC
+        table.cell(myTable, col, row, "21 EMA", text_color=txtC, bgcolor=sC, text_size=myFont)
+        col := col + 1
+        sC := close > tickEma200 ? greenC : redC
+        table.cell(myTable, col, row, "200 EMA", text_color=txtC, bgcolor=sC, text_size=myFont)
 
-    percentChange = ta.changePercent(tickClose, tickDayOpen)
-    sC := percentChange > 0 ? color.green : color.maroon
-    table.cell(myTable, 9, row, "CH: " + str.tostring(percentChange, "#.##"), text_color=color.white, bgcolor=sC, text_size=size.small)
+    if (showCH)    
+        tickClose = request.security(sym, tf, close)
+        tickDayOpen = request.security(sym, "1D", open)
+        col := col + 1
+        percentChange = ta.changePercent(tickClose, tickDayOpen)
+        sC := percentChange > 0 ? greenC : redC
+        table.cell(myTable, col, row, "CH: " + str.tostring(percentChange, "#.##"), text_color=txtC, bgcolor=sC, text_size=myFont)
 
-    sC := tickST < 0 ? color.green : color.maroon
-    table.cell(myTable, 10, row, "SuperTrend", text_color=color.white, bgcolor=sC, text_size=size.small)
+    if (showRSI)
+        tickRSI = request.security(sym, tf, ta.rsi(close, rsiLen))
+        col := col + 1
+        sC := tickRSI > rsiOB ? greenC : tickRSI < rsiOS ? redC : color.gray
+        table.cell(myTable, col, row, "RSI", text_color=txtC, bgcolor=sC, text_size=myFont)
 
-    sC := tickRSI > rsiOB ? color.green : tickRSI < rsiOS ? color.maroon : color.gray
-    table.cell(myTable, 11, row, "RSI", text_color=color.white, bgcolor=sC, text_size=size.small)
+//        table.cell(myTable, col, row, "BB Touch", text_color=bg, bgcolor=bg, text_size=myFont)
+    //[tickBBMiddle, tickBBUpper, tickBBLower] = request.security(sym, tf, ta.bb(close, bbLength, bbMultiplier))
+    //tickTouchingUpperBB = math.abs(tickClose - tickBBUpper) <= tickBBUpper * BBtouchTolerance
+    //tickTouchingLowerBB = math.abs(tickClose - tickBBLower) <= tickBBLower * BBtouchTolerance
+    //tickTouchingBB = tickTouchingUpperBB or tickTouchingLowerBB
 
-    if (tickTouchingBB)
-        sC1 = tickTouchingUpperBB ? color.green : color.maroon
-        table.cell(myTable, 12, row, "BB Touch", text_color=color.white, bgcolor=sC1, text_size=size.small)
-    else
-        table.cell(myTable, 12, row, "BB Touch", text_color=bg, bgcolor=bg, text_size=size.small)
+loadUpMap(comma) =>
+    for i = 0 to array.size(comma) - 2 by 2
+        key = str.trim(array.get(comma, i))
+        valueStr = str.trim(array.get(comma, i+1))
+        valueNum = str.tonumber(valueStr)
+        map.put(mapC, key, valueNum)
+
+lookMap(string a) =>
+    result = 0.0
+    if map.contains(mapC, a)
+        result := map.get(mapC, a)
+    result
+
+getKillStatus(float fuc) =>
+    if (fuc > lookMap("HV") and fuc < lookMap("RD0"))
+        "Long from Middle"
+    if (fuc > lookMap("RD0") and fuc < lookMap("RD1"))
+        "🡅 Long 1"
+    if (fuc > lookMap("RD1") and fuc < lookMap("RD2"))
+        "🡅🡅 Long 2"  
+    if (fuc > lookMap("RD2") and fuc < lookMap("vix r1"))
+        "🡅🡅🡅 Long 3"
+    if (fuc > lookMap("vix r1") and fuc < lookMap("vix r2"))
+        "😧 Extreme Long 😧"
+    if (fuc > lookMap("vix r2") and fuc < lookMap("VAH"))
+        "⛔ Absolute TOP ⛔"
+
+    if (fuc < lookMap("HV") and fuc > lookMap("SD0"))
+        "Short from Middle"
+    if (fuc < lookMap("SD0") and fuc > lookMap("SD1"))
+        "🡇 Short 1"
+    if (fuc < lookMap("SD1") and fuc > lookMap("SD2"))
+        "🡇🡇 Short 2"  
+    if (fuc < lookMap("SD2") and fuc > lookMap("vix s1"))
+        "🡇🡇🡇 Short 3"  
+    if (fuc < lookMap("vix s1") and fuc > lookMap("vix s2"))
+        "😧 Extreme Short 😧"
+    if (fuc < lookMap("vix s2") and fuc > lookMap("VAL"))
+        "⛔ Absolute BOTTOM ⛔"
+
 
 if barstate.islast
-    row := 1
-    updateTable(esSymbol)
-    row := row + 1
-    updateTable(nqSymbol)
-    row := row + 1
-    updateTable(ymSymbol)
-    row := row + 1
-    updateTable(vixSymbol)
-    row := row + 1
-    updateTable(oilSymbol)
-    row := row + 1
-    updateTable(goldSymbol)
+    string[] _pair = str.split(zones, "\n")
+    string sw = ""
+    string commas = ""
+    var tickClose = close
+
+    for s in _pair
+        sw := s
+        // $HG1!: SD2, 5.0530, HV, 5.1130, VAH, 5.2195, VAL, 5.0060  setting 5k - 41k
+        if str.contains(s, "setting ")
+            string[] parts = str.split(s, "setting ")
+            sw := array.get(parts, 0)
+        if str.contains(sw, ":")
+            string[] parts = str.split(sw, ":")
+            // SD2, 5.0530, HV, 5.1130, VAH, 5.2195, VAL, 5.0060  setting 5k - 41k
+            sw := array.get(parts, 1)
+            // $HG1!: 
+            sTick = array.get(parts, 0)
+            if str.contains(sTick, syminfo.ticker)
+                sw := str.trim(sw)
+                string[] comma = str.split(sw, ", ")
+                // vix r1, 5788, vix r2, 5793, vix s1, 5637, vix s2, 5632, RD0, 5727, RD1, 5740, RD2, 5768
+                loadUpMap(comma)
+
+                log.info(getKillStatus(tickClose))
+
+
+    rowG := 0
+    if(useES) // = input.bool(true, "Scan S&P 500 Futures", group="Scan List")
+        rowG := rowG + 1
+        updateTable(esSymbol)
+    if(useNQ) // = input.bool(true, "Scan NASDAQ Futures", group="Scan List")
+        rowG := rowG + 1
+        updateTable(nqSymbol)
+    if(useVIX) // = input.bool(true, "Scan VIX", group="Scan List")
+        rowG := rowG + 1
+        updateTable(vixSymbol)
+    if(useYM) // = input.bool(true, "Scan Dow Jones Futures",  group="Scan List")
+        rowG := rowG + 1
+        updateTable(ymSymbol)
+    if(useNDX) // = input.bool(false, "Scan NDX",  group="Scan List")
+        rowG := rowG + 1
+        updateTable(ndxSymbol)
+    if(useRTY) // = input.bool(false, "Scan RTY",  group="Scan List")
+        rowG := rowG + 1
+        updateTable(rtySymbol)
+    if(useFDAX) // = input.bool(false, "Scan FDAX",  group="Scan List")
+        rowG := rowG + 1
+        updateTable(fdaxSymbol)
+    if(useGC) // = input.bool(false, "Scan Gold Futures",  group="Scan List")
+        rowG := rowG + 1
+        updateTable(goldSymbol)
+    if(useSI) // = input.bool(false, "Scan Silver Futures",  group="Scan List")
+        rowG := rowG + 1
+        updateTable(silverSymbol)
+    if(useHG) // = input.bool(false, "Scan Copper Futures",  group="CommScandities List")
+        rowG := rowG + 1
+        updateTable(copperSymbol)
+    if(useCL) // = input.bool(false, "Scan Oil Futures",  group="Scan List")
+        rowG := rowG + 1
+        updateTable(oilSymbol)
 
