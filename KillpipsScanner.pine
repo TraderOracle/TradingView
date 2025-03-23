@@ -2,14 +2,6 @@
 indicator("TO Futures Scanner v1.1", overlay=true)
 import TradingView/ta/9
 
-// New in version 1.1:
-// - Added support for MenthorQ line bounces
-// - MenthorQ line bounces can be grouped with Bollinger Band touch
-// - MenthorQ can also detect line WICK rather than standard reversal
-// - request.security is now lumped into ONE call, able to add more tickers
-// - Added support for more tickers
-// - Misc adjustments to allow multi-paid-line usage
-
 KPzones = input.text_area("", "Paste Killpips values (format: $NQ1: name,value ...)")
 MQzones = input.text_area("", "Paste MenthorQ values (format: $NQ1: name,value ...)")
 
@@ -21,9 +13,9 @@ redC = input.color(defval=color.new(color.red, 50),title = "Red Color", group="S
 yellowC = input.color(defval=color.new(color.yellow, 50),title = "Yellow Color", group="Settings") 
 
 bool showKill = input.bool(true, "Show Killpips Status", group="Paid Lines")
-bool showMQRev = input.bool(false, "Show MenthorQ Reversals", group="Paid Lines")
+bool showMQRev = input.bool(true, "Show MenthorQ Reversals", group="Paid Lines")
 bool showMQWick = input.bool(true, "Show MenthorQ Wicks", group="Paid Lines")
-bool showMQBB = input.bool(true, "ONLY Show MenthorQ when at BB extreme)", group="Paid Lines")
+bool showOnlyBB = input.bool(false, "ONLY Show MenthorQ when at BB extreme)", group="Paid Lines")
 
 bool showVWAP = input.bool(false, "Show VWAP Status",  group="Show Options")
 bool showMACDPsar = input.bool(true, "Show MACD/Psar Status",  group="Show Options")
@@ -70,21 +62,10 @@ oilSymbol = "NYMEX:CL1!"
 silverSymbol = "COMEX:SI1!"
 copperSymbol = "COMEX:HG1!"
 
-float tickOpen = 0.0
-float tickClose = 0.0
-float tickHigh = 0.0
-float tickLow = 0.0
-float tickPOpen = 0.0
-float tickPClose = 0.0
-float tickPHigh = 0.0
-float tickPLow = 0.0
-int tickST = 0
-int rowG = 1
-
-// Maps to store the descriptions/price
 mapKP = map.new<string, float>()
 mapMQ = map.new<float, string>()
 
+rowG = 1
 bg = color.new(color.black, 100)
 
 tPos = tP == "Top Left" ? position.top_left : tP == "Bottom Right" ? position.bottom_right : tP == "Bottom Left" ? position.bottom_left : tP == "Top Center" ? position.top_center : tP == "Bottom Center" ? position.bottom_center : position.top_right
@@ -97,64 +78,93 @@ var table myTable = table.new(tPos, 17, 20, bgcolor = color.new(color.black, 100
 //table.cell(myTable, 2, 1, "Killpips Level", text_color=txtC, bgcolor=bg, text_size=myFont)
 //table.cell(myTable, 3, 1, "Latest Alert", text_color=txtC, bgcolor=bg, text_size=myFont)
 
-lookKPMap(string a) =>
-    result = 0.0
-    if map.contains(mapKP, a)
-        result := map.get(mapKP, a)
-    result
-
-loadUpKPMap(comma) =>
+generateKPMap(comma) =>
     map.clear(mapKP)
     for i = 0 to array.size(comma) - 2 by 2
         key = str.trim(array.get(comma, i))
         valueStr = str.trim(array.get(comma, i+1))
         valueNum = str.tonumber(valueStr)
         map.put(mapKP, key, valueNum)
- 
+
+findKPMap(string a) =>
+    result = 0.0
+    if map.contains(mapKP, a)
+        result := map.get(mapKP, a)
+    result
+
 getKillStatus(float fuc) =>
     string result = ""
-    log.info("KillStatus float = " + str.tostring(fuc))
-    if (fuc > lookKPMap("HV") and fuc < lookKPMap("RD0"))
+    //log.info("KillStatus float = " + str.tostring(fuc))
+    if (fuc > findKPMap("HV") and fuc < findKPMap("RD0"))
         result := "Long"
-    if (fuc > lookKPMap("RD0") and fuc < lookKPMap("RD1"))
+    if (fuc > findKPMap("RD0") and fuc < findKPMap("RD1"))
         result := "🡅 Long "
-    if (fuc > lookKPMap("RD1") and fuc < lookKPMap("RD2"))
+    if (fuc > findKPMap("RD1") and fuc < findKPMap("RD2"))
         result := "🡅🡅 Long "  
-    if (fuc > lookKPMap("RD2") and fuc < lookKPMap("vix r1"))
+    if (fuc > findKPMap("RD2") and fuc < findKPMap("vix r1"))
         result := "🡅🡅🡅 Long "
-    if (fuc > lookKPMap("vix r1") and fuc < lookKPMap("vix r2"))
+    if (fuc > findKPMap("vix r1") and fuc < findKPMap("vix r2"))
         result := "😧 Extreme Long 😧"
-    if (fuc > lookKPMap("vix r2") and fuc < lookKPMap("VAH"))
+    if (fuc > findKPMap("vix r2") and fuc < findKPMap("VAH"))
         result := "⛔ Absolute TOP ⛔"
-    if (fuc < lookKPMap("HV") and fuc > lookKPMap("SD0"))
+    if (fuc < findKPMap("HV") and fuc > findKPMap("SD0"))
         result := "Short"
-    if (fuc < lookKPMap("SD0") and fuc > lookKPMap("SD1"))
+    if (fuc < findKPMap("SD0") and fuc > findKPMap("SD1"))
         result := "🡇 Short "
-    if (fuc < lookKPMap("SD1") and fuc > lookKPMap("SD2"))
+    if (fuc < findKPMap("SD1") and fuc > findKPMap("SD2"))
         result := "🡇🡇 Short "  
-    if (fuc < lookKPMap("SD2") and fuc > lookKPMap("vix s1"))
+    if (fuc < findKPMap("SD2") and fuc > findKPMap("vix s1"))
         result := "🡇🡇🡇 Short "  
-    if (fuc < lookKPMap("vix s1") and fuc > lookKPMap("vix s2"))
+    if (fuc < findKPMap("vix s1") and fuc > findKPMap("vix s2"))
         result := "😧 Extreme Short 😧"
-    if (fuc < lookKPMap("vix s2") and fuc > lookKPMap("VAL"))
+    if (fuc < findKPMap("vix s2") and fuc > findKPMap("VAL"))
         result := "⛔ Absolute BOTTOM ⛔"
     result
 
-findMQMap(float fuc) =>
+parseKPLines(sTicker, Close) =>
+    //log.info("parseKPLines = '" + sTicker + "'" + str.tostring(Close) + "'")
+    string[] _pair = str.split(KPzones, "\n")
+    string sw = ""
+    string commas = ""
+    string result = ""
+
+    for s in _pair
+        sw := s
+        if str.contains(s, "setting ")
+            string[] parts = str.split(s, "setting ")
+            sw := array.get(parts, 0)
+        if str.contains(sw, ":")
+            string[] parts = str.split(sw, ":")
+            // SD2, 5.0530, HV, 5.1130, VAH, 5.2195, VAL, 5.0060  setting 5k - 41k
+            sw := array.get(parts, 1)
+            // $HG1!: 
+            sTick = array.get(parts, 0)
+            if str.contains(sTick, sTicker)
+                sw := str.trim(sw)
+                string[] comma = str.split(sw, ", ")
+                // vix r1, 5788, vix r2, 5793, vix s1, 5637, vix s2, 5632, RD0, 5727, RD1, 5740, RD2, 5768
+                generateKPMap(comma)
+                //log.info("Map contains " + str.tostring(map.size(mapKP)))
+                result := getKillStatus(Close)
+                //log.info("result 2 = " + result)
+    result
+
+findMQMap(float Close, float Open, float POpen, float PClose, float High, float Low, float PHigh, float PLow) =>
+    log.info("findMQMap with array size " + str.tostring(map.size(mapMQ)))
     result = ""
-    bRed = tickClose < tickOpen
-    bGreen = tickOpen < tickClose
-    bPRed = tickPClose < tickPOpen
-    bPGreen = tickPOpen < tickPClose
+    bRed = Close < Open
+    bGreen = Open < Close
+    bPRed = PClose < POpen
+    bPGreen = POpen < PClose
 
     if showMQRev and not showMQWick
         keys = map.keys(mapMQ)
         for i = 0 to array.size(keys) - 1
             keyValue = array.get(keys, i) // 1D Min, key=5659.67
-            if (bGreen and bPRed and tickHigh > keyValue and tickLow < keyValue and tickPHigh > keyValue and tickPLow < keyValue)
+            if (bGreen and bPRed and High > keyValue and Low < keyValue and PHigh > keyValue and PLow < keyValue)
                 result := map.get(mapMQ, keyValue)
                 break
-            else if (bPGreen and bRed and tickHigh > keyValue and tickLow < keyValue and tickPHigh > keyValue and tickPLow < keyValue)
+            else if (bPGreen and bRed and High > keyValue and Low < keyValue and PHigh > keyValue and PLow < keyValue)
                 result := map.get(mapMQ, keyValue)
                 break
 
@@ -162,13 +172,13 @@ findMQMap(float fuc) =>
         keys = map.keys(mapMQ)
         for i = 0 to array.size(keys) - 1
             keyValue = array.get(keys, i) // 1D Min, key=5659.67
-            if ((tickHigh > keyValue and tickClose < keyValue) or (tickHigh > keyValue and tickOpen < keyValue))
-                result = map.get(mapMQ, keyValue)
+            if ((High > keyValue and Close < keyValue) or (High > keyValue and Open < keyValue))
+                result := map.get(mapMQ, keyValue)
                 break
     result
 
-
 loadUpMQMap(comma) =>
+    log.info("loadUpMQMap started " + str.tostring(comma))
     map.clear(mapMQ)
     // $ES1!: HVL, 5725, 1D Min, 5659.67, HVL 0DTE, 5715, GEX 9, 5830, GEX 10, 5820
     for i = 0 to array.size(comma) - 2 by 2
@@ -176,29 +186,10 @@ loadUpMQMap(comma) =>
         key = str.trim(array.get(comma, i+1))
         valueNum = str.tonumber(key)
         map.put(mapMQ, valueNum, valueStr)
+    log.info("loadUpMQMap finished with " + str.tostring(map.size(mapMQ)))
 
-parseKPLines(string sTicker) =>
-    //log.info("parseKPLines = '" + sTicker + "'" + str.tostring(Close) + "'")
-    string[] _pair = str.split(KPzones, "\n")
-    string result = ""
-    for s in _pair
-        sw = s
-        if str.contains(s, "setting ")
-            string[] parts = str.split(s, "setting ")
-            sw := array.get(parts, 0)
-        if str.contains(sw, ":")
-            string[] parts = str.split(sw, ":")
-            sTick = array.get(parts, 0) // $HG1!: 
-            sw := array.get(parts, 1) // SD2, 5.0530, HV, 5.1130, VAH, 5.2195, VAL, 5.0060
-            if str.contains(sTick, sTicker)
-                sw := str.trim(sw)
-                string[] comma = str.split(sw, ", ") // vix r1, 5788, vix r2, 5793
-                loadUpKPMap(comma)
-                result := getKillStatus(tickClose)
-    result
-
-parseMQLines(string sTicker) =>
-    //log.info("parseMQLines = '" + sTicker + "'" + str.tostring(Close) + "'")
+parseMQLines(string sTicker, float Close) =>
+    log.info("parseMQLines = '" + sTicker + "', close = " + str.tostring(Close))
     string[] _pair = str.split(MQzones, "\n")
     string result = ""
     for s in _pair
@@ -213,85 +204,67 @@ parseMQLines(string sTicker) =>
                 loadUpMQMap(comma)
     result
 
-updateTable(string sym) =>
+updateTable(sym) =>
     row = rowG
     tf = timeframe.period
     string[] xxx = str.split(sym, ":")
     sins = str.replace_all(array.get(xxx, 1), "1!", "") 
+ 
+    [basisBB, devBB, Open, Close, High, Low, POpen, PClose, PHigh, PLow, tickVWAP, tickSar, tickEma, tickEma200, tickRSI] = request.security(sym, tf, [ta.sma(close, bbLength), ta.stdev(close, bbLength), open, close, high, low, open-1, close-1, high-1, low-1, ta.vwap(close), ta.sar(start = 0.02, inc = 0.02, max=0.2), ta.ema(close, smEMA), ta.ema(close, bigEMA), ta.rsi(close, rsiLen)]) 
+    [yaa, tickST] = request.security(sym, tf, ta.supertrend(stLength, stMultiplier))
 
-    [atrSuper, basisBB, devBB, tickOpen, tickClose, tickHigh, tickLow, tickPOpen, tickPClose, tickPHigh, tickPLow, tickVWAP, tickSar, tickEma, tickEma200, tickRSI] = request.security(sym, tf, [ta.sma(ta.tr, stLength), ta.sma(close, bbLength), ta.stdev(close, bbLength), open, close, high, low, open-1, close-1, high-1, low-1, ta.vwap(close), ta.sar(start = 0.02, inc = 0.02, max=0.2), ta.ema(close, smEMA), ta.ema(close, bigEMA), ta.rsi(close, rsiLen)]) 
+    //MACDLine = macdFast - macdSlow
+    //SignalLine = ta.ema(MACDLine, macd3)
+    //tickMacdHist = MACDLine - SignalLine
 
-    // =-=-=-=-=-=-=-=-=-=  AVOIDING EXTRA request.security is CRITICAL  =-=-=-=-=-=-=-=-=-=
-    // Old school SUPERTREND calculation
-    atrSMA = atrSuper
-    txST = hl2 - (stMultiplier * atrSMA)
-    tx1 = nz(txST[1], txST)
-    txST := close[1] > tx1 ? math.max(txST, tx1) : txST
-    tyST = hl2 + (1 * atrSMA)
-    ty1 = nz(tyST[1], tyST)
-    tyST := close[1] < ty1 ? math.min(tyST, ty1) : tyST
-    suptickST = 1
-    suptickST := nz(suptickST[1], suptickST)
-    suptickST := suptickST == -1 and close > ty1 ? 1 : tickST == 1 and close < tx1 ? -1 : tickST
-    tickST = suptickST != suptickST[1]
-    bool SuperBuy = suptickST==1 and tx1 > 0
-    bool SuperSell = suptickST!=1 and ty1 > 0
-
-    // Old school BB calculation
+    // Old school BB calculation, to avoid another request.security
     tickBBUpper = basisBB + devBB
     tickBBLower = basisBB - devBB
 
-    col = 0
+    col = 1
     sC = color.white
+    table.cell(myTable, col, row, sins, text_color=txtC, bgcolor=bg, text_size=myFont)
 
+    log.info("ticker '" + str.tostring(sins) + "' , tickClose " + str.tostring(Close))
     if (showKill)
-        sKillStatus = parseKPLines(sins)
-        col := col + 1
-        table.cell(myTable, col, row, sins, text_color=txtC, bgcolor=bg, text_size=myFont)
+        sKillStatus = parseKPLines(sins, Close)
+        //log.info("sKillStatus '" + sKillStatus + "'")
         sC := str.contains(str.lower(sKillStatus), "long") ? greenC : str.contains(str.lower(sKillStatus), "short") ? redC : bg
         col := col + 1
         table.cell(myTable, col, row, sKillStatus, text_color=txtC, bgcolor=sC , text_size=myFont)
 
-    // bool showMQRev = input.bool(false, "Show MenthorQ Reversals", group="Paid Lines")
-    // bool showMQWick = input.bool(true, "Show MenthorQ Wicks", group="Paid Lines")
-    // bool showMQBB = input.bool(true, "ONLY Show MenthorQ when at BB extreme)", group="Paid Lines")
-    if (showMQRev or showMQWick)
-        desc = "Bounced off MQ " + parseMQLines(sins)
-        col := col + 1
-        if (showMQBB)
-            tickTouchingUpperBB = math.abs(tickClose - tickBBUpper) <= tickBBUpper * BBtouchTolerance
-            tickTouchingLowerBB = math.abs(tickClose - tickBBLower) <= tickBBLower * BBtouchTolerance
-            tickTouchingBB = tickTouchingUpperBB or tickTouchingLowerBB
-            sC := tickTouchingUpperBB ? greenC : tickTouchingLowerBB ? redC : bg
-            table.cell(myTable, col, row, desc, text_color=txtC, bgcolor=sC , text_size=myFont)
+    if (showMQRev)
+        parseMQLines(sins, Close)
+        string homies = findMQMap(Close, Open, POpen, PClose, High, Low, PHigh, PLow)
+        log.info("parseMQLines homies = '" + homies + "'")
+        if (homies != '')
+            homies := "Bounced off MQ " + homies
+            sC := Close > Open ? greenC : Close < Open ? redC : bg
         else
-            desc := "Wicked off MQ " + parseMQLines(sins)
-            table.cell(myTable, col, row, desc, text_color=txtC, bgcolor=sC , text_size=myFont)
+            sC := bg
+        col := col + 1
+        table.cell(myTable, col, row, homies, text_color=txtC, bgcolor=sC , text_size=myFont)
 
     col := col + 1
-    sC := SuperBuy ? greenC : SuperSell ? redC : bg
+    sC := tickST < 0 ? greenC : redC
     table.cell(myTable, col, row, "Trend", text_color=txtC, bgcolor=sC, text_size=myFont)
 
     if (showVWAP)
-        //tickVWAP = request.security(sym, tf, ta.vwap(close))
         col := col + 1
         sC := close > tickVWAP ? greenC : redC
         table.cell(myTable, col, row, "VWAP", text_color=txtC, bgcolor=sC, text_size=myFont)
 
     if (showMACDPsar)
-        //tickSar = request.security(sym, tf, ta.sar(start = 0.02, inc = 0.02, max=0.2))
         [tickM1, tickM2, tickMacdHist] = request.security(sym, tf, ta.macd(close, macd1, macd2, macd3))
         col := col + 1
         sC := tickMacdHist > 0 ? greenC : redC
-        table.cell(myTable, 5, row, "MACD", text_color=txtC, bgcolor=sC, text_size=myFont)
+        table.cell(myTable, col, row, "MACD", text_color=txtC, bgcolor=sC, text_size=myFont)
         col := col + 1
         sC := tickSar < close ? greenC : redC
         table.cell(myTable, col, row, "PSar", text_color=txtC, bgcolor=sC, text_size=myFont)
 
     if (showEMAs)
         col := col + 1
-        //tickEma = request.security(sym, tf, ta.ema(close, smEMA))
-        //tickEma200 = request.security(sym, tf, ta.ema(close, bigEMA))
         sC := close > tickEma ? greenC : redC
         table.cell(myTable, col, row, "21 EMA", text_color=txtC, bgcolor=sC, text_size=myFont)
         col := col + 1
@@ -301,22 +274,20 @@ updateTable(string sym) =>
     if (showCH)    
         tickDayOpen = request.security(sym, "1D", open)
         col := col + 1
-        percentChange = ta.changePercent(tickClose, tickDayOpen)
+        percentChange = ta.changePercent(Close, tickDayOpen)
         sC := percentChange > 0 ? greenC : redC
         table.cell(myTable, col, row, "CH: " + str.tostring(percentChange, "#.##"), text_color=txtC, bgcolor=sC, text_size=myFont)
 
     if (showRSI)
-        //tickRSI = request.security(sym, tf, ta.rsi(close, rsiLen))
         col := col + 1
         sC := tickRSI > rsiOB ? greenC : tickRSI < rsiOS ? redC : bg
         colTTT = tickRSI > rsiOB ? txtC : tickRSI < rsiOS ? txtC : color.new(color.gray, 10)
         table.cell(myTable, col, row, "RSI", text_color=colTTT, bgcolor=sC, text_size=myFont)
 
     if (showBB)
-        [tickBBMiddle, tickBBUpper, tickBBLower] = request.security(sym, tf, ta.bb(close, bbLength, bbMultiplier))
         col := col + 1
-        tickTouchingUpperBB = math.abs(tickClose - tickBBUpper) <= tickBBUpper * BBtouchTolerance
-        tickTouchingLowerBB = math.abs(tickClose - tickBBLower) <= tickBBLower * BBtouchTolerance
+        tickTouchingUpperBB = math.abs(Close - tickBBUpper) <= tickBBUpper * BBtouchTolerance
+        tickTouchingLowerBB = math.abs(Close - tickBBLower) <= tickBBLower * BBtouchTolerance
         tickTouchingBB = tickTouchingUpperBB or tickTouchingLowerBB
         sC := tickTouchingUpperBB ? greenC : tickTouchingLowerBB ? redC : bg
         colTTT = tickTouchingBB ? txtC : color.new(color.gray, 10)
@@ -361,4 +332,5 @@ if barstate.islast
     if(useCL) // = input.bool(false, "Scan Oil Futures",  group="Scan List")
         rowG := rowG + 1
         updateTable(oilSymbol)
+
 
