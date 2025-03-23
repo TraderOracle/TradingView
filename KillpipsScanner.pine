@@ -1,5 +1,5 @@
 // @version=6
-indicator("Killpips Scanner", overlay=true)
+indicator("TO Futures Scanner", overlay=true)
 import TradingView/ta/9
 
 zones = input.text_area("", "Paste Killpips values here")
@@ -65,7 +65,7 @@ tPos = tP == "Top Left" ? position.top_left : tP == "Bottom Right" ? position.bo
 myFont = sFontSize == "Tiny" ? size.tiny : sFontSize == "Small" ? size.small : sFontSize == "Normal" ? size.normal : sFontSize == "Large" ? size.large : size.auto
 
 // Create Table
-var table myTable = table.new(tPos, 17, 8, bgcolor = color.new(color.black, 100), frame_width = 1, frame_color = color.gray, border_width = 1, border_color = color.gray)
+var table myTable = table.new(tPos, 17, 20, bgcolor = color.new(color.black, 100), frame_width = 1, frame_color = color.gray, border_width = 1, border_color = color.gray)
 // Header
 //table.cell(myTable, 1, 1, "Ticker", text_color=txtC, bgcolor=bg, text_size=myFont)
 //table.cell(myTable, 2, 1, "Killpips Level", text_color=txtC, bgcolor=bg, text_size=myFont)
@@ -148,7 +148,7 @@ updateTable(sym) =>
     string[] xxx = str.split(sym, ":")
     sins = str.replace_all(array.get(xxx, 1), "1!", "") 
 
-    tickClose = request.security(sym, tf, close)
+    [tickOpen, tickClose, tickHigh, tickLow, tickVWAP, tickSar, tickEma, tickEma200, tickRSI] = request.security(sym, tf, [open, close, high, low, ta.vwap(close), ta.sar(start = 0.02, inc = 0.02, max=0.2), ta.ema(close, smEMA), ta.ema(close, bigEMA), ta.rsi(close, rsiLen)])
     [yaa, tickST] = request.security(sym, tf, ta.supertrend(stLength, stMultiplier))
     //[yab, tickST15m] = request.security(sym, "15", ta.supertrend(stLength, stMultiplier))
     //[yac, tickST30m] = request.security(sym, "30", ta.supertrend(stLength, stMultiplier))
@@ -174,13 +174,13 @@ updateTable(sym) =>
     col = 3
 
     if (showVWAP)
-        tickVWAP = request.security(sym, tf, ta.vwap(close))
+        //tickVWAP = request.security(sym, tf, ta.vwap(close))
         col := col + 1
         sC := close > tickVWAP ? greenC : redC
         table.cell(myTable, col, row, "VWAP", text_color=txtC, bgcolor=sC, text_size=myFont)
 
     if (showMACDPsar)
-        tickSar = request.security(sym, tf, ta.sar(start = 0.02, inc = 0.02, max=0.2))
+        //tickSar = request.security(sym, tf, ta.sar(start = 0.02, inc = 0.02, max=0.2))
         [tickM1, tickM2, tickMacdHist] = request.security(sym, tf, ta.macd(close, macd1, macd2, macd3))
         col := col + 1
         sC := tickMacdHist > 0 ? greenC : redC
@@ -191,8 +191,8 @@ updateTable(sym) =>
 
     if (showEMAs)
         col := col + 1
-        tickEma = request.security(sym, tf, ta.ema(close, smEMA) + ta.ema(close, bigEMA))
-        tickEma200 = request.security(sym, tf, ta.ema(close, bigEMA))
+        //tickEma = request.security(sym, tf, ta.ema(close, smEMA))
+        //tickEma200 = request.security(sym, tf, ta.ema(close, bigEMA))
         sC := close > tickEma ? greenC : redC
         table.cell(myTable, col, row, "21 EMA", text_color=txtC, bgcolor=sC, text_size=myFont)
         col := col + 1
@@ -207,7 +207,7 @@ updateTable(sym) =>
         table.cell(myTable, col, row, "CH: " + str.tostring(percentChange, "#.##"), text_color=txtC, bgcolor=sC, text_size=myFont)
 
     if (showRSI)
-        tickRSI = request.security(sym, tf, ta.rsi(close, rsiLen))
+        //tickRSI = request.security(sym, tf, ta.rsi(close, rsiLen))
         col := col + 1
         sC := tickRSI > rsiOB ? greenC : tickRSI < rsiOS ? redC : bg
         colTTT = tickRSI > rsiOB ? txtC : tickRSI < rsiOS ? txtC : color.new(color.gray, 10)
