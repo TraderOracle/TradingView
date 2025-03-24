@@ -208,18 +208,25 @@ updateTable(sym) =>
     row = rowG
     tf = timeframe.period
     string[] xxx = str.split(sym, ":")
-    sins = str.replace_all(array.get(xxx, 1), "1!", "") 
- 
+    sins = str.replace_all(array.get(xxx, 1), "1!", "")
+    sins := str.replace_all(sins, "M2025", "")
+
     [basisBB, devBB, Open, Close, High, Low, POpen, PClose, PHigh, PLow, tickVWAP, tickSar, tickEma, tickEma200, tickRSI] = request.security(sym, tf, [ta.sma(close, bbLength), ta.stdev(close, bbLength), open, close, high, low, open-1, close-1, high-1, low-1, ta.vwap(close), ta.sar(start = 0.02, inc = 0.02, max=0.2), ta.ema(close, smEMA), ta.ema(close, bigEMA), ta.rsi(close, rsiLen)]) 
     [yaa, tickST] = request.security(sym, tf, ta.supertrend(stLength, stMultiplier))
+    
+    // Old school BB calculation, to avoid another request.security
+    //tickBBUpper = basisBB + devBB
+    //tickBBLower = basisBB - devBB
+    
+    [middle, tickBBUpper, tickBBLower] = request.security(sym, tf, ta.bb(close, bbLength, bbMultiplier))
+
+    upWick50PercentLarger = Close > Open and math.abs(High - Close) > math.abs(Open - Close)
+    downWick50PercentLarger = Close < Open and math.abs(Low - Close) > math.abs(Open - Close)
 
     //MACDLine = macdFast - macdSlow
     //SignalLine = ta.ema(MACDLine, macd3)
     //tickMacdHist = MACDLine - SignalLine
 
-    // Old school BB calculation, to avoid another request.security
-    tickBBUpper = basisBB + devBB
-    tickBBLower = basisBB - devBB
 
     col = 1
     sC = color.white
@@ -231,19 +238,19 @@ updateTable(sym) =>
         //log.info("sKillStatus '" + sKillStatus + "'")
         sC := str.contains(str.lower(sKillStatus), "long") ? greenC : str.contains(str.lower(sKillStatus), "short") ? redC : bg
         col := col + 1
-        table.cell(myTable, col, row, sKillStatus, text_color=txtC, bgcolor=sC , text_size=myFont)
+        table.cell(myTable, col, row, sKillStatus, text_color=txtC, bgcolor=sC, text_size=myFont)
 
-    if (showMQRev)
+    if (true)
         parseMQLines(sins, Close)
         string homies = findMQMap(Close, Open, POpen, PClose, High, Low, PHigh, PLow)
         log.info("parseMQLines homies = '" + homies + "'")
         if (homies != '')
             homies := "Bounced off MQ " + homies
-            sC := Close > Open ? greenC : Close < Open ? redC : bg
+            sC := Close > Open ? greenC : Close < Open ? redC : color.black
         else
-            sC := bg
+            sC := color.black
         col := col + 1
-        table.cell(myTable, col, row, homies, text_color=txtC, bgcolor=sC , text_size=myFont)
+        table.cell(myTable, col, row, homies, text_color=txtC, bgcolor=sC, text_size=myFont)
 
     col := col + 1
     sC := tickST < 0 ? greenC : redC
@@ -280,14 +287,14 @@ updateTable(sym) =>
 
     if (showRSI)
         col := col + 1
-        sC := tickRSI > rsiOB ? greenC : tickRSI < rsiOS ? redC : bg
+        sC := tickRSI > rsiOB ? greenC : tickRSI < rsiOS ? redC : color.black
         colTTT = tickRSI > rsiOB ? txtC : tickRSI < rsiOS ? txtC : color.new(color.gray, 10)
         table.cell(myTable, col, row, "RSI", text_color=colTTT, bgcolor=sC, text_size=myFont)
 
     if (showBB)
         col := col + 1
-        tickTouchingUpperBB = math.abs(Close - tickBBUpper) <= tickBBUpper * BBtouchTolerance
-        tickTouchingLowerBB = math.abs(Close - tickBBLower) <= tickBBLower * BBtouchTolerance
+        tickTouchingUpperBB = High > tickBBUpper //* BBtouchTolerance
+        tickTouchingLowerBB = Low < tickBBLower //* BBtouchTolerance
         tickTouchingBB = tickTouchingUpperBB or tickTouchingLowerBB
         sC := tickTouchingUpperBB ? greenC : tickTouchingLowerBB ? redC : bg
         colTTT = tickTouchingBB ? txtC : color.new(color.gray, 10)
