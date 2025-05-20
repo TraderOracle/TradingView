@@ -1,0 +1,45 @@
+//@version=6
+indicator("McGraw Playbook v2", overlay=true, max_boxes_count = 500)
+zones = input.text_area("", "Paste McGraw text here")
+// vim: syntax=pine 
+ 
+sFontSize = input.string(title="Font Size: ", options=["Tiny", "Small", "Normal", "Large"], defval="Normal", group="Options")
+lWidth = input.int(1, "Line Width", group="Options")
+iBoxTrans = input.int(50, "Box Transparency", group="Options")
+// bAlert = input.bool(title="Line Penetration Alerts?", defval=true, group="Options")
+
+colLong = input.color(color.rgb(0, 255, 0), "Long color", group="Colors")
+colShort = input.color(color.rgb(255, 0, 0), "Short color", group="Colors")
+
+myFont = sFontSize == "Tiny" ? size.tiny : sFontSize == "Small" ? size.small : sFontSize == "Normal" ? size.normal : sFontSize == "Large" ? size.large : size.auto
+
+var box[] boxes = array.new_box()
+
+if (barstate.islast)
+    string[] _pair = str.split(zones, "\n")
+
+    if (array.size(boxes) > 0)
+        _pair.clear()
+        
+    for s in _pair
+        string price = ""
+        string desc = ""
+
+        str.trim(s)
+        desc := str.replace_all(s, "IF ", "")
+        desc := str.replace_all(s, "THEN ", "")
+        string[] comma = str.split(desc, " ")
+        string IFs = array.get(comma, 1)
+        price := array.get(comma, 2)
+        log.info("price = " + price)
+
+        // IF below 5475, THEN magnet at 5450.
+        if str.contains(s, "IF <")
+            box bahx = box.new(bar_index[100], str.tonumber(price), bar_index, str.tonumber(price), text_size=myFont, text= "▼▼ " + desc, text_color=color.new(colShort, 0), border_color=color.new(colShort, iBoxTrans), bgcolor=color.new(colShort, iBoxTrans), border_width=lWidth, extend=extend.both, text_halign = text.align_center)
+            array.push(boxes, bahx)
+
+        // IF above 5500, THEN quick move to 5525/35.
+        if str.contains(s, "IF >")
+            box bahx = box.new(bar_index[100], str.tonumber(price), bar_index, str.tonumber(price), text_size=myFont, text= "▲▲ " + desc, text_color=color.new(colLong, 0), border_color=color.new(colLong, iBoxTrans), bgcolor=color.new(colLong, iBoxTrans), border_width=lWidth, extend=extend.both, text_halign = text.align_left)
+            array.push(boxes, bahx)
+

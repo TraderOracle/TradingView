@@ -1,6 +1,7 @@
 // @version=6
 indicator("MenthorQ Scanner", overlay=true)
 import TradingView/ta/9
+// vim: syntax=pine 
 
 MQzones = input.text_area("", "Paste MenthorQ values (format: $NQ1: name,value ...)")
 
@@ -90,7 +91,7 @@ table.cell(myTable, 1, 1, "Ticker", text_color=txtC, bgcolor=bg, text_size=myFon
 table.cell(myTable, 2, 1, "MenthorQ Alerts", text_color=txtC, bgcolor=bg, text_size=myFont)
 table.cell(myTable, 3, 1, "SuperTrend", text_color=txtC, bgcolor=bg, text_size=myFont)
 
-rowG = 3
+rowG = 2
 
 findMQMap(float Close, float Open, float POpen, float PClose, float High, float Low, float PHigh, float PLow) =>
     log.info("findMQMap with array size " + str.tostring(map.size(mapMQ)))

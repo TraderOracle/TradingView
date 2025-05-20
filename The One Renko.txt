@@ -4,13 +4,14 @@
 // =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=  THE ONE RENKO TO RULE THEM ALL  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 // Designed to be used on Renko 1s, Traditional 4.  I primary trade the US 100 PEPPERSTONE (which is NQ futures)
 // Version 1 created by TraderOracle 11/18/2023
+// Version 2 - Fixed flag and squeeze overlapping, plus changed colors to be more intuitive
 //
 
 study(title="The One Renko To Rule Them All", overlay=true, shorttitle="The One Renko")
 
 bShowFlags = input(false, title="Show Flags", group="Main Settings")
 bShowDots = input(false, title="Show Dots", group="Main Settings")
-iLookBack = input(7, title="How many bars to look back for signals", group="Main Settings")
+bShowX = input(true, title="Show Big X for Buy/Sell", group="Main Settings")
 
 bUpCurve = close > close[1] and close[1] > close[2] and close[2] > close[3] and close[3] < close[4] and close[4] < close[5] and close[5] < close[6] ? 1 : 0
 bDownCurve = close < close[1] and close[1] < close[2] and close[2] < close[3] and close[3] > close[4] and close[4] > close[5] and close[5] > close[6] ? 1 : 0
@@ -20,7 +21,7 @@ bDownCurve = close < close[1] and close[1] < close[2] and close[2] < close[3] an
 // These are volume patterns I noticed after backtesting reversals for many months
 // 
 
-var cColor = color.aqua
+var cColor = color.rgb(194, 196, 197)
 
 basis = sma(close, 30)
 dev = 2 * stdev(close, 30)
@@ -85,7 +86,7 @@ BollingerCross = false
 up99 = (up1 or up2 or up3 or up4)
 down99 = (down1 or down2 or down3 or down4)
 
-bColor = color.blue
+bColor = color.rgb(199, 197, 197)
 
 if (MyRsi < 60)
     down99 := false
@@ -94,10 +95,10 @@ if (MyRsi > 40)
 
 // version 1.21 - I wasn't showing Bollinger Bands/RSI unless it also was volume rules, which kinda ruins the point of the update.  Fixed...
 if (close < (lower - 2) or (lower - 2) and MyRsi < 30)
-    bColor := color.orange
+    bColor := color.rgb(255, 53, 53)
     up99 := true
 if (close > (upper + 2) or open > (upper + 2) and MyRsi > 80)
-    bColor := color.lime
+    bColor := color.rgb(255, 53, 53)
     down99 := true
 
 // eliminate dupes
@@ -106,8 +107,12 @@ if (up99[1])
 if (down99[1])
     down99 := false
 
-plotshape(down99 and bShowFlags, title="Sell Signal", style=shape.flag, location=location.abovebar, color=bColor, size=size.tiny)
-plotshape(up99 and bShowFlags, title="Buy Signal", style=shape.flag, location=location.belowbar, color=bColor, size=size.tiny)
+atr = atr(10)
+pos2 = high + (1.6 * atr)
+pos3 = low - (1.6 * atr)
+
+plotshape(down99 and bShowFlags ? pos2 : na, title="Reversal Sell Signal", style=shape.flag, location=location.absolute, color=bColor, size=size.tiny)
+plotshape(up99 and bShowFlags ? pos3 : na, title="Reversal Buy Signal", style=shape.flag, location=location.absolute, color=bColor, size=size.tiny)
 
 
 //
@@ -215,35 +220,35 @@ buySignal1 = pos
 sellSignal1 = neg
 
 // Basic diamond color: Yellow as default, and Red is RSI is overbought or sold
-bColor4 = iff(rsi < 34 or rsi > 66, color.red, color.yellow) // RSI Overbought Value = 34, RSI Oversold Value = 66
+bColor4 = iff(rsi < 34 or rsi > 66, color.rgb(255, 0, 0), color.rgb(189, 189, 189)) // RSI Overbought Value = 34, RSI Oversold Value = 66
  
 // If we crossed Keltner channel, then color is Aqua
-cColor4 = iff(KeltnerCross, color.aqua, bColor4)
+cColor4 = iff(KeltnerCross, color.rgb(50, 255, 67), bColor4)
  
-plotshape(buySignal1 and bShowDots ? pos : na, title="Buy Signal", style=shape.diamond, location=location.belowbar, color=cColor4, size=size.tiny)
-plotshape(sellSignal1 and bShowDots ? neg : na, title="Sell Signal", style=shape.diamond, location=location.abovebar, color=cColor, size=size.tiny)
+plotshape(buySignal1 and bShowDots ? pos : na, title="Squeeze Buy Signal", style=shape.diamond, location=location.belowbar, color=cColor4, size=size.tiny)
+plotshape(sellSignal1 and bShowDots ? neg : na, title="Squeeze Sell Signal", style=shape.diamond, location=location.abovebar, color=cColor, size=size.tiny)
 
 // BUY SELL SIGNALS
 
-buySignals = 0
-for history1 = 0 to iLookBack - 1
-    if (buySignal1[history1])
-        buySignals := buySignals + 1
+//buySignals = 0
+//for history1 = 0 to iLookBack - 1
+//    if (buySignal1[history1])
+//        buySignals := buySignals + 1
 
-sellSignals = 0
-for history1 = 0 to iLookBack - 1
-    if (sellSignals[history1])
-        sellSignals := sellSignals + 1
+//sellSignals = 0
+//for history1 = 0 to iLookBack - 1
+//    if (sellSignals[history1])
+//        sellSignals := sellSignals + 1
 
-upSignals = 0
-for history1 = 0 to iLookBack - 1
-    if (up99[history1])
-        upSignals := upSignals + 1
+//upSignals = 0
+//for history1 = 0 to iLookBack - 1
+//    if (up99[history1])
+//        upSignals := upSignals + 1
 
-downSignals = 0
-for history1 = 0 to iLookBack - 1
-    if (downSignals[history1])
-        down99 := downSignals + 1
+//downSignals = 0
+//for history1 = 0 to iLookBack - 1
+//    if (downSignals[history1])
+//        down99 := downSignals + 1
 
 bBuyFlag = buySignal1 or buySignal1[1] or buySignal1[2] or buySignal1[3] or buySignal1[4] or buySignal1[5] or buySignal1[6]
 bBuySqueeze = up99 or up99[1] or up99[2] or up99[3] or up99[4] or up99[5] or up99[6]
@@ -251,8 +256,8 @@ bBuySqueeze = up99 or up99[1] or up99[2] or up99[3] or up99[4] or up99[5] or up9
 bSellFlag = sellSignal1 or sellSignal1[1] or sellSignal1[2] or sellSignal1[3] or sellSignal1[4] or sellSignal1[5] or sellSignal1[6]
 bSellSqueeze = down99 or down99[1] or down99[2] or down99[3] or down99[4] or down99[5] or down99[6]
 
-plotshape(bUpCurve and bBuyFlag and bBuySqueeze ? 1 : na, title="E", location=location.belowbar, style=shape.xcross, size=size.small, color=color.rgb(0, 255, 8))
-plotshape(bDownCurve and bSellFlag and bSellSqueeze ? 1 : na, title="E", location=location.abovebar, style=shape.xcross, size=size.small, color=color.rgb(255, 0, 0))
+plotshape(bUpCurve and bBuyFlag and bBuySqueeze and bShowX ? 1 : na, title="X Buy Signal", location=location.belowbar, style=shape.xcross, size=size.normal, color=color.rgb(255, 53, 53))
+plotshape(bDownCurve and bSellFlag and bSellSqueeze and bShowX ? 1 : na, title="X Sell Signal", location=location.abovebar, style=shape.xcross, size=size.normal, color=color.rgb(255, 12, 12)) 
 
 alertcondition(bUpCurve, title='One Renko BUY', message='One Renko BUY')
 alertcondition(bDownCurve, title='One Renko SELL', message='One Renko SELL')

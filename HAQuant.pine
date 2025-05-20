@@ -1,0 +1,323 @@
+// @version=5
+indicator(title='Everest', shorttitle='Everest', overlay=true)
+
+// Inspired by this video: https://www.youtube.com/watch?v=a7Hd0b5grZs
+
+// ==============================   SMOOTHED HA   ====================================
+
+g_TimeframeSettings = 'Display & Timeframe Settings'
+time_frame = input.timeframe(title='Timeframe for HA candle calculation', defval='', group=g_TimeframeSettings) 
+g_SmoothedHASettings = 'Smoothed HA Settings'
+smoothedHALength = input.int(title='HA Price Input Smoothing Length', minval=1, maxval=500, step=1, defval=13, group=g_SmoothedHASettings)
+smoothedMAType = input.string(title='Moving Average Calculation', group=g_SmoothedHASettings, options=['Exponential', 'Simple', 'Smoothed', 'Weighted', 'Linear', 'Hull', 'Arnaud Legoux'], defval='Exponential')
+smoothedHAalmaSigma = input.float(title="ALMA Sigma", defval=6, minval=0, maxval=100, step=0.1, group=g_SmoothedHASettings)
+smoothedHAalmaOffset = input.float(title="ALMA Offset", defval=0.85, minval=0, maxval=1, step=0.01, group=g_SmoothedHASettings)
+g_DoubleSmoothingSettings = 'Double-smoothed HA Settings'
+doDoubleSmoothing = input.bool(title='Enable double-smoothing', defval=true, group=g_DoubleSmoothingSettings)
+doubleSmoothedHALength = input.int(title='HA Second Smoothing Length', minval=1, maxval=500, step=1, defval=10, group=g_DoubleSmoothingSettings)
+doubleSmoothedMAType = input.string(title='Double-Smoothing Moving Average Calculation', group=g_DoubleSmoothingSettings, options=['Exponential', 'Simple', 'Smoothed', 'Weighted', 'Linear', 'Hull', 'Arnaud Legoux'], defval='Exponential')
+doubleSmoothedHAalmaSigma = input.float(title="ALMA Sigma", defval=6, minval=0, maxval=100, step=0.1, group=g_DoubleSmoothingSettings)
+doubleSmoothedHAalmaOffset = input.float(title="ALMA Offset", defval=0.85, minval=0, maxval=1, step=0.01, group=g_DoubleSmoothingSettings)
+
+smoothedMovingAvg(src, len) => 
+	smma = 0.0
+	smma := na(smma[1]) ? ta.sma(src, len) : (smma[1] * (len - 1) + src) / len 
+	smma
+	
+getHAOpen(prevOpen, prevClose) =>
+    haOpen = 0.0
+    haOpen := ((prevOpen + prevClose)/2)
+    haOpen
+
+getHAHigh(o, h, c) =>
+    haHigh = 0.0
+    haHigh := math.max(h, o, c)
+    haHigh
+
+getHALow(o, l, c) =>
+    haLow = 0.0
+    haLow := math.min(o, l, c)
+    haLow
+    
+getHAClose(o, h, l, c) =>
+    haClose = 0.0
+    haClose := ((o + h + l + c)/4)
+    haClose
+	
+getMAValue(src, len, type, isDoubleSmooth) =>
+	maValue = 0.0
+	if (type == 'Exponential')
+		maValue := ta.ema(source=src, length=len)
+	else if (type == 'Simple')
+		maValue := ta.sma(source=src, length=len)
+	else if (type == 'Smoothed')
+		maValue := smoothedMovingAvg(src=src, len=len)
+	else if (type == 'Weighted')
+		maValue := ta.wma(source=src, length=len)
+	else if (type == 'Linear')
+		maValue := ta.linreg(source=src, length=len, offset=0)
+	else if (type == 'Hull')
+		maValue := ta.hma(source=src, length=len)
+	else if (type == 'Arnaud Legoux')
+		maValue := ta.alma(series=src, length=len, offset=(isDoubleSmooth ? doubleSmoothedHAalmaOffset : smoothedHAalmaOffset), sigma=(isDoubleSmooth ? doubleSmoothedHAalmaSigma : smoothedHAalmaSigma))
+	else 
+		maValue := na
+	maValue
+
+realPriceTicker = ticker.new(prefix=syminfo.prefix, ticker=syminfo.ticker)
+actualOpen = request.security(symbol=realPriceTicker, timeframe=time_frame, expression=open, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+actualHigh = request.security(symbol=realPriceTicker, timeframe=time_frame, expression=high, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+actualLow = request.security(symbol=realPriceTicker, timeframe=time_frame, expression=low, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+actualClose = request.security(symbol=realPriceTicker, timeframe=time_frame, expression=close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+smoothedMA1open = getMAValue(actualOpen, smoothedHALength, smoothedMAType, false) 
+smoothedMA1high = getMAValue(actualHigh, smoothedHALength, smoothedMAType, false) 
+smoothedMA1low = getMAValue(actualLow, smoothedHALength, smoothedMAType, false) 
+smoothedMA1close = getMAValue(actualClose, smoothedHALength, smoothedMAType, false)
+smoothedHAClose = getHAClose(smoothedMA1open, smoothedMA1high, smoothedMA1low, smoothedMA1close)
+
+smoothedHAOpen = smoothedMA1open
+smoothedHAOpen := na(smoothedHAOpen[1]) ? smoothedMA1open : getHAOpen(smoothedHAOpen[1], smoothedHAClose[1])
+smoothedHAHigh = getHAHigh(smoothedHAOpen, smoothedMA1high, smoothedHAClose)
+smoothedHALow =  getHALow(smoothedHAOpen, smoothedMA1low, smoothedHAClose)
+
+openToPlot = smoothedHAOpen
+closeToPlot = smoothedHAClose
+highToPlot = smoothedHAHigh
+lowToPlot = smoothedHALow
+
+if (doDoubleSmoothing)
+    openToPlot := getMAValue(smoothedHAOpen, doubleSmoothedHALength, doubleSmoothedMAType, true)
+    closeToPlot := getMAValue(smoothedHAClose, doubleSmoothedHALength, doubleSmoothedMAType, true)
+    highToPlot := getMAValue(smoothedHAHigh, doubleSmoothedHALength, doubleSmoothedMAType, true)
+    lowToPlot := getMAValue(smoothedHALow, doubleSmoothedHALength, doubleSmoothedMAType, true)
+else
+    na
+
+candleColor = color.rgb(0, 0, 0, 100)
+// candleColor := (closeToPlot > openToPlot) ? colorBullish : (closeToPlot < openToPlot) ? colorBearish : candleColor[1]
+
+// ===================================   DXF   ======================================================
+
+f_avgdxf(_price, _length, _vol, _avg) =>
+    mf              = ta.change(_price) * _vol
+    SumAbsChange    = math.sum(math.abs(mf), _length)
+    SumUpChange     = math.sum(math.max(mf, 0), _length)
+    o_dxf           = SumUpChange / SumAbsChange * 200 - 100
+    o_avgdxf        = ta.wma(o_dxf, _avg)
+
+price       = input(close, 'Price')
+lookbk      = input.int(15, 'DXF Lookback', minval=1)
+length      = input.int(5, 'Avg Length', minval=1)
+smth        = input.int(3, 'Smooth', minval=1)
+step        = input.int(20, 'Step [0 = No Step]', minval=0, step=5)
+s_level     = input(20, 'Significant Trend Level')
+vol_w       = input(false, 'Volume Weighted?')
+
+v           = vol_w ? volume : 1                                   
+dxf_raw     = f_avgdxf(price, lookbk, v, length)
+dxf_s       = ta.wma(dxf_raw, smth)                                
+dxf         = step > 0 ? math.round(dxf_s / step) * step : dxf_s
+
+c_up        = color.new(#33ff00, 0)
+c_dn        = color.new(#ff1111, 0)
+upDXF       = dxf >= 0
+downDXF     = dxf < 0
+c_zeroline  = color.new(color.yellow, 70)
+
+//l_zero      = hline(0,          color=c_zeroline,                   linestyle=hline.style_solid, editable=false)
+//l_splus     = hline(s_level,    color=color.green,                  linestyle=hline.style_dotted, editable=false)
+//l_sminus    = hline(-s_level,   color=color.red,                    linestyle=hline.style_dotted, editable=false)
+//l_100plus   = hline(100,        color=color.new(color.green,90),    linestyle=hline.style_dotted, editable=false)
+//l_100minus  = hline(-100,       color=color.new(color.red,90),      linestyle=hline.style_dotted, editable=false)
+
+
+// =====================================   REDK EVEREX 2.0   ====================================================
+
+GetAverage(_data, _len, MAOption) =>
+    value = switch MAOption
+        'SMA' => ta.sma(_data, _len) 
+        'EMA' => ta.ema(_data, _len) 
+        'HMA' => ta.hma(_data, _len) 
+        'RMA' => ta.rma(_data, _len) 
+        => 
+            ta.wma(_data, _len)
+
+Normalize(_Value, _Avg) =>
+    _X = _Value / _Avg
+    _Nor = 
+      _X > 1.50 ? 1.00 :
+      _X > 1.20 ? 0.90 :
+      _X > 1.00 ? 0.80 :
+      _X > 0.80 ? 0.70 :
+      _X > 0.60 ? 0.60 :
+      _X > 0.40 ? 0.50 :
+      _X > 0.20 ? 0.25 :
+      0.1
+
+grp_1   = 'Rate of FLow (RoF)'
+grp_2   = 'Lookback Parameters'
+grp_3   = 'Bias / Sentiment'
+grp_4   = 'EVEREX Bands'
+
+length1    = input.int(10, minval = 1, inline = 'ROF', group = grp_1)
+MA_Type   = input.string(defval = 'WMA', title = 'MA type', 
+  options = ['WMA', 'EMA', 'SMA', 'HMA', 'RMA'], inline = 'ROF', group = grp_1) 
+smooth    = input.int(defval = 3, title = 'Smooth', minval = 1,  inline = 'ROF', group = grp_1)
+
+sig_length  = input.int(5, 'Signal Length', minval = 1, inline = 'Signal', group = grp_1)
+S_Type      = input.string(defval = 'WMA', title = 'Signal Type', 
+  options = ['WMA', 'EMA', 'SMA', 'HMA', 'RMA'], inline = 'Signal', group = grp_1)
+
+lookback    = input.int(defval = 20, title = 'Length', minval = 1, inline = 'Lookback', group = grp_2)
+lkbk_Calc   = input.string(defval = 'Simple', title = 'Averaging', 
+  options = ['Simple', 'Same as RRoF'], inline='Lookback', group = grp_2 )
+
+showBias    = input.bool(defval = false, title = 'Bias Plot ? -- ', inline = 'Bias', group = grp_3)
+B_Length    = input.int(defval = 30, title = 'Length', minval = 1, inline = 'Bias', group = grp_3)
+B_Type      = input.string(defval = 'WMA', title = 'MA type', 
+  options = ['WMA', 'EMA', 'SMA', 'HMA', 'RMA'], inline = 'Bias', group = grp_3)
+
+showEVEREX  = input.bool(true, 'Show EVEREX Bands ? -- ', inline = 'EVEREX', group = grp_4)
+
+bandscale   = str.tonumber(input.string("100", title = "Band Scale", 
+  options = ['100', '200', '400'], inline = 'EVEREX', group = grp_4))
+
+DispBias    = showBias ? display.pane : display.none 
+DispBands   = showEVEREX ? display.pane : display.none 
+showhlines  = showEVEREX ? display.all : display.none 
+
+Disp_vals   = display.status_line + display.data_window
+
+v1   = na(volume) ? 1 : volume                  // this part ensures we're not hit with calc issues due to NaN's
+NoVol_Flag = na(volume) ? true : false          // this is a flag to use later 
+
+lkbk_MA_Type = lkbk_Calc == 'Simple' ? 'SMA' : MA_Type
+
+Vola  = GetAverage(v1, lookback, lkbk_MA_Type)
+Vola_n_pre = Normalize(v1, Vola) * 100
+Vola_n = NoVol_Flag ? 100 : Vola_n_pre
+
+BarSpread = close - open 
+BarRange  = high - low
+R2        = ta.highest(2) - ta.lowest(2)
+SrcShift  = ta.change(close)
+
+sign_shift = math.sign(SrcShift) 
+sign_spread = math.sign(BarSpread) 
+barclosing  = 2 * (close - low) / BarRange * 100 - 100
+s2r = BarSpread / BarRange * 100
+
+BarSpread_abs   = math.abs(BarSpread)
+BarSpread_avg   = GetAverage(BarSpread_abs, lookback, lkbk_MA_Type)
+BarSpread_ratio_n = Normalize(BarSpread_abs, BarSpread_avg) * 100 * sign_spread  
+barclosing_2  = 2 * (close - ta.lowest(2)) / R2 * 100 - 100
+Shift2Bar_toR2 = SrcShift / R2 * 100 
+
+SrcShift_abs    = math.abs(SrcShift)
+srcshift_avg    = GetAverage(SrcShift_abs, lookback, lkbk_MA_Type) 
+srcshift_ratio_n   = Normalize(SrcShift_abs, srcshift_avg) * 100 * sign_shift
+
+Pricea_n = (barclosing + s2r + BarSpread_ratio_n + barclosing_2 + Shift2Bar_toR2 + srcshift_ratio_n) / 6
+bar_flow  =   Pricea_n * Vola_n / 100 
+
+bulls = math.max(bar_flow, 0)
+bears = -1 * math.min(bar_flow, 0)
+
+bulls_avg = GetAverage(bulls, length1, MA_Type)
+bears_avg = GetAverage(bears, length1, MA_Type)
+
+dx          = bulls_avg / bears_avg
+RROF         = 2 * (100 - 100 / (1 + dx)) - 100
+RROF_s      = ta.wma(RROF, smooth)
+
+Signal = GetAverage(RROF_s, sig_length, S_Type)
+
+dx_b          = GetAverage(bulls, B_Length, B_Type) / GetAverage(bears, B_Length, B_Type)
+RROF_b       = 2 * (100 - 100 / (1 + dx_b)) - 100
+RROF_bs      = ta.wma(RROF_b, smooth)
+
+up1      = RROF_s >= 0
+s_up1    = RROF_bs >=0 
+
+//hline(0, 'Zero Line', c_zero, linestyle = hline.style_solid)
+//hline(0.25 * bandscale, title = '1/4 Level', color=c_band, linestyle = hline.style_dotted, display = showhlines)
+//hline(0.50 * bandscale, title = '2/4 Level', color=c_band, linestyle = hline.style_dotted, display = showhlines)
+//hline(0.75 * bandscale, title = '3/4 Level', color=c_band, linestyle = hline.style_dotted, display = showhlines)
+//hline(bandscale, title = '4/4 Level', color=c_band, linestyle = hline.style_dotted, display = showhlines)
+
+//plot(ta.wma(bulls_avg, smooth), "Bulls", color = #11ff20, linewidth = 2, display = display.none)
+//plot(ta.wma(bears_avg, smooth), "Bears", color = #d5180b, linewidth = 2, display = display.none)
+
+// plot (RROF_bs, "Bias / Sentiment", style=plot.style_area, color = s_up ? c_sup : c_sdn, linewidth = 4, display = DispBias ) 
+
+Eq_band_option = input.string("Joint", title = 'Band Option', options = ["Joint", "Separate"], group = grp_4)
+
+nPrice  = math.max(math.min(Pricea_n, 100), -100)
+nVol    = math.max(math.min(Vola_n, 100), -100)
+
+bar = bar_flow
+
+c_vol_grn   = color.new(#26a69a, 75)
+c_vol_red   = color.new(#ef5350, 75)
+
+cb_vol_grn  = color.new(#26a69a, 20)
+cb_vol_red  = color.new(#ef5350, 20)
+
+c_vol       = bar > 0 ? c_vol_grn : c_vol_red
+cb_vol      = bar > 0 ? cb_vol_grn : cb_vol_red
+
+vc_lo       = 0
+vc_hi       = nVol * bandscale / 100 / 2
+
+// plotcandle(vc_lo, vc_hi, vc_lo, vc_hi , "Volume Band", c_vol, c_vol, bordercolor = cb_vol, display = DispBands)
+
+c_pri_grn   = color.new(#3ed73e, 75)
+c_pri_red   = color.new(#ff870a, 75)
+
+cb_pri_grn  = color.new(#3ed73e, 20)
+cb_pri_red  = color.new(#ff870a, 20)
+
+c_pri       = bar > 0 ? c_pri_grn : c_pri_red
+cb_pri      = bar > 0 ? cb_pri_grn : cb_pri_red
+
+pc_lo_base  = Eq_band_option == "Joint" ? vc_hi : 0.50 * bandscale
+
+pc_lo       = pc_lo_base
+pc_hi       = pc_lo_base + math.abs(nPrice) * bandscale / 100 / 2
+
+//plotcandle(pc_lo, pc_hi, pc_lo ,pc_hi , "Price Band", c_pri, c_pri, bordercolor = cb_pri, display = DispBands)
+//plotchar(nVol,    "Normalized Vol",   char = "", color = c_vol, editable = false, display = Disp_vals)
+//plotchar(nPrice,  "Normalized Price", char = "", color = c_pri, editable = false, display = Disp_vals)
+
+//plot(RROF, 'RROF Raw', color.new(#2470f0, 9), display=display.none)
+//plot(RROF_s, 'RROF Smooth', color = color.new(#b2b5be,40), linewidth = 2)
+//plot(Signal, "Signal Line", up ? c_up : c_dn, 3)
+
+Alert_up    = ta.crossover(RROF_s,0)
+Alert_dn    = ta.crossunder(RROF_s,0)
+Alert_swing = ta.cross(RROF_s,0)
+
+nPrice_abs = math.abs(nPrice)
+EV_Ratio = 100 * nPrice_abs / nVol
+is_positive     = nPrice > 0
+
+is_Compression  = EV_Ratio <= 50
+is_EoM          = EV_Ratio >= 120
+
+//plotshape(showMarkers and is_EoM and is_positive ? 0 : na,      "EoM +ve", shape.triangleup,    color=color.green, location=location.absolute, size=size.auto, editable = false, display = display.pane)
+//plotshape(showMarkers and is_EoM and not(is_positive) ? 0 : na, "EoM -ve", shape.triangledown,  color=color.red, location=location.absolute, size=size.auto, editable = false, display = display.pane)
+//plotshape(showMarkers and is_Compression and is_positive ? 0 : na,        "Compression +ve", style = SetShape(Mshape), color=color.green, location=location.absolute, size = size.auto, editable = false, display = display.pane)
+//plotshape(showMarkers and is_Compression and not(is_positive) ? 0 : na,   "Compression -ve", style = SetShape(Mshape), color=color.red, location=location.absolute, size=size.auto, editable = false, display = display.pane)
+
+// =====================================   MY SHIT   ==================================================================
+
+upwards = upDXF and up1 and (closeToPlot > openToPlot) and pc_hi > 74 and bar > 0
+downwards = downDXF and not up1 and (closeToPlot < openToPlot) and pc_hi > 74 and bar < 0
+
+showUp = upwards and not upwards[1] and not upwards[2] and not upwards[3] and not upwards[4] 
+showDown = downwards and not downwards[1] and not upwards[2] and not upwards[3] and not upwards[4] 
+
+plotshape(showUp ? 1 : na, title="E", text="E", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.green, textcolor=color.white)
+plotshape(showDown ? 1 : na, title="E", text="E", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.red, textcolor=color.white)
+

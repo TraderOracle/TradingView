@@ -1,0 +1,157 @@
+//@version = 4
+
+study("OneHour Fib Power","OneHour Fib Power v1",true,max_bars_back=1000,max_lines_count=500)
+
+bShowVol  = input(false, "Show Volume Profile", type = input.bool)
+length    = input(60,'Lookback',minval=1,maxval=1000,tooltip='Number of most recent bars to use for the calculation of the volume profile')
+row       = input(150,'Row Size',minval=1,maxval=500,tooltip='Determines the number of rows used for the calculation of the volume profile')
+width     = input(50,'Width (% of the box)',minval=1,maxval=100,tooltip='Determines the length of the bars relative to the Lookback value')
+bar_width = input(2,'Bar Width',tooltip='Width of each bar')
+solid     = input(#0055c4,'Rows Solid Color',tooltip='Color of each bar when "Gradient" is disabled')
+
+tradeTimes = input("1030-1031", title="Hour after open")
+
+InSession(sessionTimes) =>
+    not na(time(timeframe.period, sessionTimes))
+bool iss = InSession(tradeTimes)
+
+var a = array.new_line()
+var b = array.new_line()
+
+if barstate.isfirst
+    for i = 0 to row-1
+        array.push(a,line.new(na,na,na,na,width=2))
+    array.push(b,line.new(na,na,na,na,width=2))
+//-----------------------------------------------------------------------------------------
+n = bar_index
+src = close
+v = volume
+//-----------------------------------------------------------------------------------------
+var Alvl = 0.
+var Blvl = 0.
+var current_num_conf = 0
+var current_num_cont = 0
+highest = highest(length)
+lowest = lowest(length)
+
+var bool lineExtend = false
+var float F05 = na
+var float F105 = na
+var float F005 = na
+var float F100 = na
+var float F618 = na
+var float F0618 = na
+var float F1618 = na
+var float F1272 = na
+var float F200 = na
+var float F0272 = na
+var float F2272 = na
+var float F2618 = na
+var float F300 = na
+var float F00 = na
+var int lineLen = 0
+var int startBar = 0
+
+fibrange = highest - lowest
+
+if iss
+    lineExtend := true
+    lineLen := 0
+    startBar := bar_index
+    F005 := highest + 0.5 * abs(fibrange)
+    F0272 := highest + 0.272 * abs(fibrange)
+    F0618 := highest + 0.618 * abs(fibrange)
+    F00 := highest + abs(fibrange)
+    F05 := highest - 0.5 * abs(fibrange)
+    F618 := highest - 0.618 * abs(fibrange)
+    F100 := highest - 1 * abs(fibrange)
+    F200 := highest - 2 * abs(fibrange)
+    F105 := highest - 1.5 * abs(fibrange)
+    F1272 := highest - 1.272 * abs(fibrange)
+    F1618 := highest - 1.618 * abs(fibrange)
+    F2272 := highest - 2.272 * abs(fibrange)
+    F2618 := highest - 2.618 * abs(fibrange)
+    F300 := highest - 3 * abs(fibrange)
+
+// line.new(startBar, close, startBar, close, extend = extend.right)
+
+if lineExtend
+    lineLen := lineLen + 1
+
+if lineLen > 330
+    lineExtend := false
+
+r_F0272 = plot(lineExtend ? F0272 : na, title='1.5', color=color.purple, style=plot.style_line, offset=0)
+label.new(startBar - 2, F0272, "1.272", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+
+r_F00 = plot(lineExtend ? F00 : na, title='.05', color=color.blue, style=plot.style_line, offset=0)
+label.new(startBar - 2, F00, "2", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+
+r_F05 = plot(lineExtend ? F05 : na, title='.05', color=color.blue, style=plot.style_line, offset=0)
+label.new(startBar - 2, F005, "1.5", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+
+r_F618 = plot(lineExtend ? F618 : na, title='.05', color=color.blue, style=plot.style_line, offset=0)
+label.new(startBar - 2, F618, "0.618", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+
+r_F005 = plot(lineExtend ? F005 : na, title='.05', color=color.blue, style=plot.style_line, offset=0)
+label.new(startBar - 2, F005, "1.5", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+
+r_F0618 = plot(lineExtend ? F0618 : na, title='.05', color=color.rgb(172, 14, 14), style=plot.style_line, offset=0)
+label.new(startBar - 2, F0618, "1.618", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+
+r_F1618 = plot(lineExtend ? F1618 : na, title='.05', color=color.rgb(0, 173, 89), style=plot.style_line, offset=0)
+label.new(startBar - 2, F1618, "1.618", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+
+r_F105 = plot(lineExtend ? F105 : na, title='.05', color=color.rgb(184, 21, 21), style=plot.style_line, offset=0)
+label.new(startBar - 2, F105, "1.5", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+
+r_F100 = plot(lineExtend ? F100 : na, title='.05', color=color.gray, style=plot.style_line, offset=0)
+label.new(startBar - 2, F100, "0", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+
+r_F1272 = plot(lineExtend ? F1272 : na, title='1.5', color=color.purple, style=plot.style_line, offset=0)
+label.new(startBar - 2, F1272, "1.272", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+
+r_F200 = plot(lineExtend ? F200 : na, title='.05', color=color.rgb(1, 182, 94), style=plot.style_line, offset=0)
+label.new(startBar - 2, F200, "2", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+
+r_F2272 = plot(lineExtend ? F2272 : na, title='.05', color=color.purple, style=plot.style_line, offset=0)
+label.new(startBar - 2, F2272, "2.272", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+
+r_F2618 = plot(lineExtend ? F2618 : na, title='.05', color=color.rgb(183, 27, 27), style=plot.style_line, offset=0)
+label.new(startBar - 2, F2618, "2.618", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+
+r_F300 = plot(lineExtend ? F300 : na, title='.05', color=color.purple, style=plot.style_line, offset=0)
+label.new(startBar - 2, F300, "3", color=color.new(color.black, 100), textcolor=color.blue, style=label.style_none)
+
+
+line l = na
+line poc = na
+levels = array.new_float(0)
+sumv = array.new_float(0)
+
+if iss
+    for i = 0 to row
+        array.push(levels,lowest + i/row*(highest-lowest))
+    for j = 0 to row-1
+        sum = 0.
+        for k = 0 to length-1
+            sum := high[k] > array.get(levels,j) and low[k] < array.get(levels,j+1) ?
+              sum + v[k] : sum
+        array.push(sumv,sum)
+    for j = 0 to row-1
+        mult = array.get(sumv,j)/array.max(sumv)
+        l := array.get(a,j)
+        get = array.get(levels,j)
+        if bShowVol
+            line.set_xy1(l,n-length+1,get)
+            line.set_xy2(l,n-length+round(length*width/100*mult),array.get(levels,j))
+            line.set_width(l,bar_width)
+        if mult == 1
+            poc := array.get(b,0)
+            avg = avg(get,array.get(levels,j+1))
+            if bShowVol
+                line.set_xy1(poc,n-length+1,avg)
+                line.set_xy2(poc,n,avg)
+                line.set_style(poc,line.style_dotted)
+                line.set_width(poc,bar_width)
+

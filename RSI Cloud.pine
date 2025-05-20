@@ -1,0 +1,24 @@
+ // @version=5
+
+indicator(title="TO RSI Cloud", max_bars_back = 1000, max_lines_count = 500, max_labels_count = 500)
+
+rsiLengthInput = input.int(14, minval=1, title="RSI Length", group="RSI Settings")
+rsiSourceInput = input.source(close, "Source", group="RSI Settings")
+
+
+up = ta.rma(math.max(ta.change(rsiSourceInput), 0), rsiLengthInput)
+down = ta.rma(-math.min(ta.change(rsiSourceInput), 0), rsiLengthInput)
+rsi = down == 0 ? 100 : up == 0 ? 0 : 100 - (100 / (1 + up / down))
+rsiPlot = plot(rsi, "RSI", color=#7E57C2)
+
+ma = ta.sma(src, 20)
+cci = (src - ma) / (0.015 * ta.dev(src, 20))
+cciPlot = plot(cci, "CCI", color=#2962FF)
+
+ad = close==high and close==low or high==low ? 0 : ((2*close-low-high)/(high-low))*volume
+mf = math.sum(ad, 20) / math.sum(volume, 20)
+mfPlot = plot(mf, color=#43A047, title="Money Flow")
+// fill(rsiPlot, mfPlot, 30,  0,  top_color = color.new(color.red, 100), bottom_color = color.new(color.red, 0))
+
+
+

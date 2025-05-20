@@ -1,0 +1,132 @@
+//@version=4
+strategy("BullRush Strategy", overlay=true)
+
+///////////////////////////////////////////////////
+iAvgType = input("SMMA", title="Moving Average Type", options=["EMA","HMA","SMA","SMMA","WMA"])
+iEMAMain = input(50, "Main EMA Length", minval=1, tooltip="Normally 50.  64 is an alternative")
+bRSI = input(true, title="Enable RSI Verification")
+ 
+up = rma(max(change(close), 0), 14)
+down = rma(-min(change(close), 0), 14)
+rsi = down == 0 ? 100 : up == 0 ? 0 : 100 - (100 / (1 + up / down))
+rsiMA = ema(rsi, 14)
+
+var isLong = false
+var isShort = false
+
+bMAUp = false
+bMADown = false
+b9over21 = false
+b9under21 = false
+
+if (iAvgType == "HMA")
+    bMAUp := close > wma(2*wma(close, iEMAMain/2)-wma(close, iEMAMain), floor(sqrt(iEMAMain)))
+    bMADown := close < wma(2*wma(close, iEMAMain/2)-wma(close, iEMAMain), floor(sqrt(iEMAMain)))
+    b9over21 := wma(2*wma(close, 9/2)-wma(close, 9), floor(sqrt(9))) > wma(2*wma(close, 21/2)-wma(close, 21), floor(sqrt(21)))
+    b9under21 := wma(2*wma(close, 9/2)-wma(close, 9), floor(sqrt(9))) < wma(2*wma(close, 21/2)-wma(close, 21), floor(sqrt(21)))
+
+if (iAvgType == "WMA")
+    bMAUp := close > wma(close, iEMAMain) // and open > sma(close, iEMAMain)
+    bMADown := close < wma(close, iEMAMain) // and open < sma(close, iEMAMain)
+    b9over21 := wma(close, 9) > wma(close, 21)
+    b9under21 := wma(close, 9) < wma(close, 21)
+
+if (iAvgType == "SMA")
+    bMAUp := close > sma(close, iEMAMain) // and open > sma(close, iEMAMain)
+    bMADown := close < sma(close, iEMAMain) // and open < sma(close, iEMAMain)
+    b9over21 := sma(close, 9) > sma(close, 21)
+    b9under21 := sma(close, 9) < sma(close, 21)
+
+if (iAvgType == "EMA")
+    bMAUp := close > ema(close, iEMAMain) // and open > ema(close, iEMAMain)
+    bMADown := close < ema(close, iEMAMain) // and open < ema(close, iEMAMain)
+    b9over21 := ema(close, 9) > ema(close, 21)
+    b9under21 := ema(close, 9) < ema(close, 21)
+
+if (iAvgType == "SMMA")
+    smma = 0.0
+    smma := na(smma[1]) ? sma(close, iEMAMain) : (smma[1] * (iEMAMain - 1) + close) / iEMAMain
+    bMAUp := close > smma // and open > smma
+    bMADown := close < smma // and open < smma
+    b9over21 := ema(close, 9) > ema(close, 21)
+    b9under21 := ema(close, 9) < ema(close, 21)
+
+rsiUp = true
+rsiDown = true
+if (bRSI)
+    rsiUp := rsi > 50 and rsi > rsiMA
+    rsiDown := rsi < 50 and rsi < rsiMA
+
+upwards = not isLong and bMAUp and close > open and rsiUp and b9over21 // and ema(close, 9) > ema(close, 21)
+downwards = not isShort and bMADown and open > close and rsiDown and b9under21 // and ema(close, 9) < ema(close, 21)
+
+showUp = upwards and not upwards[1] 
+showDown = downwards and not downwards[1] 
+
+plotshape(showUp ? hl2 : na, title="BR", text="BR", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.green, textcolor=color.white)
+plotshape(showDown ? hl2 : na, title="BR", text="BR", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.red, textcolor=color.white)
+
+if showUp
+    isLong := true
+    isShort := false
+
+if showDown
+    isLong := false
+    isShort := true
+
+
+/////////////////////////////////////////////////////////////////
+
+TimeWindow=time(timeframe.period,"1400-1900", "GMT")
+
+if (showUp and TimeWindow)
+    strategy.entry("Trade", strategy.long, comment="Long")
+if (showDown and TimeWindow)
+    strategy.entry("Trade", strategy.short, comment="Short")
+
+trailSource         = input(title="Trail Source", defval="Lows/Highs", options=["Lows/Highs", "Close", "Open"], confirm=true, group="Strategy")
+trailMethod         = input(title="Trail Method", defval="ATR", options=["ATR", "Percent"], confirm=true, group="Strategy")
+trailPercent        = input(title="Trail Percent", defval=10, minval=0.1, confirm=true, group="Strategy")
+swingLookback       = input(title="Lookback", defval=7, confirm=true, group="Strategy")
+atrPeriod           = input(title="ATR Period", defval=14, confirm=true, group="Strategy")
+atrMultiplier       = input(title="ATR Multiplier", defval=1.0, confirm=true, group="Strategy")
+barTime             = input(title="Bar Time", defval=timestamp("01 Jan 2021 13:30 +0000"), confirm=true, group="Strategy")
+
+var float trailPrice    = na
+float next_trailPrice   = na
+
+atrValue                = atr(atrPeriod) * atrMultiplier
+float swingLow          = lowest(low, swingLookback)
+float swingHigh         = highest(high, swingLookback)
+
+
+if trailMethod == "ATR"
+    if trailSource == "Close" 
+        next_trailPrice := strategy.position_size > 0 ? close - atrValue : close + atrValue
+    else if trailSource == "Open" 
+        next_trailPrice := strategy.position_size > 0 ? open - atrValue : open + atrValue
+    else
+        next_trailPrice := strategy.position_size > 0 ? swingLow - atrValue : swingHigh + atrValue
+
+if trailMethod == "Percent" 
+    float percentMulti = strategy.position_size > 0 ? (100 - trailPercent) / 100 : (100 + trailPercent) / 100
+    if trailSource == "Close" 
+        next_trailPrice := close * percentMulti
+    else if trailSource == "Open" 
+        next_trailPrice := open * percentMulti
+    else
+        next_trailPrice := strategy.position_size > 0 ? swingLow * percentMulti : swingHigh * percentMulti
+
+if strategy.position_size != 0 and barstate.isconfirmed
+    if (next_trailPrice > trailPrice or na(trailPrice)) and strategy.position_size > 0
+        trailPrice := next_trailPrice
+    if (next_trailPrice < trailPrice or na(trailPrice)) and strategy.position_size < 0
+        trailPrice := next_trailPrice
+
+plot(strategy.position_size != 0 ? trailPrice : na, color=color.red, title="Trailing Stop")
+
+strategy.exit(id="Trail Exit", from_entry="Trade", limit=na, stop=trailPrice)
+
+if (strategy.position_size > 0 and close < trailPrice) or (strategy.position_size < 0 and close > trailPrice)
+    strategy.close("Trade")
+

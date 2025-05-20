@@ -1,0 +1,837 @@
+//@version=4
+// Created By Lij_MC
+// Heavily modified by TraderOracle on 4/26/23
+study(title="MP Meter v1.5")
+
+// Inputs / Menus
+PosNegPressure = false
+TMSetups       = true
+TMSetupsANDWT  = true
+
+TrendBar1 = input(title="Trend Meter 1", defval="MACD Crossover - 12, 26, 9", options=["ADX","Awesome Oscillator","Bollinger Bands","Bull Rush","CCI","Chaikin Money Flow","Chande Momentum","Halftrend","Hull Moving Average","Keltner Channels","Know Sure Thing","MACD Crossover - 12, 26, 9", "MACD Crossover - Fast - 8, 21, 5", "PSAR","QQE Mod","RSI Signal Line Cross - RSI 13, Sig 21", "RSI 13: > or < 50", "RSI 5: > or < 50","RVI Above SMA","Schaff Trend Cycle","SSL Hybrid","Stochastic RSI","Triple SuperTrend","TRIX","VWMA Cross","WMA Cross","N/A"], group = "Trend Meters")  
+TrendBar2 = input(title="Trend Meter 2", defval="PSAR", options=["ADX","Awesome Oscillator","Bollinger Bands","Bull Rush","CCI","Chaikin Money Flow","Chande Momentum","Halftrend","Hull Moving Average","Keltner Channels","Know Sure Thing","MACD Crossover - 12, 26, 9", "MACD Crossover - Fast - 8, 21, 5","PSAR","QQE Mod","RSI Signal Line Cross - RSI 13, Sig 21", "RSI 13: > or < 50", "RSI 5: > or < 50","RVI Above SMA","Schaff Trend Cycle","SSL Hybrid","Stochastic RSI","Triple SuperTrend","TRIX","VWMA Cross","WMA Cross","N/A"], group = "Trend Meters")  
+TrendBar3 = input(title="Trend Meter 3", defval="Triple SuperTrend", options=["ADX","Awesome Oscillator","Bollinger Bands","Bull Rush","CCI","Chaikin Money Flow","Chande Momentum","Halftrend","Hull Moving Average","Keltner Channels","Know Sure Thing","MACD Crossover - 12, 26, 9", "MACD Crossover - Fast - 8, 21, 5","PSAR","QQE Mod","RSI Signal Line Cross - RSI 13, Sig 21", "RSI 13: > or < 50", "RSI 5: > or < 50","RVI Above SMA","Schaff Trend Cycle","SSL Hybrid","Stochastic RSI","Triple SuperTrend","TRIX","VWMA Cross","WMA Cross","N/A"], group = "Trend Meters")  
+TrendBarM = input(title="Trend Meter 4", defval="Halftrend", options=["ADX","Awesome Oscillator","Bollinger Bands","Bull Rush","CCI","Chaikin Money Flow","Chande Momentum","Halftrend","Hull Moving Average","Keltner Channels","Know Sure Thing","MACD Crossover - 12, 26, 9", "MACD Crossover - Fast - 8, 21, 5","PSAR","QQE Mod","RSI Signal Line Cross - RSI 13, Sig 21", "RSI 13: > or < 50", "RSI 5: > or < 50","RVI Above SMA","Schaff Trend Cycle","SSL Hybrid","Stochastic RSI","Triple SuperTrend","TRIX","VWMA Cross","WMA Cross","N/A"], group = "Trend Meters")  
+
+psarStart = input(title="PSAR Start", type=input.float, step=0.001, defval=0.02, group="MACD / PSAR")
+psarIncrement = input(title="PSAR Increment", type=input.float, step=0.001, defval=0.02, group="MACD / PSAR")
+psarMaximum = input(title="PSAR Maximum", type=input.float, step=0.01, defval=0.2, group="MACD / PSAR")
+
+lengthBB = input(30, minval=1, title="Length", group="Bollinger Bands")
+srcBB = input(close, title="Source", group="Bollinger Bands")
+multBB = input(2.0, minval=0.001, maxval=50, title="StdDev", group="Bollinger Bands")
+
+lengthKC = input(20, minval=1, group="Keltner Channel")
+multKC = input(2.0, "Multiplier", group="Keltner Channel")
+srcKC = input(close, title="Source", group="Keltner Channel")
+expKC = input(true, "Use Exponential MA", group="Keltner Channel")
+BandsStyle = input("Average True Range", options = ["Average True Range", "True Range", "Range"], title="Bands Style", group="Keltner Channel")
+atrlengthKC = input(10, "ATR Length", group="Keltner Channel")
+
+// QQE MOD
+Wilders_Period = 6 * 2 - 1
+
+qqeRsi = rsi(close, 6)
+RsiMa = ema(qqeRsi, 5)
+AtrRsi = abs(RsiMa[1] - RsiMa)
+MaAtrRsi = ema(AtrRsi, Wilders_Period)
+dar = ema(MaAtrRsi, Wilders_Period) * 3
+
+longband = 0.0
+shortband = 0.0
+qqetrend = 0
+
+newshortband = RsiMa + dar
+newlongband = RsiMa - dar
+
+shortband := RsiMa[1] < shortband[1] and RsiMa < shortband[1] ? 
+   min(shortband[1], newshortband) : newshortband
+longband := RsiMa[1] > longband[1] and RsiMa > longband[1] ? 
+   max(longband[1], newlongband) : newlongband
+cross_1 = cross(longband[1], RsiMa)
+
+qqetrend := cross(RsiMa, shortband[1]) ? 1 : cross_1 ? -1 : nz(qqetrend[1], 1)
+FastAtrRsiTL = qqetrend == 1 ? longband : shortband
+qqebasis = sma(FastAtrRsiTL - 50, 50)
+qqedev = 0.35 * stdev(FastAtrRsiTL - 50, 50)
+qqeupper = qqebasis + qqedev
+qqelower = qqebasis - qqedev
+
+Rsi2 = rsi(close, 6)
+RsiMa2 = ema(Rsi2, 5)
+
+Greenbar1 = RsiMa2 - 50 > 3
+Greenbar2 = RsiMa - 50 > qqeupper
+
+Redbar1 = RsiMa2 - 50 < 0 - 3
+Redbar2 = RsiMa - 50 < qqelower
+qqeUp = Greenbar1 and Greenbar2 == 1
+qqeDown = Redbar1 and Redbar2 == 1
+qqeTrue = qqeUp ? true : false
+qqeColor = qqeUp ? #288a75 : qqeDown ? color.red : color.new(color.black, 100)
+
+// SSL HYBRID
+Keltma = wma(2 * wma(close, 60 / 2) - wma(close, 60), round(sqrt(60)))
+rangeSSL = ema(tr, 60)
+upperk = Keltma + rangeSSL * 0.2
+lowerk = Keltma - rangeSSL * 0.2
+sslTrue = close > upperk ? true : false
+sslColor = close > upperk ? #288a75 : close < lowerk ? color.red : color.new(color.black, 100)
+
+// CCI
+lCCI = input(20, minval=1, group="CCI")
+srcCCI = input(hlc3, title="Source", group="CCI")
+ma = sma(srcCCI, lCCI)
+cci = (srcCCI - ma) / (0.015 * dev(srcCCI, lCCI))
+cciTrue = cci >= 100 ? true : false
+cciColor = cci >= 100 ? #288a75 : cci <= -100 ? color.red : color.new(color.black, 100)
+
+// WMA and VWMA IRON CROSS
+vwCrossF = input(10, title="VWMA Cross Fast", group="VWMA Iron Cross")
+vwCrossS = input(50, title="VWMA Cross Slow", group="VWMA Iron Cross")
+wCrossF = input(10, title="WMA Cross Fast", group="WMA Iron Cross")
+wCrossS = input(50, title="WMA Cross Slow", group="WMA Iron Cross")
+VWMAF = vwma(close, vwCrossF)
+VWMAS = vwma(close, vwCrossS)
+WMAF = wma(close, wCrossF)
+WMAS = wma(close, wCrossS)
+
+// Average Directional Index
+adxlen = input(14, title="ADX Smoothing", group="ADX")
+dilen = input(14, title="DI Length", group="ADX")
+adxThreshold = input(19, title="ADX Threshold", group="ADX", tooltip="ADX value that must be reached in order for an indicator to show green")
+dirmov(len) =>
+	up = change(high)
+	down = -change(low)
+	plusDM = na(up) ? na : (up > down and up > 0 ? up : 0)
+	minusDM = na(down) ? na : (down > up and down > 0 ? down : 0)
+	truerange = rma(tr, len)
+	plus = fixnan(100 * rma(plusDM, len) / truerange)
+	minus = fixnan(100 * rma(minusDM, len) / truerange)
+	[plus, minus]
+adx(dilen, adxlen) =>
+	[plus, minus] = dirmov(dilen)
+	sum = plus + minus
+	adx = 100 * rma(abs(plus - minus) / (sum == 0 ? 1 : sum), adxlen)
+adxValue = adx(dilen, adxlen)
+adxTrue = adxValue >= adxThreshold ? true : false
+adxColor = adxTrue ? #288a75 : color.red
+
+// TRIX - silly rabbit, Trix are for kids?
+lTrix = input(18, minval=1, group="TRIX")
+oTrix = 10000 * change(ema(ema(ema(log(close), lTrix), lTrix), lTrix))
+TrixTrue = oTrix >= 0 ? true : false
+TrixColor = TrixTrue ? #288a75 : color.red
+
+// KNOW SURE THING
+roclen1 = 10
+roclen2 = 15
+roclen3 = 20
+roclen4 = 30
+smalen1 = 10
+smalen2 = 10
+smalen3 = 10
+smalen4 = 15
+siglen = 9
+smaroc(roclen, smalen) => sma(roc(close, roclen), smalen)
+kst = smaroc(roclen1, smalen1) + 2 * smaroc(roclen2, smalen2) + 3 * smaroc(roclen3, smalen3) + 4 * smaroc(roclen4, smalen4)
+sig = sma(kst, siglen)
+KSTTrue = kst >= sig
+KSTColor = KSTTrue ? #288a75 : color.red
+
+// RVI
+lengthRVI = input(10, minval=1, group="RVI Settings")
+offsetRVI = input(0, "Offset", minval = -500, maxval = 500, group="RVI Settings")
+maLengthInput = input(14, title="MA Length", group="RVI Settings")
+bbMultInput = input(2.0, minval=0.001, maxval=50, title="BB StdDev", group="RVI Settings")
+srcRVI = close
+lenRVI = 14
+stddevRVI = stdev(srcRVI, lengthRVI)
+upperRVI = ema(change(srcRVI) <= 0 ? 0 : stddevRVI, lenRVI)
+lowerRVI = ema(change(srcRVI) > 0 ? 0 : stddevRVI, lenRVI)
+rvi = upperRVI / (upperRVI + lowerRVI) * 100
+rviMA = sma(rvi, lengthRVI)
+RVITrue = rvi >= rviMA
+RVIColor = RVITrue ? #288a75 : color.red
+
+// ChandeMO
+lengthCMO = input(9, minval=1,group="Chande Momentum")
+srcCMO = input(close, "Source",group="Chande Momentum")
+momm = change(srcCMO)
+f1(m) => m >= 0.0 ? m : 0.0
+f2(m) => m >= 0.0 ? 0.0 : -m
+m1 = f1(momm)
+m2 = f2(momm)
+sm1 = sum(m1, lengthCMO)
+sm2 = sum(m2, lengthCMO)
+percent(nom, div) => 100 * nom / div
+chandeMO = percent(sm1-sm2, sm1+sm2)
+CMOTrue = chandeMO >= 0
+CMOColor = CMOTrue ? #288a75 : color.red
+
+// STOCHASTIC RSI
+smoothK = input(3, "K", minval=1, group="Stochastic RSI")
+smoothD = input(3, "D", minval=1, group="Stochastic RSI")
+lengthRSI = input(14, "RSI Length", minval=1, group="Stochastic RSI")
+lengthStoch = input(14, "Stochastic Length", minval=1, group="Stochastic RSI")
+srcSR = input(close, title="RSI Source", group="Stochastic RSI")
+rsiSR = rsi(srcSR, lengthRSI)
+kSR = sma(stoch(rsiSR, rsiSR, rsiSR, lengthStoch), smoothK)
+dSR = sma(kSR, smoothD)
+SRTrue = kSR > dSR
+SRColor = SRTrue ? #288a75 : color.red
+
+// Chaikin Money Flow
+var cumVol = 0.0
+cumVol += nz(volume)
+CMFlength = input(20, minval=1, group="Chaikin Money Flow")
+CMFad = close==high and close==low or high==low ? 0 : ((2*close-low-high)/(high-low))*volume
+CMFmf = sum(CMFad, CMFlength) / sum(volume, CMFlength)
+CMFAboveZero = CMFmf > 0
+CMFColor = CMFAboveZero ? #288a75 : color.red
+
+// Awesome Oscillator
+ao = sma(hl2,5) - sma(hl2,34)
+aoColor = ao >= 0 ? #288a75 : color.red
+aoTrue = ao >= 0
+
+// BULL RUSH
+bullUp = (ema(close, 9) > ema(close, 21) and close > ema(close, 50) and open > ema(close, 50))
+bullDown = (ema(close, 9) < ema(close, 21) and close < ema(close, 50) and open < ema(close, 50))
+bullColor = bullDown ? color.red : bullUp ? #288a75 : color.new(color.black, 100)
+
+// HULL MOVING AVERAGE
+length = input(21, minval=1, group="Hull Moving Average")
+src = input(close, title="Source", group="Hull Moving Average")
+hullma = wma(2*wma(src, length/2)-wma(src, length), floor(sqrt(length)))
+hullColor = hullma < hullma[1] ? color.red : #288a75
+hullTrue = hullma < hullma[1]
+
+// Schaff Trend Cycle
+EEEEEE = input(12, 'Length', group='Schaff Trend Cycle')
+BBBB = input(26, 'FastLength', group='Schaff Trend Cycle')
+BBBBB = input(50, 'SlowLength', group='Schaff Trend Cycle')
+
+AAAA(BBB, BBBB, BBBBB) =>
+    fastMA = ema(BBB, BBBB)
+    slowMA = ema(BBB, BBBBB)
+    AAAA = fastMA - slowMA
+    AAAA
+
+AAAAA(EEEEEE, BBBB, BBBBB) =>
+    AAA = input(0.5)
+    var CCCCC = 0.0
+    var DDD = 0.0
+    var DDDDDD = 0.0
+    var EEEEE = 0.0
+    BBBBBB = AAAA(close, BBBB, BBBBB)
+    CCC = lowest(BBBBBB, EEEEEE)
+    CCCC = highest(BBBBBB, EEEEEE) - CCC
+    CCCCC := CCCC > 0 ? (BBBBBB - CCC) / CCCC * 100 : nz(CCCCC[1])
+    DDD := na(DDD[1]) ? CCCCC : DDD[1] + AAA * (CCCCC - DDD[1])
+    DDDD = lowest(DDD, EEEEEE)
+    DDDDD = highest(DDD, EEEEEE) - DDDD
+    DDDDDD := DDDDD > 0 ? (DDD - DDDD) / DDDDD * 100 : nz(DDDDDD[1])
+    EEEEE := na(EEEEE[1]) ? DDDDDD : EEEEE[1] + AAA * (DDDDDD - EEEEE[1])
+    EEEEE
+
+mAAAAA = AAAAA(EEEEEE, BBBB, BBBBB)
+stcColor = mAAAAA > mAAAAA[1] ? color.new(#288a75, 0) : color.new(color.red, 0)
+stcTrue = mAAAAA > mAAAAA[1]
+
+// KELTNER CHANNEL
+esma(sourceKC, lengthKC)=>
+	s = sma(sourceKC, lengthKC)
+	e = ema(sourceKC, lengthKC)
+	expKC ? e : s
+maKC = esma(srcKC, lengthKC)
+rangema = BandsStyle == "True Range" ? tr(true) : BandsStyle == "Average True Range" ? atr(atrlengthKC) : rma(high - low, lengthKC)
+upperKC = maKC + rangema * multKC
+lowerKC = maKC - rangema * multKC
+downKC = low < lowerKC or high < lowerKC
+upKC = low > upperKC or high > upperKC
+kcTrue = not upKC and not downKC
+kcColor = upKC ? #288a75 : downKC ? color.red : color.new(color.black, 100)
+
+// BOLLINGER BANDS
+basisBB = sma(srcBB, lengthBB)
+devBB = multBB * stdev(srcBB, lengthBB)
+upperBB = basisBB + devBB
+lowerBB = basisBB - devBB
+offsetBB = input(0, "Offset", minval = -500, maxval = 500)
+downBB = low < lowerBB or high < lowerBB
+upBB = low > upperBB or high > upperBB
+bbTrue = not upBB and not downBB
+bbColor = upBB ? #288a75 : downBB ? color.red : color.new(color.black, 100)
+
+// TRIPLE SUPERTREND
+atr25 = sma(tr, 10)
+atr= atr25
+tx=hl2-(1*atr)
+tx1 = nz(tx[1],tx)
+tx := close[1] > tx1 ? max(tx,tx1) : tx
+ty=hl2+(1*atr)
+ty1 = nz(ty[1], ty)
+ty := close[1] < ty1 ? min(ty, ty1) : ty
+trend5 = 1
+trend5 := nz(trend5[1], trend5)
+trend5 := trend5 == -1 and close > ty1 ? 1 : trend5 == 1 and close < tx1 ? -1 : trend5
+changeCond = trend5 != trend5[1]
+
+atr20 = sma(tr, 11)
+atr0 = atr20
+tx0 =hl2-(2*atr)
+tx10 = nz(tx0[1],tx0)
+tx0 := close[1] > tx10 ? max(tx0,tx10) : tx0
+ty0=hl2+(2*atr)
+ty10 = nz(ty0[1], ty0)
+ty0 := close[1] < ty10 ? min(ty0, ty10) : ty0
+trend0 = 1
+trend0 := nz(trend0[1], trend0)
+trend0 := trend0 == -1 and close > ty10 ? 1 : trend0 == 1 and close < tx10 ? -1 : trend0
+changeCond0 = trend0 != trend0[1]
+
+atr29 = sma(tr, 12)
+atr9 = atr29
+tx9=hl2-(3*atr)
+tx19 = nz(tx9[1],tx9)
+tx9 := close[1] > tx19 ? max(tx9,tx19) : tx9
+ty9=hl2+(3*atr)
+ty19 = nz(ty9[1], ty9)
+ty9 := close[1] < ty19 ? min(ty9, ty19) : ty9
+trend9 = 1
+trend9 := nz(trend9[1], trend9)
+trend9 := trend9 == -1 and close > ty19 ? 1 : trend9 == 1 and close < tx19 ? -1 : trend9
+changeCond9 = trend9 != trend9[1]
+
+var tripBuy = false
+var tripSell = false
+
+tripBuy := (trend9==1 and tx9 and trend5==1 and tx and trend0==1 and tx0) or (trend9==1 and tx9 and trend5==1 and tx) or (trend9==1 and tx9 and trend0==1 and tx0) or (trend5==1 and tx and trend0==1 and tx0) 
+tripSell := (trend9!=1 and ty9 and trend5!=1 and ty and trend0!=1 and ty0) or (trend9!=1 and ty9 and trend5!=1 and ty) or (trend9!=1 and ty9 and trend0!=1 and ty0) or (trend5!=1 and ty and trend0!=1 and ty0) 
+TripTrue = tripBuy or tripSell
+
+// Halftrend
+amplitude = input(title="Amplitude", defval=2, group="Halftrend")
+channelDeviation = input(title="Channel Deviation", defval=2, group="Halftrend")
+
+var int trend = 0
+var int nextTrend = 0
+var float maxLowPrice = nz(low[1], low)
+var float minHighPrice = nz(high[1], high)
+
+var float up = 0.0
+var float down = 0.0
+float atrHigh = 0.0
+float atrLow = 0.0
+float arrowUp = na
+float arrowDown = na
+
+atr2 = atr(100) / 2
+dev = channelDeviation * atr2
+
+highPrice = high[abs(highestbars(amplitude))]
+lowPrice = low[abs(lowestbars(amplitude))]
+highma = sma(high, amplitude)
+lowma = sma(low, amplitude)
+
+if nextTrend == 1
+	maxLowPrice := max(lowPrice, maxLowPrice)
+
+	if highma < maxLowPrice and close < nz(low[1], low)
+		trend := 1
+		nextTrend := 0
+		minHighPrice := highPrice
+else
+	minHighPrice := min(highPrice, minHighPrice)
+
+	if lowma > minHighPrice and close > nz(high[1], high)
+		trend := 0
+		nextTrend := 1
+		maxLowPrice := lowPrice
+
+if trend == 0
+	if not na(trend[1]) and trend[1] != 0
+		up := na(down[1]) ? down : down[1]
+		arrowUp := up - atr2
+	else
+		up := na(up[1]) ? maxLowPrice : max(maxLowPrice, up[1])
+	atrHigh := up + dev
+	atrLow := up - dev
+else
+	if not na(trend[1]) and trend[1] != 1 
+		down := na(up[1]) ? up : up[1]
+		arrowDown := down + atr2
+	else
+		down := na(down[1]) ? minHighPrice : min(minHighPrice, down[1])
+	atrHigh := down + dev
+	atrLow := down - dev
+
+HalfTrue = trend == 0
+htColor = trend == 0 ? #288a75 : color.red
+
+// Parabolic SAR
+psar = sar(psarStart, psarIncrement, psarMaximum)
+psarDir = psar < close ? 1 : 0
+PSarColor = psarDir ? #288a75 : color.red 
+
+// MA Inputs
+ShowTrendBar1 = input(true, "Trend Bar 1", group = "Trend Bar 1", inline = "Trend Bar 1")
+
+TrendBar4 = input(title="", defval="MA Crossover", options=["MA Crossover", "MA Direction - Fast MA - TB1", "MA Direction - Slow MA - TB1"], group = "Trend Bar 1", inline = "Trend Bar 1") 
+
+MA1_Length = input(9,  title='Fast MA', minval=1,                             group = "Trend Bar 1", inline = "TB1 Fast")
+MA1_Type   = input(    title='',        defval="EMA", options=["EMA", "SMA"], group = "Trend Bar 1", inline = "TB1 Fast")
+MA2_Length = input(21, title='Slow MA', minval=1,                             group = "Trend Bar 1", inline = "TB1 Slow")
+MA2_Type   = input(    title='',        defval="EMA", options=["EMA", "SMA"], group = "Trend Bar 1", inline = "TB1 Slow")
+MA3_Length = 21
+MA3_Type   = "EMA"
+MA4_Length = 50
+MA4_Type   = "EMA"
+
+// MA Calculations
+Close = close   //security(syminfo.tickerid, timeframe.period, close, barmerge.lookahead_off)
+
+MA1 = ema(Close, MA1_Length)
+MA2 = ema(Close, MA2_Length)
+MA3 = ema(Close, MA3_Length)
+MA4 = ema(Close, MA4_Length)
+
+// MA Crossover Condition
+MACrossover1 = MA1 > MA2 ? 1 : 0
+MACrossover2 = MA3 > MA4 ? 1 : 0
+
+// MA Direction Condition
+MA1Direction = MA1 > MA1[1] ? 1 : 0
+MA2Direction = MA2 > MA2[1] ? 1 : 0
+MA3Direction = MA3 > MA3[1] ? 1 : 0
+MA4Direction = MA4 > MA4[1] ? 1 : 0
+
+// MA Direction Change Condition
+MA1PositiveDirectionChange = MA1Direction and not MA1Direction[1] ? 1 : 0
+MA2PositiveDirectionChange = MA2Direction and not MA2Direction[1] ? 1 : 0
+MA3PositiveDirectionChange = MA3Direction and not MA3Direction[1] ? 1 : 0
+MA4PositiveDirectionChange = MA4Direction and not MA4Direction[1] ? 1 : 0
+
+MA1NegativeDirectionChange = not MA1Direction and MA1Direction[1] ? 1 : 0
+MA2NegativeDirectionChange = not MA2Direction and MA2Direction[1] ? 1 : 0
+MA3NegativeDirectionChange = not MA3Direction and MA3Direction[1] ? 1 : 0
+MA4NegativeDirectionChange = not MA4Direction and MA4Direction[1] ? 1 : 0
+
+// Standard MACD Calculations
+MACDfastMA = 12
+MACDslowMA = 26
+MACDsignalSmooth = 9
+
+MACDLine = ema(close, MACDfastMA) - ema(close, MACDslowMA)
+SignalLine = ema(MACDLine, MACDsignalSmooth)
+MACDHistogram = MACDLine - SignalLine
+
+// MACD- Background Color Change Condition
+MACDHistogramCross = MACDHistogram > 0 ? 1 : 0
+MACDLineOverZero = MACDLine > 0 ? 1 : 0
+MACDLineOverZeroandHistogramCross = MACDHistogramCross and MACDLineOverZero ? 1 : 0
+MACDLineUnderZeroandHistogramCross = not MACDHistogramCross and not MACDLineOverZero ? 1 : 0
+
+// Fast MACD Calculations
+FastMACDfastMA = 8
+FastMACDslowMA = 21
+FastMACDsignalSmooth = 5
+
+FastMACDLine = ema(close, FastMACDfastMA) - ema(close, FastMACDslowMA)
+FastSignalLine = ema(FastMACDLine, FastMACDsignalSmooth)
+FastMACDHistogram = FastMACDLine - FastSignalLine
+// Fast MACD- Background Color Change Condition
+FastMACDHistogramCross = FastMACDHistogram > 0 ? 1 : 0
+FastMACDLineOverZero = FastMACDLine > 0 ? 1 : 0
+FastMACDLineOverZeroandHistogramCross = FastMACDHistogramCross and FastMACDLineOverZero ? 1 : 0
+FastMACDLineUnderZeroandHistogramCross = not FastMACDHistogramCross and not FastMACDLineOverZero ? 1 : 0
+
+haclose = ohlc4
+haopen = 0.0
+haopen := na(haopen[1]) ? (open + close) / 2 : (haopen[1] + haclose[1]) / 2
+
+ccolor = haclose - haopen > 0 ? 1 : 0
+
+inside6 = haopen <= max(haopen[6], haclose[6]) and haopen >= min(haopen[6], haclose[6]) and 
+   haclose <= max(haopen[6], haclose[6]) and haclose >= min(haopen[6], haclose[6]) ? 
+   1 : 0
+
+inside5 = haopen <= max(haopen[5], haclose[5]) and haopen >= min(haopen[5], haclose[5]) and 
+   haclose <= max(haopen[5], haclose[5]) and haclose >= min(haopen[5], haclose[5]) ? 
+   1 : 0
+
+inside4 = haopen <= max(haopen[4], haclose[4]) and haopen >= min(haopen[4], haclose[4]) and 
+   haclose <= max(haopen[4], haclose[4]) and haclose >= min(haopen[4], haclose[4]) ? 
+   1 : 0
+
+inside3 = haopen <= max(haopen[3], haclose[3]) and haopen >= min(haopen[3], haclose[3]) and 
+   haclose <= max(haopen[3], haclose[3]) and haclose >= min(haopen[3], haclose[3]) ? 
+   1 : 0
+
+inside2 = haopen <= max(haopen[2], haclose[2]) and haopen >= min(haopen[2], haclose[2]) and 
+   haclose <= max(haopen[2], haclose[2]) and haclose >= min(haopen[2], haclose[2]) ? 
+   1 : 0
+
+inside1 = haopen <= max(haopen[1], haclose[1]) and haopen >= min(haopen[1], haclose[1]) and 
+   haclose <= max(haopen[1], haclose[1]) and haclose >= min(haopen[1], haclose[1]) ? 
+   1 : 0
+
+colorvalue = inside6 ? ccolor[6] : inside5 ? ccolor[5] : inside4 ? ccolor[4] : 
+   inside3 ? ccolor[3] : inside2 ? ccolor[2] : inside1 ? ccolor[1] : ccolor
+TrendBarTrend_Candle_Color = colorvalue ? #288a75 : color.red
+TrendBarTrend_Candle = colorvalue ? 1 : 0
+
+// RSI 5 Trend Barmeter Calculations
+RSI5 = rsi(close, 5)
+RSI5Above50 = RSI5 > 50 ? 1 : 0
+RSI5Color = RSI5Above50 ? #288a75 : color.red
+TrendBarRSI5Color = RSI5Above50 ? #288a75 : color.red
+
+// RSI 5 Trend Barmeter Calculations
+RSI13 = rsi(close, 13)
+
+// Linear Regression Calculation For RSI Signal Line
+SignalLineLength1 = 21
+
+x = bar_index
+y = RSI13
+x_ = sma(x, SignalLineLength1)
+y_ = sma(y, SignalLineLength1)
+mx = stdev(x, SignalLineLength1)
+my = stdev(y, SignalLineLength1)
+c = correlation(x, y, SignalLineLength1)
+slope = c * (my / mx)
+inter = y_ - slope * x_
+LinReg1 = x * slope + inter
+
+RSISigDirection = LinReg1 > LinReg1[1] ? 1 : 0
+RSISigCross = RSI13 > LinReg1 ? 1 : 0
+RSI13Above50 = RSI13 > 50 ? 1 : 0
+
+// Trend Barmeter Color Calculation
+RSI13Color = RSI13Above50 ? #288a75 : color.red
+TrendBarRSI13Color = RSI13Above50 ? #288a75 : color.red
+TrendBarRSISigCrossColor = RSISigCross ? #288a75 : color.red
+TrendBarMACDColor = MACDHistogramCross ? #288a75 : color.red
+TrendBarFastMACDColor = FastMACDHistogramCross ? #288a75 : color.red
+TrendBarMACrossColor = MACrossover1 ? #288a75 : color.red
+
+TrendBar1Result = TrendBar1 == "MA Crossover" ? MACrossover1 : 
+   TrendBar1 == "PSAR" ? psarDir : 
+   TrendBar1 == "Triple SuperTrend" ? tripBuy : 
+   TrendBar1 == "MACD Crossover - 12, 26, 9" ? MACDHistogramCross : 
+   TrendBar1 == "MACD Crossover - Fast - 8, 21, 5" ? FastMACDHistogramCross : 
+   TrendBar1 == "RSI Signal Line Cross - RSI 13, Sig 21" ? RSISigCross : 
+   TrendBar1 == "RSI 5: > or < 50" ? RSI5Above50 : 
+   TrendBar1 == "RSI 13: > or < 50" ? RSI13Above50 : 
+   TrendBar1 == "Bollinger Bands" ? bbTrue : 
+   TrendBar1 == "Keltner Channels" ? kcTrue : 
+   TrendBar1 == "Schaff Trend Cycle" ? stcTrue :
+   TrendBar1 == "Hull Moving Average" ? hullTrue :
+   TrendBar1 == "Awesome Oscillator" ? aoTrue :
+   TrendBar1 == "Bull Rush" ? bullUp :
+   TrendBar1 == "Chaikin Money Flow" ? CMFAboveZero :
+   TrendBar1 == "Stochastic RSI" ? SRTrue :
+   TrendBar1 == "Chande Momentum" ? CMOTrue :
+   TrendBar1 == "RVI Above SMA" ? RVITrue :
+   TrendBar1 == "Know Sure Thing" ? KSTTrue :
+   TrendBar1 == "TRIX" ? TrixTrue : 
+   TrendBar1 == "ADX" ? adxTrue : 
+   TrendBar1 == "WMA Cross" ? true : 
+   TrendBar1 == "VWMA Cross" ? true : 
+   TrendBar1 == "CCI" ? cciTrue : 
+   TrendBar1 == "SSL Hybrid" ? sslTrue :
+   TrendBar1 == "QQE Mod" ? qqeTrue :
+   TrendBar1 == "Halftrend" ? HalfTrue  : na
+
+TrendBar2Result = TrendBar2 == "MA Crossover" ? MACrossover1 : 
+   TrendBar2 == "PSAR" ? psarDir : 
+   TrendBar2 == "Triple SuperTrend" ? tripBuy : 
+   TrendBar2 == "MACD Crossover - 12, 26, 9" ? MACDHistogramCross : 
+   TrendBar2 == "MACD Crossover - Fast - 8, 21, 5" ? FastMACDHistogramCross : 
+   TrendBar2 == "RSI Signal Line Cross - RSI 13, Sig 21" ? RSISigCross : 
+   TrendBar2 == "RSI 5: > or < 50" ? RSI5Above50 : 
+   TrendBar2 == "RSI 13: > or < 50" ? RSI13Above50 : 
+   TrendBar2 == "Bollinger Bands" ? bbTrue : 
+   TrendBar2 == "Keltner Channels" ? kcTrue : 
+   TrendBar2 == "Schaff Trend Cycle" ? stcTrue :
+   TrendBar2 == "Hull Moving Average" ? hullTrue :
+   TrendBar2 == "Awesome Oscillator" ? aoTrue :
+   TrendBar2 == "Bull Rush" ? bullUp :
+   TrendBar2 == "Chaikin Money Flow" ? CMFAboveZero :
+   TrendBar2 == "Stochastic RSI" ? SRTrue :
+   TrendBar2 == "Chande Momentum" ? CMOTrue :
+   TrendBar2 == "RVI Above SMA" ? RVITrue :
+   TrendBar2 == "Know Sure Thing" ? KSTTrue :
+   TrendBar2 == "TRIX" ? TrixTrue :
+   TrendBar2 == "ADX" ? adxTrue : 
+   TrendBar2 == "WMA Cross" ? true : 
+   TrendBar2 == "VWMA Cross" ? true : 
+   TrendBar2 == "CCI" ? cciTrue : 
+   TrendBar2 == "SSL Hybrid" ? sslTrue :
+   TrendBar2 == "QQE Mod" ? qqeTrue :
+   TrendBar2 == "Halftrend" ? HalfTrue  : na
+
+TrendBar3Result = TrendBar3 == "MA Crossover" ? MACrossover1 : 
+   TrendBar3 == "PSAR" ? psarDir : 
+   TrendBar3 == "Triple SuperTrend" ? tripBuy : 
+   TrendBar3 == "MACD Crossover - 12, 26, 9" ? MACDHistogramCross : 
+   TrendBar3 == "MACD Crossover - Fast - 8, 21, 5" ? FastMACDHistogramCross : 
+   TrendBar3 == "RSI Signal Line Cross - RSI 13, Sig 21" ? RSISigCross : 
+   TrendBar3 == "RSI 5: > or < 50" ? RSI5Above50 : 
+   TrendBar3 == "RSI 13: > or < 50" ? RSI13Above50 : 
+   TrendBar3 == "Bollinger Bands" ? bbTrue : 
+   TrendBar3 == "Keltner Channels" ? kcTrue : 
+   TrendBar3 == "Schaff Trend Cycle" ? stcTrue :
+   TrendBar3 == "Hull Moving Average" ? hullTrue :
+   TrendBar3 == "Awesome Oscillator" ? aoTrue :
+   TrendBar3 == "Bull Rush" ? bullUp :
+   TrendBar3 == "Chaikin Money Flow" ? CMFAboveZero :
+   TrendBar3 == "Stochastic RSI" ? SRTrue :
+   TrendBar3 == "Chande Momentum" ? CMOTrue :
+   TrendBar3 == "RVI Above SMA" ? RVITrue :
+   TrendBar3 == "Know Sure Thing" ? KSTTrue :
+   TrendBar3 == "TRIX" ? TrixTrue :
+   TrendBar3 == "ADX" ? adxTrue : 
+   TrendBar3 == "WMA Cross" ? true : 
+   TrendBar3 == "VWMA Cross" ? true : 
+   TrendBar3 == "CCI" ? cciTrue : 
+   TrendBar3 == "SSL Hybrid" ? sslTrue :
+   TrendBar3 == "QQE Mod" ? qqeTrue :
+   TrendBar3 == "Halftrend" ? HalfTrue  : na
+
+TrendBarMResult = TrendBar3 == "MA Crossover" ? MACrossover1 : 
+   TrendBarM == "PSAR" ? psarDir : 
+   TrendBarM == "Triple SuperTrend" ? tripBuy : 
+   TrendBarM == "MACD Crossover - 12, 26, 9" ? MACDHistogramCross : 
+   TrendBarM == "MACD Crossover - Fast - 8, 21, 5" ? FastMACDHistogramCross : 
+   TrendBarM == "RSI Signal Line Cross - RSI 13, Sig 21" ? RSISigCross : 
+   TrendBarM == "RSI 5: > or < 50" ? RSI5Above50 : 
+   TrendBarM == "RSI 13: > or < 50" ? RSI13Above50 : 
+   TrendBarM == "Bollinger Bands" ? bbTrue : 
+   TrendBarM == "Keltner Channels" ? kcTrue : 
+   TrendBarM == "Schaff Trend Cycle" ? stcTrue :
+   TrendBarM == "Hull Moving Average" ? hullTrue :
+   TrendBarM == "Awesome Oscillator" ? aoTrue :
+   TrendBarM == "Bull Rush" ? bullUp :
+   TrendBarM == "Chaikin Money Flow" ? CMFAboveZero :
+   TrendBarM == "Stochastic RSI" ? SRTrue :
+   TrendBarM == "Chande Momentum" ? CMOTrue :
+   TrendBarM == "RVI Above SMA" ? RVITrue :
+   TrendBarM == "Know Sure Thing" ? KSTTrue :
+   TrendBarM == "TRIX" ? TrixTrue :
+   TrendBarM == "ADX" ? adxTrue : 
+   TrendBarM == "WMA Cross" ? true : 
+   TrendBarM == "VWMA Cross" ? true : 
+   TrendBarM == "CCI" ? cciTrue : 
+   TrendBarM == "SSL Hybrid" ? sslTrue :
+   TrendBarM == "QQE Mod" ? qqeTrue :
+   TrendBarM == "Halftrend" ? HalfTrue  : na
+
+TrendBars3Positive =     TrendBar1Result and     TrendBar2Result and     TrendBar3Result and     TrendBarMResult  ? 1 : 0
+TrendBars3Negative = not TrendBar1Result and not TrendBar2Result and not TrendBar3Result and not TrendBarMResult  ? 1 : 0
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+BackgroundColorChangePositive = TrendBars3Positive and not TrendBars3Positive[1]
+BackgroundColorChangeNegative = TrendBars3Negative and not TrendBars3Negative[1]
+
+// Signals Color Calculations
+MSBar2Color = BackgroundColorChangePositive ? #09ff00 : 
+   BackgroundColorChangeNegative ? color.rgb(255, 0, 0) : na
+
+tripleSuperColor = TripTrue and tripBuy ? color.rgb(60, 243, 66) : TripTrue and tripSell ? color.rgb(255, 149, 234) : color.gray
+WMAColor = WMAF > WMAS ? #288a75 : color.red
+VWMAColor = VWMAF > VWMAS ? #288a75 : color.red
+
+// Trend Barmeter Color Assignments
+TrendBar1Color = TrendBar1 == "N/A" ? na : 
+   TrendBar1 == "PSAR" ? PSarColor : 
+   TrendBar1 == "Triple SuperTrend" ? tripleSuperColor : 
+   TrendBar1 == "MACD Crossover - 12, 26, 9" ? TrendBarMACDColor : 
+   TrendBar1 == "MACD Crossover - Fast - 8, 21, 5" ? TrendBarFastMACDColor : 
+   TrendBar1 == "RSI Signal Line Cross - RSI 13, Sig 21" ? TrendBarRSISigCrossColor : 
+   TrendBar1 == "RSI 5: > or < 50" ? TrendBarRSI5Color : 
+   TrendBar1 == "RSI 13: > or < 50" ? TrendBarRSI13Color : 
+   TrendBar1 == "Halftrend" ? htColor : 
+   TrendBar1 == "Bollinger Bands" ? bbColor : 
+   TrendBar1 == "Keltner Channels" ? kcColor : 
+   TrendBar1 == "Schaff Trend Cycle" ? stcColor :
+   TrendBar1 == "Hull Moving Average" ? hullColor :
+   TrendBar1 == "Awesome Oscillator" ? aoColor :
+   TrendBar1 == "Bull Rush" ? bullColor :
+   TrendBar1 == "Chaikin Money Flow" ? CMFColor :
+   TrendBar1 == "Stochastic RSI" ? SRColor :
+   TrendBar1 == "Chande Momentum" ? CMOColor :
+   TrendBar1 == "RVI Above SMA" ? RVIColor :
+   TrendBar1 == "Know Sure Thing" ? KSTColor :
+   TrendBar1 == "TRIX" ? TrixColor :
+   TrendBar1 == "ADX" ? adxColor :
+   TrendBar1 == "WMA Cross" ? WMAColor : 
+   TrendBar1 == "VWMA Cross" ? VWMAColor : 
+   TrendBar1 == "CCI" ? cciColor : 
+   TrendBar1 == "SSL Hybrid" ? sslColor :
+   TrendBar1 == "QQE Mod" ? qqeColor :
+   TrendBar1 == "MA Crossover" ? TrendBarMACrossColor : na
+
+TrendBar2Color = TrendBar2 == "N/A" ? na : 
+   TrendBar2 == "PSAR" ? PSarColor : 
+   TrendBar2 == "Triple SuperTrend" ? tripleSuperColor : 
+   TrendBar2 == "MACD Crossover - 12, 26, 9" ? TrendBarMACDColor : 
+   TrendBar2 == "MACD Crossover - Fast - 8, 21, 5" ? TrendBarFastMACDColor : 
+   TrendBar2 == "RSI Signal Line Cross - RSI 13, Sig 21" ? TrendBarRSISigCrossColor : 
+   TrendBar2 == "RSI 5: > or < 50" ? TrendBarRSI5Color : 
+   TrendBar2 == "RSI 13: > or < 50" ? TrendBarRSI13Color : 
+   TrendBar2 == "Halftrend" ? htColor : 
+   TrendBar2 == "Bollinger Bands" ? bbColor : 
+   TrendBar2 == "Keltner Channels" ? kcColor : 
+   TrendBar2 == "Schaff Trend Cycle" ? stcColor :
+   TrendBar2 == "Hull Moving Average" ? hullColor :
+   TrendBar2 == "Awesome Oscillator" ? aoColor :
+   TrendBar2 == "Bull Rush" ? bullColor :
+   TrendBar2 == "Chaikin Money Flow" ? CMFColor :
+   TrendBar2 == "Stochastic RSI" ? SRColor :
+   TrendBar2 == "Chande Momentum" ? CMOColor :
+   TrendBar2 == "RVI Above SMA" ? RVIColor :
+   TrendBar2 == "Know Sure Thing" ? KSTColor :
+   TrendBar2 == "TRIX" ? TrixColor :
+   TrendBar2 == "ADX" ? adxColor :
+   TrendBar2 == "WMA Cross" ? WMAColor :
+   TrendBar2 == "VWMA Cross" ? VWMAColor : 
+   TrendBar2 == "CCI" ? cciColor : 
+   TrendBar2 == "SSL Hybrid" ? sslColor :
+   TrendBar2 == "QQE Mod" ? qqeColor :
+   TrendBar2 == "MA Crossover" ? TrendBarMACrossColor : na
+
+TrendBar3Color = TrendBar3 == "N/A" ? na : 
+   TrendBar3 == "PSAR" ? PSarColor : 
+   TrendBar3 == "Triple SuperTrend" ? tripleSuperColor : 
+   TrendBar3 == "MACD Crossover - 12, 26, 9" ? TrendBarMACDColor : 
+   TrendBar3 == "MACD Crossover - Fast - 8, 21, 5" ? TrendBarFastMACDColor : 
+   TrendBar3 == "RSI Signal Line Cross - RSI 13, Sig 21" ? TrendBarRSISigCrossColor : 
+   TrendBar3 == "RSI 5: > or < 50" ? TrendBarRSI5Color : 
+   TrendBar3 == "RSI 13: > or < 50" ? TrendBarRSI13Color : 
+   TrendBar3 == "Halftrend" ? htColor : 
+   TrendBar3 == "Bollinger Bands" ? bbColor : 
+   TrendBar3 == "Keltner Channels" ? kcColor : 
+   TrendBar3 == "Schaff Trend Cycle" ? stcColor :
+   TrendBar3 == "Hull Moving Average" ? hullColor :
+   TrendBar3 == "Awesome Oscillator" ? aoColor :
+   TrendBar3 == "Bull Rush" ? bullColor :
+   TrendBar3 == "Chaikin Money Flow" ? CMFColor :
+   TrendBar3 == "Stochastic RSI" ? SRColor :
+   TrendBar3 == "Chande Momentum" ? CMOColor :
+   TrendBar3 == "RVI Above SMA" ? RVIColor :
+   TrendBar3 == "Know Sure Thing" ? KSTColor :
+   TrendBar3 == "TRIX" ? TrixColor :
+   TrendBar3 == "ADX" ? adxColor :
+   TrendBar3 == "WMA Cross" ? WMAColor :
+   TrendBar3 == "VWMA Cross" ? VWMAColor : 
+   TrendBar3 == "CCI" ? cciColor : 
+   TrendBar3 == "SSL Hybrid" ? sslColor :
+   TrendBar3 == "QQE Mod" ? qqeColor :
+   TrendBar3 == "MA Crossover" ? TrendBarMACrossColor : na
+
+TrendBarMColor = TrendBar3 == "N/A" ? na : 
+   TrendBarM == "PSAR" ? PSarColor : 
+   TrendBarM == "Triple SuperTrend" ? tripleSuperColor : 
+   TrendBarM == "MACD Crossover - 12, 26, 9" ? TrendBarMACDColor : 
+   TrendBarM == "MACD Crossover - Fast - 8, 21, 5" ? TrendBarFastMACDColor : 
+   TrendBarM == "RSI Signal Line Cross - RSI 13, Sig 21" ? TrendBarRSISigCrossColor : 
+   TrendBarM == "RSI 5: > or < 50" ? TrendBarRSI5Color : 
+   TrendBarM == "RSI 13: > or < 50" ? TrendBarRSI13Color : 
+   TrendBarM == "Halftrend" ? htColor : 
+   TrendBarM == "Bollinger Bands" ? bbColor : 
+   TrendBarM == "Keltner Channels" ? kcColor : 
+   TrendBarM == "Schaff Trend Cycle" ? stcColor :
+   TrendBarM == "Hull Moving Average" ? hullColor :
+   TrendBarM == "Awesome Oscillator" ? aoColor :
+   TrendBarM == "Bull Rush" ? bullColor :
+   TrendBarM == "Chaikin Money Flow" ? CMFColor :
+   TrendBarM == "Stochastic RSI" ? SRColor :
+   TrendBarM == "Chande Momentum" ? CMOColor :
+   TrendBarM == "RVI Above SMA" ? RVIColor :
+   TrendBarM == "Know Sure Thing" ? KSTColor :
+   TrendBarM == "TRIX" ? TrixColor :
+   TrendBarM == "ADX" ? adxColor :
+   TrendBarM == "WMA Cross" ? WMAColor :
+   TrendBarM == "VWMA Cross" ? VWMAColor : 
+   TrendBarM == "CCI" ? cciColor : 
+   TrendBarM == "SSL Hybrid" ? sslColor :
+   TrendBarM == "QQE Mod" ? qqeColor :
+   TrendBarM == "MA Crossover" ? TrendBarMACrossColor : na
+
+CrossoverType2 = TrendBar4 == "MACD Crossover" ? MACDHistogramCross : 
+   TrendBar4 == "MA Direction - Fast MA - TB1" ? MA1Direction : 
+   TrendBar4 == "MA Direction - Slow MA - TB1" ? MA2Direction : MACrossover1
+
+color_1 = color.new(color.green, 15)
+color_2 = color.new(color.red, 20)
+TrendBar4Color1 = TrendBar4 == "N/A" ? na : CrossoverType2 ? color_1 : color_2
+
+RSI14     = rsi(close, 15)
+RSI14OB   = RSI14 > 70 ?     1 : 0
+RSI14OS   = RSI14 < 30 ?     1 : 0 
+RSI14OBOS = RSI14OB or RSI14OS ? 1 : 0
+
+plot(134.5, title = "All 4 Trend Meters Now Align", style=plot.style_circles, color=MSBar2Color, linewidth=4)
+
+// Trend Barmeter Plots
+plot(129.5, title="Trend Meter 1", style=plot.style_circles, color=TrendBar1Color, linewidth=2)
+plot(123.5, title="Trend Meter 2", style=plot.style_circles, color=TrendBar2Color, linewidth=2)
+plot(117.5, title="Trend Meter 3", style=plot.style_circles, color=TrendBar3Color, linewidth=2)
+plot(111.5, title="Trend Meter 4", style=plot.style_circles, color=TrendBarMColor, linewidth=2)
+
+plot(ShowTrendBar1 ? 107 : na, title="Trend Bar 1 - Thick Line", style=plot.style_line, color=TrendBar4Color1, linewidth=9)
+
+// Background Highlights
+TrendBar3BarsSame = TrendBars3Positive ? color.green : TrendBars3Negative ? color.red : na
+TMa = hline(113.7, color=color.new(color.white, 100))
+TMb = hline(131.3, color=color.new(color.white, 100))
+fill(TMa, TMb, color=TrendBar3BarsSame, title="Trend Meter Background Highlight - 3 Trend Meter Conditions Met")
+
+// Alerts & Conditions - MA Crossing & Background Color
+
+alertcondition(BackgroundColorChangePositive, title=' --  4 meters Turn Green', message='All 4 Meters Turn Green')
+alertcondition(BackgroundColorChangeNegative, title=' --  4 meters Turn Red',   message='All 4 Meters Turn Red')
+
+alertcondition(TrendBarMACDColor == #288a75 and psarDir == false, title='MACD/PSAR BUY', message='MACD/PSAR BUY')
+alertcondition(TrendBarMACDColor == color.red and psarDir == true, title='MACD/PSAR SELL', message='MACD/PSAR SELL')
+
+alertcondition(upBB, title='Bollinger Bands ABOVE', message='Bollinger Bands ABOVE')
+alertcondition(downBB, title='Bollinger Bands BELOW', message='Bollinger Bands BELOW')
+
+alertcondition(upKC, title='Keltner Channels ABOVE', message='Keltner Channels ABOVE')
+alertcondition(downKC, title='Keltner Channels BELOW', message='Keltner Channels BELOW')
+
+alertcondition(HalfTrue, title='Halftrend BUY', message='Halftrend BUY')
+alertcondition(not HalfTrue, title='Halftrend SELL', message='Halftrend SELL')
+
+alertcondition(SRTrue, title='Stochastic ABOVE', message='Stochastic ABOVE')
+alertcondition(not SRTrue, title='Stochastic BELOW', message='Stochastic BELOW')
+
+alertcondition(bullUp, title='BullRush BUY', message='BullRush BUY')
+alertcondition(bullDown, title='BullRush SELL', message='BullRush SELL')
+
+alertcondition(aoTrue, title='Awesome Oscillator BUY', message='Awesome Oscillator BUY')
+alertcondition(not aoTrue, title='Awesome Oscillator SELL', message='Awesome Oscillator SELL')
+
+alertcondition(CMFAboveZero, title='Chaikin Money Flow ABOVE', message='Chaikin Money Flow ABOVE')
+alertcondition(not CMFAboveZero, title='Chaikin Money Flow BELOW', message='Chaikin Money Flow BELOW')
+
+alertcondition(hullTrue, title='Hull Moving Average BUY', message='Hull Moving Average BUY')
+alertcondition(not hullTrue, title='Hull Moving Average SELL', message='Hull Moving Average SELL')
+
+alertcondition(stcTrue, title='Schaff Trend Cycle BUY', message='Schaff Trend Cycle BUY')
+alertcondition(not stcTrue, title='Schaff Trend Cycle SELL', message='Schaff Trend Cycle SELL')
+
+alertcondition(CMOTrue, title='Chande Momentum ABOVE ZERO', message='Chande Momentum ABOVE ZERO')
+alertcondition(not CMOTrue, title='Chande Momentum BELOW ZERO', message='Chande Momentum BELOW ZERO')
+
+alertcondition(RVITrue, title='RVI Above SMA', message='RVI Above SMA')
+alertcondition(not RVITrue, title='RVI Below SMA', message='RVI Below SMA')
+
+alertcondition(KSTTrue, title='Know Sure Thing BUY', message='Know Sure Thing BUY')
+alertcondition(not KSTTrue, title='Know Sure Thing SELL', message='Know Sure Thing SELL')
+

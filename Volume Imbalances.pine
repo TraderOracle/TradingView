@@ -1,0 +1,45 @@
+//@version=5
+indicator(title="Volume Imbalances", shorttitle="Volume Imbalances", overlay=true, max_bars_back = 1000, max_lines_count = 500, max_labels_count = 500)
+// vim: syntax=pine 
+
+bTrackBar = true
+iBarExtend = input.int(50, "Number of bars to extend line", maxval=500, minval=10, group="Basic Settings")
+lWidth = input.int(3, "Line Width", group="Basic Settings")
+lStyle = input.string(title="Line Style", options=["Solid", "Dotted", "Dashed"], defval="Dotted", group="Basic Settings")
+
+sStyle = lStyle=="Solid" ? line.style_solid : lStyle=="Dashed" ? line.style_dashed : line.style_dotted
+bExtend = lWidth==500 ? extend.right : extend.none
+
+var line[] ll = array.new_line()
+iss = true
+
+redCandle = close < open
+greenCandle = close > open
+
+if iss
+    for [index, line] in ll
+        if (high > line.get_y1(line) and low < line.get_y1(line))
+            line.delete(array.get(ll, index))
+
+if (iss and redCandle and barstate.isconfirmed)
+    if (redCandle[1] and open < close[1])
+        gapRed := true
+        if bTrackBar
+            array.push(ll, line.new(bar_index, open, bar_index + iBarExtend, open, color=color.new(color.red, 50), width=lWidth, style=sStyle, extend=bExtend))
+            bNewGap := true
+
+if (iss and greenCandle and barstate.isconfirmed)
+    if (greenCandle[1] and open > close[1])
+        gapGreen := true
+        if bTrackBar
+            array.push(ll, line.new(bar_index, open, bar_index + iBarExtend, open, color=color.new(color.lime, 50), width=lWidth, style=sStyle, extend=bExtend))
+            bNewGap := true
+
+alertcondition(bNewGap, "Volume Imbalance", "Volume Imbalance")
+
+if (iss and noOverlapGreen)
+    brightGreen := true
+
+if (iss and noOverlapRed)
+    brightRed := true
+

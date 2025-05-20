@@ -1,3 +1,4 @@
+// vim: syntax=pine
 // @version=6
 indicator("TO Futures Scanner v1.1", overlay=true)
 import TradingView/ta/9

@@ -1,0 +1,105 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © MensaTrader
+
+//@version=5
+indicator("Pivot Order Blocks", shorttitle="Pivot - OB", overlay=true, max_bars_back=500, max_boxes_count=250)
+
+//Titles
+inputGroupTitle     = "=== Pivots ==="
+plotGroupTitle      = "=== Plots ==="
+
+
+//Inputs
+source              = input.string("Wicks", options=['Wicks','Bodys'], title="Source", group=inputGroupTitle)
+
+leftLenH            = input.int(title="Pivot High", defval=25, minval=1, inline="Pivot High", group=inputGroupTitle)
+rightLenH           = input.int(title="/", defval=25, minval=1, inline="Pivot High", group=inputGroupTitle)
+
+leftLenL            = input.int(title="Pivot Low", defval=25, minval=1, inline="Pivot Low", group=inputGroupTitle)
+rightLenL           = input.int(title="/", defval=25, minval=1, inline="Pivot Low", group=inputGroupTitle)
+
+bullBoxColor        = input.color(color.new(#00E600,90), title="Bullish Color", group=plotGroupTitle, inline="1")
+bearBoxColor        = input.color(color.new(#FF0000,90), title="Bearish Color", group=plotGroupTitle, inline="1")
+closedBoxColor      = input.color(color.new(color.gray,90), title="Closed", group=plotGroupTitle, inline="1")
+
+extendBox           = input.bool(true, title="Extend Boxes", group=plotGroupTitle, tooltip="Extend boxes until price hits them")
+boxLength           = input.int(30, title="Box Size", tooltip="if Extend boxes is off, boxes will be drawn this long", group=plotGroupTitle)
+
+//Wick / Body option
+phOption            = source == "Wicks" ? high : close
+plOption            = source == "Wicks" ? low : close
+
+
+ph                  = ta.pivothigh(phOption,leftLenH, rightLenH)
+pl                  = ta.pivotlow(plOption,leftLenL, rightLenL)
+
+//Variables
+var leftBull        = bar_index
+var rightBull       = bar_index
+var topBull         = close
+var bottomBull      = close
+
+var leftBear        = bar_index
+var rightBear       = bar_index
+var topBear         = close
+var bottomBear      = close
+
+var box[] _bearBoxes = array.new_box()
+var box[] _bullBoxes = array.new_box()
+
+
+//Bear Box Calc
+if ph
+    leftBear        := bar_index-leftLenH
+    rightBear       := bar_index-(leftLenH-boxLength)
+    topBear         := source == "Bodys" ? (close[leftLenL]>open[leftLenL] ? close[leftLenH] : open[leftLenH]) : high[leftLenL]
+    bottomBear      := source == "Bodys" ? (close[leftLenL]>open[leftLenL] ? open[leftLenH] : close[leftLenH]) : close[leftLenL] > open[leftLenL] ? close[leftLenL] : open[leftLenL]
+
+//Bull Box Calc
+if pl
+    leftBull        := bar_index-leftLenL
+    rightBull       := bar_index-(leftLenL-boxLength)
+    topBull         := source == "Bodys" ? (close[leftLenL]>open[leftLenL] ? close[leftLenL] : open[leftLenL]) : close[leftLenL] > open[leftLenL] ? open[leftLenL] : close[leftLenL]
+    bottomBull      := source == "Bodys" ? (close[leftLenL]>open[leftLenL] ? open[leftLenL] : close[leftLenL]) : low[leftLenL]
+     
+
+if pl
+    array.push(_bullBoxes, box.new(left=leftBull, right=rightBull, top=topBull, bottom=bottomBull, bgcolor=color.new(bullBoxColor,80), border_color=bullBoxColor))
+
+if ph
+    array.push(_bearBoxes, box.new(left=leftBear, right=rightBear, top=topBear, bottom=bottomBear, bgcolor=color.new(bearBoxColor,80), border_color=bearBoxColor))
+
+
+
+
+extend_boxes(_array, _type)=>
+    if array.size(_array)>0
+        for i = 0 to array.size(_array)-1
+            _box = array.get(_array,i)
+            _boxLow = box.get_bottom(_box)
+            _boxHigh = box.get_top(_box)
+            _boxLeft = box.get_left(_box)
+            _boxRight = box.get_right(_box)
+            
+            if _type=="bull" and _boxRight == bar_index
+                if low >  _boxHigh
+                    box.set_right(_box,bar_index+1)
+                else
+                    box.set_bgcolor(_box, closedBoxColor)
+                    box.set_border_color(_box, closedBoxColor)
+                    box.set_text_color(_box, closedBoxColor)
+                    box.set_right(_box,bar_index)
+
+            if _type=="bear" and _boxRight == bar_index
+                if high <  _boxLow
+                    box.set_right(_box,bar_index+1)
+                else
+                    box.set_bgcolor(_box, closedBoxColor)
+                    box.set_border_color(_box, closedBoxColor)
+                    box.set_text_color(_box, closedBoxColor)
+                    box.set_right(_box,bar_index)
+
+
+if extendBox
+    extend_boxes(_bullBoxes,"bull")
+    extend_boxes(_bearBoxes,"bear")

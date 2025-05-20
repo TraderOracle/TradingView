@@ -1,0 +1,106 @@
+//@version=4
+strategy("Trampoline Strategy", overlay=true)
+
+///////////////////////////////////////////////////
+
+// CONFIG
+iBBThreshold = input(0.0015, minval=0.0, title="Bollinger Lower Threshold", tooltip="0.003 for daily, 0.0015 for 30 min candles", group="General Settings")
+RSIThreshold = input(25, minval=1, title="RSI Lower Threshold", tooltip="Normally 25", group="General Settings")
+RSIDown = input(72, minval=1, title="RSI Upper Threshold", tooltip="Normally 75", group="General Settings")
+
+rsiLengthInput = input(14, minval=1, title="RSI Length", group="RSI Settings")
+rsiSourceInput = input(close, "Source", group="RSI Settings")
+lengthBB = input(20, minval=1, group="Bollinger Bands")
+srcBB = input(close, title="Source", group="Bollinger Bands")
+multBB = input(2.0, minval=0.001, maxval=50, title="StdDev", group="Bollinger Bands")
+offsetBB = input(0, "Offset", minval = -500, maxval = 500, group="Bollinger Bands")
+
+isRed = close < open
+isGreen = close > open
+
+// BOLLINGER BANDS
+basisBB = sma(srcBB, lengthBB)
+devBB = multBB * stdev(srcBB, lengthBB)
+upperBB = basisBB + devBB
+lowerBB = basisBB - devBB
+downBB = low < lowerBB or high < lowerBB
+upBB = low > upperBB or high > upperBB
+bbw = (upperBB - lowerBB) / basisBB
+
+// RSI
+up = rma(max(change(rsiSourceInput), 0), rsiLengthInput)
+down = rma(-min(change(rsiSourceInput), 0), rsiLengthInput)
+rsiM = down == 0 ? 100 : up == 0 ? 0 : 100 - (100 / (1 + up / down))
+
+back1 = isRed[1] and rsiM[1] <= RSIThreshold and close[1] < lowerBB[1] and bbw[1] > iBBThreshold
+back2 = isRed[2] and rsiM[2] <= RSIThreshold and close[2] < lowerBB[2] and bbw[2] > iBBThreshold
+back3 = isRed[3] and rsiM[3] <= RSIThreshold and close[3] < lowerBB[3] and bbw[3] > iBBThreshold
+back4 = isRed[4] and rsiM[4] <= RSIThreshold and close[4] < lowerBB[4] and bbw[4] > iBBThreshold
+back5 = isRed[5] and rsiM[5] <= RSIThreshold and close[5] < lowerBB[5] and bbw[5] > iBBThreshold
+
+for1 = isGreen[1] and rsiM[1] >= RSIDown and close[1] > upperBB[1] and bbw[1] > iBBThreshold
+for2 = isGreen[2] and rsiM[2] >= RSIDown and close[2] > upperBB[2] and bbw[2] > iBBThreshold
+for3 = isGreen[3] and rsiM[3] >= RSIDown and close[3] > upperBB[3] and bbw[3] > iBBThreshold
+for4 = isGreen[4] and rsiM[4] >= RSIDown and close[4] > upperBB[4] and bbw[4] > iBBThreshold
+for5 = isGreen[5] and rsiM[5] >= RSIDown and close[5] > upperBB[5] and bbw[5] > iBBThreshold
+
+weGoUp = isGreen and (back1 or back2 or back3 or back4 or back5) and (high > high[1])
+upThrust = weGoUp and not weGoUp[1] and not weGoUp[2] and not weGoUp[3] and not weGoUp[4]
+weGoDown = isRed and (for1 or for2 or for3 or for4 or for5) and (low < low[1])
+downThrust = weGoDown and not weGoDown[1] and not weGoDown[2] and not weGoDown[3] and not weGoDown[4]
+
+/////////////////////////////////////////////////////////////////
+
+TimeWindow=time(timeframe.period,"1400-1900", "GMT")
+
+if (upThrust and TimeWindow)
+    strategy.entry("Trade", strategy.long, comment="Long")
+if (downThrust and TimeWindow)
+    strategy.entry("Trade", strategy.short, comment="Short")
+
+trailSource         = input(title="Trail Source", defval="Lows/Highs", options=["Lows/Highs", "Close", "Open"], confirm=true, group="Strategy")
+trailMethod         = input(title="Trail Method", defval="ATR", options=["ATR", "Percent"], confirm=true, group="Strategy")
+trailPercent        = input(title="Trail Percent", defval=10, minval=0.1, confirm=true, group="Strategy")
+swingLookback       = input(title="Lookback", defval=7, confirm=true, group="Strategy")
+atrPeriod           = input(title="ATR Period", defval=14, confirm=true, group="Strategy")
+atrMultiplier       = input(title="ATR Multiplier", defval=1.0, confirm=true, group="Strategy")
+barTime             = input(title="Bar Time", defval=timestamp("01 Jan 2021 13:30 +0000"), confirm=true, group="Strategy")
+
+var float trailPrice    = na
+float next_trailPrice   = na
+
+atrValue                = atr(atrPeriod) * atrMultiplier
+float swingLow          = lowest(low, swingLookback)
+float swingHigh         = highest(high, swingLookback)
+
+
+if trailMethod == "ATR"
+    if trailSource == "Close" 
+        next_trailPrice := strategy.position_size > 0 ? close - atrValue : close + atrValue
+    else if trailSource == "Open" 
+        next_trailPrice := strategy.position_size > 0 ? open - atrValue : open + atrValue
+    else
+        next_trailPrice := strategy.position_size > 0 ? swingLow - atrValue : swingHigh + atrValue
+
+if trailMethod == "Percent" 
+    float percentMulti = strategy.position_size > 0 ? (100 - trailPercent) / 100 : (100 + trailPercent) / 100
+    if trailSource == "Close" 
+        next_trailPrice := close * percentMulti
+    else if trailSource == "Open" 
+        next_trailPrice := open * percentMulti
+    else
+        next_trailPrice := strategy.position_size > 0 ? swingLow * percentMulti : swingHigh * percentMulti
+
+if strategy.position_size != 0 and barstate.isconfirmed
+    if (next_trailPrice > trailPrice or na(trailPrice)) and strategy.position_size > 0
+        trailPrice := next_trailPrice
+    if (next_trailPrice < trailPrice or na(trailPrice)) and strategy.position_size < 0
+        trailPrice := next_trailPrice
+
+plot(strategy.position_size != 0 ? trailPrice : na, color=color.red, title="Trailing Stop")
+
+strategy.exit(id="Trail Exit", from_entry="Trade", limit=na, stop=trailPrice)
+
+if (strategy.position_size > 0 and close < trailPrice) or (strategy.position_size < 0 and close > trailPrice)
+    strategy.close("Trade")
+

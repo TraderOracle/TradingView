@@ -1,0 +1,107 @@
+//@version=5
+indicator(title="Green Hulk version 1.31 with Stochastic", overlay=true, format=format.price, precision=2)
+
+// Inputs
+fastLength = input.int(12, title="MACD Fast Length")
+slowLength = input.int(26, title="MACD Slow Length")
+signalLength = input.int(9, title="MACD Signal Length")
+macdThreshold = input.float(2.0, title="Current MACD <=", step=0.1)
+stochLength = input.int(14, title="Stochastic Length")
+kSmoothing = input.int(3, title="Stochastic %K Smoothing", minval=1)
+dSmoothing = input.int(3, title="Stochastic %D Smoothing", minval=1)
+stochKMin = input.float(20.0, title="Stochastic %K Minimum", step=0.1)
+stochKMax = input.float(80.0, title="Stochastic %K Maximum", step=0.1)
+stochDMin = input.float(20.0, title="Stochastic %D Minimum", step=0.1)
+stochDMax = input.float(80.0, title="Stochastic %D Maximum", step=0.1)
+checkDStochOnly = input.bool(false, title="Check Stochastic %D Only")
+rsiLength = input.int(14, title="RSI Length")
+rsiMALength = input.int(14, title="RSI MA Length")
+useTrendFilter = input.bool(false, title="Use Trend Filter")
+trendFilterType = input.string("EMA", title="Trend Filter Type", options=["EMA", "SMA"])
+trendFilterLength = input.int(21, title="Trend Filter Length")
+atrPeriod = input.int(14, title="ATR Period", minval=1)
+slMethod = input.string("Default", title="SL Method", options=["Default", "ATR"])
+slAtrMultiple = input.float(2.0, title="SL ATR Multiple", minval=0.1, step=0.1)
+tpMethod = input.string("Default", title="TP Method", options=["Default", "ATR"])
+tpAtrMultiple = input.float(3.0, title="TP ATR Multiple", minval=0.1, step=0.1)
+showBacktest = input.bool(false, title="Show Backtest Results")
+
+// MACD Calculation
+[macdLine, signalLine, _] = ta.macd(close, fastLength, slowLength, signalLength)
+currMacd = macdLine
+signal = signalLine
+
+// Stochastic Calculation
+stochKRaw = ta.stoch(close, high, low, stochLength)
+stochK = ta.sma(stochKRaw, kSmoothing)
+stochD = ta.sma(stochK, dSmoothing)
+
+// RSI with Moving Average
+rsi = ta.rsi(close, rsiLength)
+rsiMA = ta.ema(rsi, rsiMALength)
+
+// Conditions
+macdGood = ta.cross(currMacd, signal) and currMacd > signal and currMacd <= macdThreshold
+stochGood = checkDStochOnly ? (stochD > stochDMin and stochD < stochDMax) : (stochK > stochKMin and stochK < stochKMax and stochD > stochDMin and stochD < stochDMax)
+stochRecent = checkDStochOnly ? (ta.barssince(stochD < stochDMin) <= 9) : (ta.barssince(stochK < stochKMin or stochD < stochDMin) <= 9)
+rsiGood = rsi > rsiMA
+
+// Trend Filter
+trendFilterValue = trendFilterType == "EMA" ? ta.ema(close, trendFilterLength) : ta.sma(close, trendFilterLength)
+trendFilter = useTrendFilter ? close > trendFilterValue : true
+
+// Buy Signal
+buySignal = macdGood and stochGood and stochRecent and rsiGood and trendFilter
+buyMe = buySignal and not buySignal[1]
+
+// ATR Calculation
+atr = ta.atr(atrPeriod)
+
+// Stop Loss and Take Profit
+sl = slMethod == "Default" ? ta.lowest(low, 10) : close - (atr * slAtrMultiple)
+tp = tpMethod == "Default" ? close + 1.5 * (close - sl) : close + (atr * tpAtrMultiple)
+
+// Plotting
+plotshape(buyMe ? close : na, title="Hulk", text="Hulk", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.rgb(40, 154, 71), textcolor=color.white)
+plotshape(buyMe ? tp : na, title="Take Profit", color=color.lime, style=shape.xcross, size=size.tiny, location=location.absolute)
+plotshape(buyMe ? sl : na, title="Stop Loss", color=color.red, style=shape.xcross, size=size.tiny, location=location.absolute)
+
+// Alerts
+alertcondition(buyMe, title="HULK BUY", message="HULK BUY")
+
+// Backtesting Logic
+var float entryPrice = na
+var float stopLoss = na
+var float takeProfit = na
+var int tradeCount = 0
+var int winCount = 0
+var bool inTrade = false
+
+if buyMe
+    entryPrice := close
+    stopLoss := sl
+    takeProfit := tp
+    inTrade := true
+else if inTrade
+    if low <= stopLoss
+        tradeCount += 1
+        inTrade := false
+    else if high >= takeProfit
+        tradeCount += 1
+        winCount += 1
+        inTrade := false
+
+// Calculate Win Rate
+float winRate = na
+if tradeCount > 0
+    winRate := (winCount / tradeCount) * 100
+
+// Table for Backtest Results
+if showBacktest
+    var table backtestTable = table.new(position.top_right, 2, 4, border_width=1)
+    table.cell(backtestTable, 0, 0, "Total Trades", bgcolor=color.gray)
+    table.cell(backtestTable, 1, 0, str.tostring(tradeCount), bgcolor=color.gray)
+    table.cell(backtestTable, 0, 1, "Winning Trades", bgcolor=color.gray)
+    table.cell(backtestTable, 1, 1, str.tostring(winCount), bgcolor=color.gray)
+    table.cell(backtestTable, 0, 2, "Win Rate (%)", bgcolor=color.gray)
+    table.cell(backtestTable, 1, 2, str.tostring(winRate, "#.##"), bgcolor=color.gray)

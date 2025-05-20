@@ -1,0 +1,373 @@
+// @version=6
+indicator("TO Futures Scanner v1.1", overlay=true)
+import TradingView/ta/9
+
+// New in version 1.1:
+// - Added support for MenthorQ line bounces
+// - MenthorQ line bounces can be grouped with Bollinger Band touch
+// - MenthorQ can also detect line WICK rather than standard reversal
+// - request.security is now lumped into ONE call, able to add more tickers
+// - Added support for more tickers
+// - Misc adjustments to allow multi-paid-line usage
+
+KPzones = input.text_area("", "Paste Killpips values (format: $NQ1: name,value ...)")
+MQzones = input.text_area("", "Paste MenthorQ values (format: $NQ1: name,value ...)")
+
+tP = input.string("Top Right", "Table Position", options=["Top Center","Bottom Center","Top Right", "Top Left", "Bottom Right", "Bottom Left"], group="Settings")
+sFontSize = input.string(title="Font Size: ", options=["Tiny", "Small", "Normal", "Large"], defval="Small", group="Settings")
+txtC = input.color(defval=color.new(color.white, 20),title = "Text Color", group="Settings") 
+greenC = input.color(defval=color.new(color.green, 50),title = "Green Color", group="Settings") 
+redC = input.color(defval=color.new(color.red, 50),title = "Red Color", group="Settings") 
+yellowC = input.color(defval=color.new(color.yellow, 50),title = "Yellow Color", group="Settings") 
+
+bool showKill = input.bool(true, "Show Killpips Status", group="Paid Lines")
+bool showMQRev = input.bool(true, "Show MenthorQ Reversals", group="Paid Lines")
+bool showMQWick = input.bool(true, "Show MenthorQ Wicks", group="Paid Lines")
+bool showOnlyBB = input.bool(false, "ONLY Show MenthorQ when at BB extreme)", group="Paid Lines")
+
+bool showVWAP = input.bool(false, "Show VWAP Status",  group="Show Options")
+bool showMACDPsar = input.bool(true, "Show MACD/Psar Status",  group="Show Options")
+bool showEMAs = input.bool(true, "Show EMA Status",  group="Show Options")
+bool showCH = input.bool(true, "Show Change Percent",  group="Show Options")
+bool showRSI = input.bool(false, "Show RSI Status",  group="Show Options")
+bool showBB = input.bool(false, "Show Bollinger Band Touches",  group="Show Options")
+
+bool useES = input.bool(true, "Scan S&P 500 Futures", group="Scan List")
+bool useNQ = input.bool(true, "Scan NASDAQ Futures", group="Scan List")
+bool useVIX = input.bool(true, "Scan VIX", group="Scan List")
+bool useYM = input.bool(true, "Scan Dow Jones Futures",  group="Scan List")
+bool useNDX = input.bool(false, "Scan NDX",  group="Scan List")
+bool useRTY = input.bool(false, "Scan RTY",  group="Scan List")
+bool useFDAX = input.bool(false, "Scan FDAX",  group="Scan List")
+bool useGC = input.bool(false, "Scan Gold Futures",  group="Scan List")
+bool useSI = input.bool(false, "Scan Silver Futures",  group="Scan List")
+bool useHG = input.bool(false, "Scan Copper Futures",  group="Scan List")
+bool useCL = input.bool(false, "Scan Oil Futures",  group="Scan List")
+
+smEMA = input.int(21, "Standard EMA", minval=1, group="Indicator Settings")
+bigEMA = input.int(200, "Longer EMA", minval=1, group="Indicator Settings")
+stLength = input.int(11, "RSI Length", minval=1, group="Indicator Settings")
+rsiOB = input.int(80, "RSI Overbought Value", minval=1, group="Indicator Settings")
+rsiOS = input.int(20, "RSI Oversold Value", minval=1, group="Indicator Settings")
+stMultiplier = input.int(2, "SuperTrend Multiplier", minval=0, step=1, group="Indicator Settings")
+rsiLen = input.int(11, "SuperTrend Length", minval=1, group="Indicator Settings")
+macd1 = input.int(12, "MACD Short",  minval=1, group="Indicator Settings")
+macd2 = input.int(26, "MACD Long",  minval=1, group="Indicator Settings")
+macd3 = input.int(9, "MACD Period",  minval=1, group="Indicator Settings")
+bbLength = input.int(20, "Bollinger Length",  minval=1, group="Indicator Settings")
+bbMultiplier = input.float(2, "Bollinger Multiplier", minval=0.1, step=0.1, group="Indicator Settings")
+BBtouchTolerance = input.float(0.05, "BB Touch Tolerance (%)", minval=0, step=0.01, group="Indicator Settings") / 100
+
+esSymbol = "CME_MINI:ES1!"
+nqSymbol = "CME_MINI:NQ1!"
+vixSymbol = "TVC:VIX"
+ymSymbol = "CBOT_MINI:YM1!"
+ndxSymbol = "NASDAQ:NDX"
+rtySymbol = "CME_MINI:RTY1!"
+fdaxSymbol = "EUREX:FDAX1!"
+goldSymbol = "COMEX:GC1!"
+oilSymbol = "NYMEX:CL1!"
+silverSymbol = "COMEX:SI1!"
+copperSymbol = "COMEX:HG1!"
+
+float tickOpen = 0.0
+float tickClose = 0.0
+float tickHigh = 0.0
+float tickLow = 0.0
+float tickPOpen = 0.0
+float tickPClose = 0.0
+float tickPHigh = 0.0
+float tickPLow = 0.0
+int tickST = 0
+int rowG = 1
+
+// Maps to store the descriptions/price
+mapKP = map.new<string, float>()
+mapMQ = map.new<float, string>()
+
+bg = color.new(color.black, 100)
+
+tPos = tP == "Top Left" ? position.top_left : tP == "Bottom Right" ? position.bottom_right : tP == "Bottom Left" ? position.bottom_left : tP == "Top Center" ? position.top_center : tP == "Bottom Center" ? position.bottom_center : position.top_right
+myFont = sFontSize == "Tiny" ? size.tiny : sFontSize == "Small" ? size.small : sFontSize == "Normal" ? size.normal : sFontSize == "Large" ? size.large : size.auto
+
+// Create Table
+var table myTable = table.new(tPos, 17, 20, bgcolor = color.new(color.black, 100), frame_width = 1, frame_color = color.gray, border_width = 1, border_color = color.gray)
+
+lookKPMap(string a) =>
+    result = 0.0
+    if map.contains(mapKP, a)
+        result := map.get(mapKP, a)
+    result
+
+loadUpKPMap(comma) =>
+    log.info("loadUpKPMap with " + str.tostring(comma))
+    map.clear(mapKP)
+    for i = 0 to array.size(comma) - 2 by 2
+        key = str.trim(array.get(comma, i))
+        valueStr = str.trim(array.get(comma, i+1))
+        valueNum = str.tonumber(valueStr)
+        map.put(mapKP, key, valueNum)
+
+getKillStatus(float fuc) =>
+    string result = ""
+    log.info("KillStatus float = " + str.tostring(fuc))
+    if (fuc > lookKPMap("HV") and fuc < lookKPMap("RD0"))
+        result := "KP Long"
+    if (fuc > lookKPMap("RD0") and fuc < lookKPMap("RD1"))
+        result := "🡅 KP Long "
+    if (fuc > lookKPMap("RD1") and fuc < lookKPMap("RD2"))
+        result := "🡅🡅 KP Long "  
+    if (fuc > lookKPMap("RD2") and fuc < lookKPMap("vix r1"))
+        result := "🡅🡅🡅 KP Long "
+    if (fuc > lookKPMap("vix r1") and fuc < lookKPMap("vix r2"))
+        result := "😧 KP Extreme Long 😧"
+    if (fuc > lookKPMap("vix r2") and fuc < lookKPMap("VAH"))
+        result := "⛔ KP Absolute TOP ⛔"
+    if (fuc < lookKPMap("HV") and fuc > lookKPMap("SD0"))
+        result := "KP Short"
+    if (fuc < lookKPMap("SD0") and fuc > lookKPMap("SD1"))
+        result := "🡇 KP Short "
+    if (fuc < lookKPMap("SD1") and fuc > lookKPMap("SD2"))
+        result := "🡇🡇 KP Short "  
+    if (fuc < lookKPMap("SD2") and fuc > lookKPMap("vix s1"))
+        result := "🡇🡇🡇 KP Short "  
+    if (fuc < lookKPMap("vix s1") and fuc > lookKPMap("vix s2"))
+        result := "😧 KP Extreme Short 😧"
+    if (fuc < lookKPMap("vix s2") and fuc > lookKPMap("VAL"))
+        result := "⛔ KP Absolute BOTTOM ⛔"
+    result
+
+parseKPLines(string sTicker, float Close) =>
+    //log.info("parseKPLines = '" + sTicker + "'" + str.tostring(Close) + "'")
+    string[] _pair = str.split(KPzones, "\n")
+    string result = ""
+    for s in _pair
+        sw = s
+        if str.contains(s, "setting ")
+            string[] parts = str.split(s, "setting ")
+            sw := array.get(parts, 0)
+        if str.contains(sw, ":")
+            string[] parts = str.split(sw, ":")
+            sTick = array.get(parts, 0) // $HG1!: 
+            sw := array.get(parts, 1) // SD2, 5.0530, HV, 5.1130, VAH, 5.2195, VAL, 5.0060
+            if str.contains(sTick, sTicker)
+                log.info("sTick contains '" + sTicker + "'")
+                sw := str.trim(sw)
+                string[] comma = str.split(sw, ", ") // vix r1, 5788, vix r2, 5793
+                log.info("close = " + str.tostring(Close) + ", calling loadUpKPMap with " + sw)
+                loadUpKPMap(comma)
+                result := getKillStatus(Close)
+    result
+ 
+findMQMap(float Close, float Open, float POpen, float PClose, float High, float Low, float PHigh, float PLow) =>
+    log.info("findMQMap with " + str.tostring(map.size(mapMQ)))
+    result = ""
+    bRed = Close < Open
+    bGreen = Open < Close
+    bPRed = PClose < POpen
+    bPGreen = POpen < PClose
+
+    if showMQRev and not showMQWick
+        keys = map.keys(mapMQ)
+        for i = 0 to array.size(keys) - 1
+            keyValue = array.get(keys, i) // 1D Min, key=5659.67
+            if (bGreen and bPRed and High > keyValue and Low < keyValue and PHigh > keyValue and PLow < keyValue)
+                result := map.get(mapMQ, keyValue)
+                break
+            else if (bPGreen and bRed and High > keyValue and Low < keyValue and PHigh > keyValue and PLow < keyValue)
+                result := map.get(mapMQ, keyValue)
+                break
+
+    if showMQWick
+        keys = map.keys(mapMQ)
+        for i = 0 to array.size(keys) - 1
+            keyValue = array.get(keys, i) // 1D Min, key=5659.67
+            if ((High > keyValue and Close < keyValue) or (High > keyValue and Open < keyValue))
+                result := map.get(mapMQ, keyValue)
+                break
+    result
+
+loadUpMQMap(comma) =>
+    log.info("loadUpMQMap with " + comma)
+    map.clear(mapMQ)
+    // $ES1!: HVL, 5725, 1D Min, 5659.67, HVL 0DTE, 5715, GEX 9, 5830, GEX 10, 5820
+    for i = 0 to array.size(comma) - 2 by 2
+        valueStr = str.trim(array.get(comma, i))
+        key = str.trim(array.get(comma, i+1))
+        valueNum = str.tonumber(key)
+        map.put(mapMQ, valueNum, valueStr)
+
+parseMQLines(string sTicker, float Close) =>
+    log.info("parseMQLines = '" + sTicker + "'" + str.tostring(Close) + "'")
+    string[] _pair = str.split(MQzones, "\n")
+    string result = ""
+    for s in _pair
+        sw = s
+        if str.contains(sw, ":")
+            string[] parts = str.split(sw, ":")
+            sTick = array.get(parts, 0) // $HG1!: 
+            sw := array.get(parts, 1) // SD2, 5.0530, HV, 5.1130, VAH, 5.2195, VAL, 5.0060
+            if str.contains(sTick, sTicker)
+                sw := str.trim(sw)
+                string[] comma = str.split(sw, ", ") // vix r1, 5788, vix r2, 5793
+                loadUpMQMap(comma)
+                result := getKillStatus(Close)
+    result
+
+updateTable(string sym) =>
+    row = rowG
+    tf = timeframe.period
+    string[] xxx = str.split(sym, ":")
+    sins = str.replace_all(array.get(xxx, 1), "1!", "") 
+
+    [atrSuper, basisBB, devBB, Open, Close, High, Low, POpen, PClose, PHigh, PLow, tickVWAP, tickSar, tickEma, tickEma200, tickRSI] = request.security(sym, tf, [ta.sma(ta.tr, stLength), ta.sma(close, bbLength), ta.stdev(close, bbLength), open, close, high, low, open-1, close-1, high-1, low-1, ta.vwap(close), ta.sar(start = 0.02, inc = 0.02, max=0.2), ta.ema(close, smEMA), ta.ema(close, bigEMA), ta.rsi(close, rsiLen)]) 
+
+    // =-=-=-=-=-=-=-=-=-=  AVOIDING EXTRA request.security is CRITICAL  =-=-=-=-=-=-=-=-=-=
+    // Old school SUPERTREND calculation
+    atrSMA = atrSuper
+    txST = hl2 - (stMultiplier * atrSMA)
+    tx1 = nz(txST[1], txST)
+    txST := close[1] > tx1 ? math.max(txST, tx1) : txST
+    tyST = hl2 + (1 * atrSMA)
+    ty1 = nz(tyST[1], tyST)
+    tyST := close[1] < ty1 ? math.min(tyST, ty1) : tyST
+    suptickST = 1
+    suptickST := nz(suptickST[1], suptickST)
+    suptickST := suptickST == -1 and close > ty1 ? 1 : tickST == 1 and close < tx1 ? -1 : tickST
+    tickST = suptickST != suptickST[1]
+    bool SuperBuy = suptickST==1 and tx1 > 0
+    bool SuperSell = suptickST!=1 and ty1 > 0
+
+    // Old school BB calculation
+    tickBBUpper = basisBB + devBB
+    tickBBLower = basisBB - devBB
+
+    sC = color.white
+    table.cell(myTable, 1, row, sins, text_color=txtC, bgcolor=bg , text_size=myFont)
+    col = 1
+
+    if (showKill)
+        log.info("ticker = '" + sins + "'")
+        sKillStatus = parseKPLines(sins, Close)
+        log.info("sKillStatus = " + sKillStatus)
+        sC := str.contains(str.lower(sKillStatus), "long") ? greenC : str.contains(str.lower(sKillStatus), "short") ? redC : bg
+        col := col + 1
+        table.cell(myTable, col, row, sKillStatus, text_color=txtC, bgcolor=sC , text_size=myFont)
+
+    // bool showMQRev = input.bool(false, "Show MenthorQ Reversals", group="Paid Lines")
+    // bool showMQWick = input.bool(true, "Show MenthorQ Wicks", group="Paid Lines")
+    // bool showOnlyBB = input.bool(true, "ONLY Show MenthorQ when at BB extreme)", group="Paid Lines")
+    if (showMQRev or showMQWick)
+        log.info("entered showMQRev or showMQWick")
+        tickTouchingUpperBB = math.abs(tickClose - tickBBUpper) <= tickBBUpper * BBtouchTolerance
+        tickTouchingLowerBB = math.abs(tickClose - tickBBLower) <= tickBBLower * BBtouchTolerance
+        tickTouchingBB = tickTouchingUpperBB or tickTouchingLowerBB
+        string homies = findMQMap(Close, Open, POpen, PClose, High, Low, PHigh, PLow)
+        if (tickTouchingBB)
+            mdesc = "MQ bounce off BB " + homies
+            sC := tickTouchingUpperBB ? greenC : tickTouchingLowerBB ? redC : bg
+            col := col + 1
+            table.cell(myTable, col, row, mdesc, text_color=txtC, bgcolor=sC , text_size=myFont)
+        else if (showOnlyBB == false)
+            mdesc = "Bounced off MQ " + homies
+            col := col + 1
+            sC := tickClose > tickOpen ? greenC : tickClose < tickOpen ? redC : bg
+            table.cell(myTable, col, row, mdesc, text_color=txtC, bgcolor=sC , text_size=myFont)
+        else
+            col := col + 1
+            table.cell(myTable, col, row, "      ", text_color=bg, bgcolor=bg , text_size=myFont)
+
+    col := col + 1
+    sC := SuperBuy ? greenC : SuperSell ? redC : bg
+    table.cell(myTable, col, row, "Trend", text_color=txtC, bgcolor=sC, text_size=myFont)
+
+    if (showVWAP)
+        //tickVWAP = request.security(sym, tf, ta.vwap(close))
+        col := col + 1
+        sC := close > tickVWAP ? greenC : redC
+        table.cell(myTable, col, row, "VWAP", text_color=txtC, bgcolor=sC, text_size=myFont)
+
+    if (showMACDPsar)
+        //tickSar = request.security(sym, tf, ta.sar(start = 0.02, inc = 0.02, max=0.2))
+        [tickM1, tickM2, tickMacdHist] = request.security(sym, tf, ta.macd(close, macd1, macd2, macd3))
+        col := col + 1
+        sC := tickMacdHist > 0 ? greenC : redC
+        table.cell(myTable, 5, row, "MACD", text_color=txtC, bgcolor=sC, text_size=myFont)
+        col := col + 1
+        sC := tickSar < close ? greenC : redC
+        table.cell(myTable, col, row, "PSar", text_color=txtC, bgcolor=sC, text_size=myFont)
+
+    if (showEMAs)
+        col := col + 1
+        //tickEma = request.security(sym, tf, ta.ema(close, smEMA))
+        //tickEma200 = request.security(sym, tf, ta.ema(close, bigEMA))
+        sC := close > tickEma ? greenC : redC
+        table.cell(myTable, col, row, "21 EMA", text_color=txtC, bgcolor=sC, text_size=myFont)
+        col := col + 1
+        sC := close > tickEma200 ? greenC : redC
+        table.cell(myTable, col, row, "200 EMA", text_color=txtC, bgcolor=sC, text_size=myFont)
+
+    if (showCH)    
+        tickDayOpen = request.security(sym, "1D", open)
+        col := col + 1
+        percentChange = ta.changePercent(tickClose, tickDayOpen)
+        sC := percentChange > 0 ? greenC : redC
+        table.cell(myTable, col, row, "CH: " + str.tostring(percentChange, "#.##"), text_color=txtC, bgcolor=sC, text_size=myFont)
+
+    if (showRSI)
+        //tickRSI = request.security(sym, tf, ta.rsi(close, rsiLen))
+        col := col + 1
+        sC := tickRSI > rsiOB ? greenC : tickRSI < rsiOS ? redC : bg
+        colTTT = tickRSI > rsiOB ? txtC : tickRSI < rsiOS ? txtC : color.new(color.gray, 10)
+        table.cell(myTable, col, row, "RSI", text_color=colTTT, bgcolor=sC, text_size=myFont)
+
+    if (showBB)
+        [tickBBMiddle, tickBBUpper, tickBBLower] = request.security(sym, tf, ta.bb(close, bbLength, bbMultiplier))
+        col := col + 1
+        tickTouchingUpperBB = math.abs(tickClose - tickBBUpper) <= tickBBUpper * BBtouchTolerance
+        tickTouchingLowerBB = math.abs(tickClose - tickBBLower) <= tickBBLower * BBtouchTolerance
+        tickTouchingBB = tickTouchingUpperBB or tickTouchingLowerBB
+        sC := tickTouchingUpperBB ? greenC : tickTouchingLowerBB ? redC : bg
+        colTTT = tickTouchingBB ? txtC : color.new(color.gray, 10)
+        table.cell(myTable, col, row, "BB Touch", text_color=colTTT, bgcolor=sC, text_size=myFont)
+
+
+if barstate.islast
+    string sw = ""
+    string commas = ""
+
+    rowG := 0
+    if(useES) // = input.bool(true, "Scan S&P 500 Futures", group="Scan List")
+        rowG := rowG + 1
+        updateTable(esSymbol)
+    if(useNQ) // = input.bool(true, "Scan NASDAQ Futures", group="Scan List")
+        rowG := rowG + 1
+        updateTable(nqSymbol)
+    if(useVIX) // = input.bool(true, "Scan VIX", group="Scan List")
+        rowG := rowG + 1
+        updateTable(vixSymbol)
+    if(useYM) // = input.bool(true, "Scan Dow Jones Futures",  group="Scan List")
+        rowG := rowG + 1
+        updateTable(ymSymbol)
+    if(useNDX) // = input.bool(false, "Scan NDX",  group="Scan List")
+        rowG := rowG + 1
+        updateTable(ndxSymbol)
+    if(useRTY) // = input.bool(false, "Scan RTY",  group="Scan List")
+        rowG := rowG + 1
+        updateTable(rtySymbol)
+    if(useFDAX) // = input.bool(false, "Scan FDAX",  group="Scan List")
+        rowG := rowG + 1
+        updateTable(fdaxSymbol)
+    if(useGC) // = input.bool(false, "Scan Gold Futures",  group="Scan List")
+        rowG := rowG + 1
+        updateTable(goldSymbol)
+    if(useSI) // = input.bool(false, "Scan Silver Futures",  group="Scan List")
+        rowG := rowG + 1
+        updateTable(silverSymbol)
+    if(useHG) // = input.bool(false, "Scan Copper Futures",  group="CommScandities List")
+        rowG := rowG + 1
+        updateTable(copperSymbol)
+    if(useCL) // = input.bool(false, "Scan Oil Futures",  group="Scan List")
+        rowG := rowG + 1
+        updateTable(oilSymbol)
+

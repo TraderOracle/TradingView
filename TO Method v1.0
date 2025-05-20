@@ -1,0 +1,54 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © jdehorty
+// @version=5
+
+indicator(title="Dave Envelope", overlay=true, timeframe='')
+
+import jdehorty/KernelFunctions/2 as kernels 
+
+getBounds(_atr, _nearFactor, _farFactor, _yhat) => 
+    _upper_far = _yhat + _farFactor*_atr
+    _upper_near = _yhat + _nearFactor*_atr
+    _lower_near = _yhat - _nearFactor*_atr
+    _lower_far = _yhat - _farFactor*_atr
+    _upper_avg = (_upper_far + _upper_near) / 2
+    _lower_avg = (_lower_far + _lower_near) / 2 
+    [_upper_near, _upper_far, _upper_avg, _lower_near, _lower_far, _lower_avg]
+
+kernel_atr(length, _high, _low, _close) =>
+    trueRange = na(_high[1])? _high-_low : math.max(math.max(_high - _low, math.abs(_high - _close[1])), math.abs(_low - _close[1]))
+    ta.rma(trueRange, length)
+
+h = input.int(256, 'Lookback Window', tooltip='The number of bars used for the estimation. This is a sliding value that represents the most recent historical bars. Recommended range: 3-50', group='Kernel Settings')
+alpha = input.float(3.5, 'Relative Weighting', step=0.25, tooltip='Relative weighting of time frames. As this value approaches zero, the longer time frames will exert more influence on the estimation. As this value approaches infinity, the behavior of the Rational Quadratic Kernel will become identical to the Gaussian kernel. Recommended range: 0.25-25', group='Kernel Settings')
+x_0 = input.int(30, "Start Regression at Bar", tooltip='Bar index on which to start regression. The first bars of a chart are often highly volatile, and omission of these initial bars often leads to a better overall fit. Recommended range: 5-25', group='Kernel Settings')
+
+yhat_close = kernels.rationalQuadratic(close, h, alpha, x_0)
+yhat_high = kernels.rationalQuadratic(high, h, alpha, x_0)
+yhat_low = kernels.rationalQuadratic(low, h, alpha, x_0)
+yhat = yhat_close
+atr_length = input.int(66, 'ATR Length', minval=1, tooltip='The number of bars associated with the Average True Range (ATR).')
+ktr = kernel_atr(atr_length, yhat_high, yhat_low, yhat_close)
+nearFactor = input.float(1.95, 'Near ATR Factor', minval=0.5, step=0.25, tooltip='The factor by which to multiply the ATR to calculate the near bound of the envelope. Recommended range: 0.5-2.0')
+farFactor = input.float(7, 'Far ATR Factor', minval=1.0, step=0.25, tooltip='The factor by which to multiply the ATR to calculate the far bound of the envelope. Recommended range: 6.0-8.0')
+[upper_near, upper_far, upper_avg, lower_near, lower_far, lower_avg] = getBounds(ktr, nearFactor, farFactor, yhat_close)
+
+red_far = input.color(color.new(color.red, 60), title='Upper Boundary Color: Far', tooltip='The color of the farmost upper boundary of the envelope.', group='Color Settings')
+red_near = input.color(color.new(color.red, 80), title='Upper Boundary Color: Near', tooltip='The color of the nearmost upper boundary of the envelope.', group='Color Settings')
+yhat_green = input.color(color.new(color.green, 50), title='Bullish Estimator Color', tooltip='The Bullish color of the Nadaraya-Watson estimator.', group='Color Settings')
+yhat_red = input.color(color.new(color.red, 50), title='Bearish Estimator Color', tooltip='The Bearish color of the Nadaraya-Watson estimator.', group='Color Settings')
+green_near = input.color(color.new(color.green, 80), title='Lower Boundary Color: Near', tooltip='The color of the nearmost lower boundary of the envelope.', group='Color Settings')
+green_far = input.color(color.new(color.green, 60), title='Lower Boundary Color: Far', tooltip='The color of the farmost lower boundary of the envelope.', group='Color Settings')
+
+p_upper_far = plot(upper_far, color=red_far, title='Upper Boundary: Far')
+p_upper_avg = plot(upper_avg, color=red_near,title='Upper Boundary: Average')
+p_upper_near = plot(upper_near, color=red_near, title='Upper Boundary: Near') 
+p_yhat = plot(yhat_close, color=yhat > yhat[1] ? yhat_green : yhat_red, linewidth=2, title='Nadaraya-Watson Estimation')
+p_lower_near = plot(lower_near, color=green_near, title='Lower Boundary: Near')
+p_lower_avg = plot(lower_avg, color=green_near, title='Lower Boundary: Average') 
+p_lower_far = plot(lower_far, color=green_far, title='Lower Boundary: Far')
+
+fill(p_upper_far, p_upper_avg, color=red_far, title='Upper Boundary: Farmost Region')
+fill(p_upper_near, p_upper_avg, color=red_near, title='Upper Boundary: Nearmost Region')
+fill(p_lower_near, p_lower_avg, color=green_near, title='Lower Boundary: Nearmost Region')
+fill(p_lower_far, p_lower_avg, color=green_far, title='Lower Boundary: Farmost Region')

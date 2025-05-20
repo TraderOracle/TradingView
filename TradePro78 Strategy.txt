@@ -1,0 +1,122 @@
+//@version=4
+strategy("TradePro78 Strategy", overlay=true)
+
+///////////////////////////////////////////////////
+
+
+var isLong78 = false
+var isShort78 = false
+
+// Bollinger Bands %B
+length = input(20, minval=1, group="Bollinger Bands")
+src = input(close, title="Source", group="Bollinger Bands")
+mult = input(2.0, minval=0.001, maxval=50, title="StdDev", group="Bollinger Bands")
+OSvalue = input(0.0, type=input.float, step=0.1, title="Oversold Value", group="Bollinger Bands")
+OBvalue = input(1.0, type=input.float, step=0.1, title="Overbought Value", group="Bollinger Bands")
+basis = sma(src, length)
+dev = mult * stdev(src, length)
+upper = basis + dev
+lower = basis - dev
+bbr = (src - lower)/(upper - lower) // this value indicates the bollinger band
+
+// Awesome Oscillator
+ao = sma(hl2,5) - sma(hl2,34)
+aoMax = input(2, title="Awesome Oscillator Max Threshold", group="Awesome Oscillator")
+aoMin = input(-2, title="Awesome Oscillator Min Threshold", group="Awesome Oscillator")
+
+// Average Directional Index
+adxlen = input(14, title="ADX Smoothing", group="ADX")
+adxThreshold = input(0, title="ADX Threshold", group="ADX")
+dilen = input(14, title="DI Length", group="ADX")
+dirmov(len) =>
+	up = change(high)
+	down = -change(low)
+	plusDM = na(up) ? na : (up > down and up > 0 ? up : 0)
+	minusDM = na(down) ? na : (down > up and down > 0 ? down : 0)
+	truerange = rma(tr, len)
+	plus = fixnan(100 * rma(plusDM, len) / truerange)
+	minus = fixnan(100 * rma(minusDM, len) / truerange)
+	[plus, minus]
+adx(dilen, adxlen) =>
+	[plus, minus] = dirmov(dilen)
+	sum = plus + minus
+	adx = 100 * rma(abs(plus - minus) / (sum == 0 ? 1 : sum), adxlen)
+adxValue = adx(dilen, adxlen)
+
+ema5 = ema(close, 5)
+ema21 = ema(close, 21)
+ema50 = ema(close, 50)
+ema200 = ema(close, 200)
+
+yesBuy = ema5 > ema21 and ema50 > ema200 and adxValue > adxThreshold and bbr > OBvalue and ao > aoMax and not isLong78
+yesSell = ema5 < ema21 and ema50 < ema200 and adxValue > adxThreshold and bbr < OSvalue and ao < aoMin and not isShort78
+
+showBuy78 = yesBuy and not yesBuy[1] //and not yesBuy[2] and not yesBuy[3] and not yesBuy[4] and not yesBuy[5]
+showSell78 = yesSell and not yesSell[1] //and not yesSell[2] and not yesSell[3] and not yesSell[4] and not yesSell[5]
+
+plotshape(showBuy78 ? hl2 : na, title="78", text="78", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.blue, textcolor=color.white)
+plotshape(showSell78 ? hl2 : na, title="78", text="78", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.blue, textcolor=color.white)
+
+if showBuy78
+    isLong78 := true
+    isShort78 := false
+
+if showSell78
+    isLong78 := false
+    isShort78 := true
+
+/////////////////////////////////////////////////////////////////
+
+TimeWindow=time(timeframe.period,"1400-1900", "GMT")
+
+if (showBuy78 and TimeWindow)
+    strategy.entry("Trade", strategy.long, comment="Long")
+if (showSell78 and TimeWindow)
+    strategy.entry("Trade", strategy.short, comment="Short")
+
+trailSource         = input(title="Trail Source", defval="Lows/Highs", options=["Lows/Highs", "Close", "Open"], confirm=true, group="Strategy")
+trailMethod         = input(title="Trail Method", defval="ATR", options=["ATR", "Percent"], confirm=true, group="Strategy")
+trailPercent        = input(title="Trail Percent", defval=10, minval=0.1, confirm=true, group="Strategy")
+swingLookback       = input(title="Lookback", defval=7, confirm=true, group="Strategy")
+atrPeriod           = input(title="ATR Period", defval=14, confirm=true, group="Strategy")
+atrMultiplier       = input(title="ATR Multiplier", defval=1.0, confirm=true, group="Strategy")
+barTime             = input(title="Bar Time", defval=timestamp("01 Jan 2021 13:30 +0000"), confirm=true, group="Strategy")
+
+var float trailPrice    = na
+float next_trailPrice   = na
+
+atrValue                = atr(atrPeriod) * atrMultiplier
+float swingLow          = lowest(low, swingLookback)
+float swingHigh         = highest(high, swingLookback)
+
+
+if trailMethod == "ATR"
+    if trailSource == "Close" 
+        next_trailPrice := strategy.position_size > 0 ? close - atrValue : close + atrValue
+    else if trailSource == "Open" 
+        next_trailPrice := strategy.position_size > 0 ? open - atrValue : open + atrValue
+    else
+        next_trailPrice := strategy.position_size > 0 ? swingLow - atrValue : swingHigh + atrValue
+
+if trailMethod == "Percent" 
+    float percentMulti = strategy.position_size > 0 ? (100 - trailPercent) / 100 : (100 + trailPercent) / 100
+    if trailSource == "Close" 
+        next_trailPrice := close * percentMulti
+    else if trailSource == "Open" 
+        next_trailPrice := open * percentMulti
+    else
+        next_trailPrice := strategy.position_size > 0 ? swingLow * percentMulti : swingHigh * percentMulti
+
+if strategy.position_size != 0 and barstate.isconfirmed
+    if (next_trailPrice > trailPrice or na(trailPrice)) and strategy.position_size > 0
+        trailPrice := next_trailPrice
+    if (next_trailPrice < trailPrice or na(trailPrice)) and strategy.position_size < 0
+        trailPrice := next_trailPrice
+
+plot(strategy.position_size != 0 ? trailPrice : na, color=color.red, title="Trailing Stop")
+
+strategy.exit(id="Trail Exit", from_entry="Trade", limit=na, stop=trailPrice)
+
+if (strategy.position_size > 0 and close < trailPrice) or (strategy.position_size < 0 and close > trailPrice)
+    strategy.close("Trade")
+

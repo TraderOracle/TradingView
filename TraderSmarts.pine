@@ -1,0 +1,175 @@
+//@version=5
+indicator("TraderSmarts v1.6", overlay=true, max_boxes_count = 500)
+zones = input.text_area("", "Paste TS values here")
+ 
+sFontSize = input.string(title="Font Size: ", options=["Tiny", "Small", "Normal", "Large"], defval="Normal", group="Lines")
+lWidth = input.int(1, "Line Width", group="Lines")
+iBoxTrans = input.int(50, "Box Transparency", group="Lines")
+bShowMTS = input.bool(true, "Show MTS lines", group="Lines")
+bShowTS = input.bool(true, "Show TS lines", group="Lines")
+
+sAlertWick = input.string(title="Wick off Line Alerts: ", options=["All", "Major Lines", "Short", "Long", "LIS", "MTS", "TS"], defval="All", group="Alerts")
+sAlert = input.string(title="Line Penetration Alerts: ", options=["All", "Major Lines", "Short", "Long", "LIS", "MTS", "TS"], defval="All", group="Alerts")
+
+colLong = input.color(color.rgb(0, 255, 0), "Long color", group="Colors")
+colShort = input.color(color.rgb(255, 0, 0), "Short color", group="Colors")
+colLIS = input.color(#c9c9c9, "Line in sand color", group="Colors")
+colMTS = input.color(color.yellow, "MTS color", group="Colors")
+colTS = input.color(color.rgb(62, 142, 209), "TS color", group="Colors")
+
+myFont = sFontSize == "Tiny" ? size.tiny : sFontSize == "Small" ? size.small : sFontSize == "Normal" ? size.normal : sFontSize == "Large" ? size.large : size.auto
+
+var bFoundStart = false
+var box[] boxes = array.new_box()
+
+newDay = ta.change(time('D'))
+//var line openLine = na
+//if newDay
+//    openLine := line.new(bar_index, open, bar_index+1, open)
+
+bLongWick = false
+bShortWick = false
+bLIS = false
+bMTS = false
+bTS = false
+
+AlertParty(b) =>
+    fBottom = b.get_bottom()
+    fTop = b.get_top()
+    bool bW = (close > open and high > fTop and close < fTop) or (close < open and low > fTop and open < fTop)
+    bool bIn = (high > fTop and low < fTop and low > fBottom) or (low < fBottom and high < fTop and high > fBottom) 
+    [bW, bIn] 
+
+drawRectangle(string s, string desc) =>
+    bAlert = false
+    string top = s
+    string bottom = s
+
+    if (str.contains(s, "-"))
+        string s1 = str.replace_all(s, " - ", "-")
+        string[] z = str.split(s1, "-")
+        top := array.get(z, 1)
+        bottom := array.get(z, 0)
+        //log.info("dash " + top)
+        //log.info("dash " + bottom)
+    if (str.tonumber(top) > 0 and str.tonumber(bottom) > 0)
+        //log.info("final " + top)
+        //log.info("final " + bottom)
+        // ["All", "Major Lines", "Short", "Long", "LIS", "MTS", "TS"]
+        if (str.contains(desc, "Long"))
+            box bahx = box.new(bar_index[100], str.tonumber(top), bar_index, str.tonumber(bottom),text_size=myFont, text=desc, text_color=color.new(colLong, 0), border_color=color.new(colLong, iBoxTrans), bgcolor=color.new(colLong, iBoxTrans), border_width=lWidth, extend=extend.both)
+            array.push(boxes, bahx) 
+            [bW, bR] = AlertParty(bahx)
+            if bW and (sAlertWick == "All" or sAlertWick == "Major Lines" or sAlertWick == "Long")
+                bAlert := true
+            if bR and (sAlert == "All" or sAlert == "Major Lines" or sAlert == "Long")
+                bAlert := true
+        else if (str.contains(desc, "Short"))
+            box bahx = box.new(bar_index[100], str.tonumber(top), bar_index, str.tonumber(bottom),text_size=myFont, text=desc, text_color=color.new(colShort, 0), border_color=color.new(colShort, iBoxTrans), bgcolor=color.new(colShort, iBoxTrans), border_width=lWidth, extend=extend.both)
+            array.push(boxes, bahx) 
+            [bW, bR] = AlertParty(bahx)
+            if bW and (sAlertWick == "All" or sAlertWick == "Major Lines" or sAlertWick == "Short")
+                bAlert := true
+            if bR and (sAlert == "All" or sAlert == "Major Lines" or sAlert == "Short")
+                bAlert := true
+        else if (str.contains(desc, "Sand"))
+            box bahx = box.new(bar_index[100], str.tonumber(top), bar_index, str.tonumber(bottom),text_size=myFont, text=desc, text_color=color.new(colLIS, 0), border_color=color.new(colLIS, iBoxTrans), bgcolor=color.new(colLIS, iBoxTrans), border_width=lWidth, extend=extend.both)
+            array.push(boxes, bahx) 
+            [bW, bR] = AlertParty(bahx)
+            if bW and (sAlertWick == "All" or sAlertWick == "Major Lines" or sAlertWick == "LIS")
+                bAlert := true
+            if bR and (sAlert == "All" or sAlert == "Major Lines" or sAlert == "LIS")
+                bAlert := true
+        else if (str.contains(desc, "MTS"))
+            box bahx = box.new(bar_index[100], str.tonumber(top), bar_index, str.tonumber(bottom),text_size=myFont, text=desc, text_color=color.new(colMTS, 0), border_color=color.new(colMTS, iBoxTrans), bgcolor=color.new(colMTS, iBoxTrans), border_width=lWidth, extend=extend.both)
+            array.push(boxes, bahx) 
+            [bW, bR] = AlertParty(bahx)
+            if bW and (sAlertWick == "All" or sAlertWick == "Major Lines" or sAlertWick == "MTS")
+                bAlert := true
+            if bR and (sAlert == "All" or sAlert == "Major Lines" or sAlert == "MTS")
+                bAlert := true
+        else if (str.contains(desc, "TS"))
+            box bahx = box.new(bar_index[100], str.tonumber(top), bar_index, str.tonumber(bottom),text_size=myFont, text=desc, text_color=color.new(colTS, 0), border_color=color.new(colTS, iBoxTrans), bgcolor=color.new(colTS, iBoxTrans), border_width=lWidth, extend=extend.both)
+            array.push(boxes, bahx) 
+            [bW, bR] = AlertParty(bahx)
+            if bW and (sAlertWick == "All" or sAlertWick == "Major Lines" or sAlertWick == "TS")
+                bAlert := true
+            if bR and (sAlert == "All" or sAlert == "Major Lines" or sAlert == "TS")
+                bAlert := true
+    bAlert
+
+bAlert = false
+if (barstate.islast)
+    string[] _pair = str.split(zones, "\n")
+
+    if (array.size(boxes) > 0)
+        _pair.clear()
+        
+    for s in _pair
+        string[] comma = str.split(s, ", ")
+        if comma.size() > 2
+            log.info(s)
+
+        //if (str.contains(s, "Execution/Target Zones:"))
+        //    bFoundStart := true
+
+        //if (bFoundStart == false)
+        //    continue
+
+        str.trim(s)
+        //log.info(s)
+        if (str.contains(s, "MTS Numbers: ") and bShowMTS)
+            // NQ MTS Numbers: 20463.75, 20196.25, 20048.50, 18263.00, 17962.50
+            string digit = ""
+            string desc = "MTS"
+            string[] sb = str.split(s, ":")
+            string s1 = str.replace_all(array.get(sb, 1), " - ", "-")
+            string[] sa = str.split(s1, ",")
+            for a in sa
+                //log.info("MTS - " + a)
+                if (str.contains(a, "."))
+                    digit := str.trim(a)
+                if drawRectangle(digit, desc)
+                    bAlert := true
+        else if (str.contains(s, "-"))
+            // 20129.00-23492.50 Range Short
+            string digit = ""
+            string desc = ""
+            string s1 = str.replace_all(s, " - ", "-")
+            //log.info(s1)
+            string[] sa = str.split(s1, " ")
+            for a in sa
+                //log.info(a)
+                string[] sb = str.split(a, " ")
+                //log.info(array.get(sb, 0))
+                string sc = array.get(sb, 0)
+                //log.info(sc)
+                if (str.contains(sc, "-"))
+                    digit := sc
+                else
+                    desc := desc + " " + sc
+            if drawRectangle(digit, desc)
+                bAlert := true  
+        else if (comma.size() > 40 and bShowTS)
+            // 20517.25, 20429.25, 20361.00, 20358.75, 20342.00, 20280.50, 20272.75, 20222.00, 20204.75, 20150.50, 20140.75, 20129.00, 20116.75, 20073.75, 20046.00, 20016.50, 20013.00, 20006.75, 19997.75
+            string s1 = str.replace_all(s, " ", "")
+            //log.info(s1)
+            string[] sa = str.split(s, ",")
+            for a in sa
+                if drawRectangle(a, "TS")  
+                    bAlert := true
+        else
+            // 20129.00 Range Short
+            string digit = ""
+            string desc = ""
+            string[] sa = str.split(s, " ")
+            for a in sa
+                //log.info("else - " + a)
+                if (str.tonumber(a) > 0)
+                    digit := a
+                else
+                    desc := desc + " " + a
+            if drawRectangle(digit, desc)  
+                bAlert := true
+
+alertcondition(bAlert, "TraderSmarts line alert")

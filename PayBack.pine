@@ -1,0 +1,53 @@
+//@version=5
+indicator(title="PayBack", shorttitle="PayBack v1.0", overlay=true, max_bars_back=1000, max_lines_count=500, max_labels_count=500, max_boxes_count=500)
+
+emaLength = input.int(21, "EMA Length", group="Basic Settings")
+useKAMA = input.bool(false, "Use KAMA instead of EMA", group="Basic Settings")
+prevCandles = input.int(3, "Lookback Candles", group="Basic Settings")
+bOnlyWicks = input.bool(true, "Only Use Wicks", group="Basic Settings")
+bReqPSAR = input.bool(false, "Only When PSAR Agrees", group="Basic Settings")
+bReqMACD = input.bool(false, "Only When MACD Agrees", group="Basic Settings")
+
+[macdLine, signalLine, histLine] = ta.macd(close, 12, 26, 9)
+macdUp = macdLine > signalLine
+macdDown = macdLine < signalLine
+
+psar = ta.sar(0.02, 0.02, 0.2)
+sarUp = psar < low 
+sarDown = psar > low 
+
+bool bWicked = false
+bool bCrossed = false
+
+bGreen = open[1] < close[1]
+bRed = open[1] > close[1]
+ema = ta.ema(close, emaLength)
+bWickFromAbove = (low[1] <= ema and open[1] > ema and bGreen) or (low[1] <= ema and close[1] > ema and bRed)
+bNextHigher = high > high[1]
+if (bReqMACD and macdDown) or (bReqPSAR and sarDown)
+    bNextHigher := false
+bWickFromBelow = (high[1] > ema and close[1] < ema and bGreen) or (high[1] > ema and open[1] < ema and bRed)
+bNextLower = low < low[1]
+if (bReqMACD and macdUp) or (bReqPSAR and sarUp)
+    bNextLower := false
+
+bPrevCandlesHigher = true
+bPrevCandlesLower = true
+
+if bOnlyWicks
+    for i = 2 to prevCandles
+        if open[i] < ema or close[i] < ema
+            bPrevCandlesHigher := false
+        if open[i] > ema or close[i] > ema
+            bPrevCandlesLower := false
+else
+    for i = 3 to prevCandles
+        if open[i] < ema or close[i] < ema
+            bPrevCandlesHigher := false
+        if open[i] > ema or close[i] > ema
+            bPrevCandlesLower := false
+
+plotchar(bWickFromAbove and bNextHigher and bPrevCandlesHigher ? 1 : na, char="👆", location=location.belowbar, color=color.lime, size=size.tiny, offset=-1)
+plotchar(bWickFromBelow and bNextLower and bPrevCandlesLower ? 1 : na, char="👇", location=location.abovebar, color=color.red, size=size.tiny, offset=-1)
+
+alertcondition(bWickFromAbove and bNextHigher and bPrevCandlesHigher, title="PayBack Alert", message="{{exchange}}:{{ticker}} {{interval}} wick pullback")

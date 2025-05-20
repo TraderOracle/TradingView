@@ -1,0 +1,207 @@
+//@version=5
+indicator(title="Nebula", shorttitle="Nebula v1", overlay=true)
+
+// ==========================   Bixord: FantailVMA   ================================
+
+ADX_Length = input.int(2, title="ADX_Length", group="FantailVMA")
+Weighting = input.float(10.0, title="Weighting", group="FantailVMA")
+MA_Length = input.int(6, minval=1, title="MA_Length", group="FantailVMA")
+
+VMA=close  
+VarMA=close
+MA=close
+STR = high-low
+sPDI = 0.0
+sMDI = 0.0
+ADX=0.0
+ADXR=0.0
+Hi  = high
+Hi1 = high[1]
+Lo  = low
+Lo1 = low[1]
+Close1= close[1]
+
+Bulls1 = 0.5*(math.abs(Hi-Hi1)+(Hi-Hi1))
+Bears1 = 0.5*(math.abs(Lo1-Lo)+(Lo1-Lo))
+Bears = Bulls1 > Bears1 ? 0 : (Bulls1 == Bears1 ? 0 : Bears1)
+Bulls = Bulls1 < Bears1 ? 0 : (Bulls1 == Bears1 ? 0 : Bulls1)
+
+if (bar_index > 0)
+    sPDI := (Weighting*sPDI[1] + Bulls)/(Weighting+1)
+    sMDI := (Weighting*sMDI[1] + Bears)/(Weighting+1)
+
+TR = math.max(Hi-Lo,Hi-Close1)
+if (bar_index > 0)
+    STR  := (Weighting*STR[1] + TR)/(Weighting+1)
+
+PDI = STR > 0 ? sPDI/STR : 0
+MDI = STR > 0 ? sMDI/STR: 0
+DX = (PDI + MDI) > 0 ? math.abs(PDI - MDI)/(PDI + MDI) : 0 
+if (bar_index > 0)
+    ADX := (Weighting*ADX[1] + DX)/(Weighting+1)
+vADX = ADX
+
+adxlow = ta.lowest(ADX, ADX_Length)
+adxmax = ta.highest(ADX, ADX_Length)
+ADXmin = math.min(1000000.0, adxlow)
+ADXmax = math.max(-1.0, adxmax)
+Diff = ADXmax - ADXmin
+Const = Diff > 0 ? (vADX- ADXmin)/Diff : 0
+
+if (bar_index > 0)
+    VarMA:=((2-Const)*VarMA[1]+Const*close)/2
+
+FanVMA = ta.sma(VarMA,MA_Length)
+
+
+// ==========================   McGinley Dynamic   ================================
+
+bool bGreen = true
+
+mg = 0.0
+mg := na(mg[1]) ? ta.ema(close, 14) : mg[1] + (close - mg[1]) / (14 * math.pow(close/mg[1], 4))
+rsi = ta.rsi(close, 14)
+
+transparencyValue= math.abs(FanVMA-mg)
+bColor = if FanVMA > mg 
+    color.from_gradient(rsi, 50, 80, color.new(color.rgb(0, 255, 132), 80), color.new(color.rgb(0, 255, 132), 50))
+else 
+    bGreen := false
+    color.from_gradient(rsi, 20, 50, color.new(color.rgb(255, 0, 0), 50), color.new(color.rgb(255, 0, 0), 80))
+
+
+// ==========================   Waddah Attar Explosion v1 by LazyBear   ================================
+
+sensitivity = input.int(150, title="Sensitivity", group="WAE")
+fastLength = input.int(20, title="FastEMA Length", group="WAE")
+slowLength = input.int(40, title="SlowEMA Length", group="WAE")
+channelLength = input.int(20, title="BB Channel Length", group="WAE")
+multWAE = input.float(2.0, title="BB Stdev Multiplier", group="WAE")
+
+calc_macd(source, fastLength, slowLength) =>
+    fastMA = ta.ema(source, fastLength)
+    slowMA = ta.ema(source, slowLength)
+    fastMA - slowMA
+
+calc_BBUpper(source, length, mult) => 
+    basis = ta.sma(source, length)
+    dev = mult * ta.stdev(source, length)
+    basis + dev
+
+calc_BBLower(source, length, mult) => 
+    basis = ta.sma(source, length)
+    dev = mult * ta.stdev(source, length)
+    basis - dev
+
+upper = calc_BBUpper(close, channelLength, multWAE)
+lower = calc_BBLower(close, channelLength, multWAE)
+
+t1 = (calc_macd(close, fastLength, slowLength) - calc_macd(close[1], fastLength, slowLength))*sensitivity
+e1 = (upper - lower)
+
+trendUpWAE = (t1 >= 0) ? t1 : 0
+trendDownWAE = (t1 < 0) ? (-1*t1) : 0
+
+waeColor = if trendUpWAE > 0
+    color.from_gradient(math.abs(trendUpWAE - e1), 1, 50, color.new(color.rgb(0, 255, 132), 50), color.new(color.rgb(0, 255, 132), 0))
+else 
+    color.from_gradient(math.abs(trendDownWAE - e1), 1, 50, color.new(color.rgb(255, 0, 0), 50), color.new(color.rgb(255, 0, 0), 0))
+
+barcolor(waeColor)
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=   Squeeze Relaxer version 2.1  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+
+// Average Directional Index
+sqTolerance = input.int(2, title="Squeeze Tolerance (lower = more sensitive)", group="Relaxing Settings", tooltip="How many bars to look back on the squeeze indicator")
+adxSqueeze = input.int(21, title="ADX Threshold for TTM Squeeze", group="Relaxing Settings", tooltip="Anything over 19 filters out low volume periods. Set to 11 as a default, feel free to increase to get less noise")
+
+adxlen = input(14, title="ADX Smoothing", group="ADX")
+dilen = input(14, title="DI Length", group="ADX")
+dirmov(len) =>
+	up5 = ta.change(high)
+	down5 = -ta.change(low)
+	plusDM = na(up5) ? na : (up5 > down5 and up5 > 0 ? up5 : 0)
+	minusDM = na(down5) ? na : (down5 > up5 and down5 > 0 ? down5 : 0)
+	truerange = ta.rma(ta.tr, len)
+	plus = fixnan(100 * ta.rma(plusDM, len) / truerange)
+	minus = fixnan(100 * ta.rma(minusDM, len) / truerange)
+	[plus, minus]
+adx(dilen, adxlen) =>
+	[plus, minus] = dirmov(dilen)
+	sum = plus + minus
+	adx = 100 * ta.rma(math.abs(plus - minus) / (sum == 0 ? 1 : sum), adxlen)
+adxValue = adx(dilen, adxlen)
+sigabove19 = adxValue > adxSqueeze
+
+var cGreen = 0
+var cRed = 0
+var pos = false 
+var neg = false 
+
+sqlength = 20
+multQ = 2.0
+lengthKC = 20
+multKC = 1.5
+
+useTrueRange = true
+source = close
+basis = ta.sma(source, sqlength)
+dev1 = multKC * ta.stdev(source, sqlength)
+upperBBsq = basis + dev1
+lowerBBsq = basis - dev1
+ma = ta.sma(source, lengthKC)
+rangeQ = high - low
+rangema = ta.sma(rangeQ, lengthKC)
+upperKC = ma + rangema * multKC
+lowerKC = ma - rangema * multKC
+sqzOn  = (lowerBBsq > lowerKC) and (upperBBsq < upperKC)
+sqzOff = (lowerBBsq < lowerKC) and (upperBBsq > upperKC)
+noSqz  = (sqzOn == false) and (sqzOff == false)
+
+avg1 = math.avg(ta.highest(high, lengthKC), ta.lowest(low, lengthKC))
+avg2 = math.avg(avg1, ta.sma(close, lengthKC))
+val = ta.linreg(close - avg2, lengthKC, 0)
+
+pos := false
+neg := false
+
+// if squeeze is bright RED, increment by one
+if (val < nz(val[1]) and val < 5 and not sqzOn)
+    cRed := cRed + 1   
+
+// if squeeze is bright GREEN, increment by one
+if (val > nz(val[1]) and val > 5 and not sqzOn)
+    cGreen := cGreen + 1   
+
+// if bright RED squeeze is now dim, momentum has changed.  Is ADX also above 19? - add a marker to chart
+if (val > nz(val[1]) and cRed > sqTolerance and val < 5 and not pos[1] and sigabove19 == true)
+    cRed := 0
+    pos := true  
+
+// if bright GREEN squeeze is now dim, momentum has changed.  Is ADX also above 19? - add a marker to chart
+if (val < nz(val[1]) and cGreen > sqTolerance and val > 5 and not neg[1] and sigabove19 == true)
+    cGreen := 0
+    neg := true  
+
+buySignal1 = pos and barstate.isconfirmed
+sellSignal1 = neg and barstate.isconfirmed
+
+
+// ==========================   PLOTS  ================================
+
+//if bShowSharkDown
+//    bColor := color.purple
+
+finalColor = bColor // = buySignal1 ? color.new(color.lime, 50) : bColor
+
+lineMD = plot(mg, title="", color=color.new(color.blue, 100))
+FVMA = plot(FanVMA, color=color.new(color.white, 100), title="Bixord FVMA")
+fill(FVMA, lineMD, color=finalColor, title="Cloud")
+
+//plotshape(buySignal1 and FanVMA > mg ? mg : na, title="Shark", color=color.rgb(255, 255, 255), style=shape.diamond, size=size.tiny, location=location.absolute)
+//plotshape(buySignal1 and FanVMA < mg ? FanVMA : na, title="Shark", color=color.rgb(255, 255, 255), style=shape.diamond, size=size.tiny, location=location.absolute)
+
+//plotshape(sellSignal1 and FanVMA > mg ? FanVMA : na, title="Shark", color=color.rgb(255, 255, 255), style=shape.diamond, size=size.tiny, location=location.absolute)
+//plotshape(sellSignal1 and FanVMA < mg ? mg : na, title="Shark", color=color.rgb(255, 255, 255), style=shape.diamond, size=size.tiny, location=location.absolute)
+

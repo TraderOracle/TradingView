@@ -1,0 +1,110 @@
+//@version=4
+strategy("Storm CloudStrategy", overlay=true)
+
+///////////////////////////////////////////////////
+
+// ICHIMOKU CLOUD
+conversionPeriods = input(9, minval=1, title="Conversion Line Length", group="Ichimoku Cloud")
+basePeriods = input(26, minval=1, title="Base Line Length", group="Ichimoku Cloud")
+laggingSpan2Periods = input(52, minval=1, title="Leading Span B Length", group="Ichimoku Cloud")
+displacement = input(26, minval=1, title="Lagging Span", group="Ichimoku Cloud")
+bShowCloudDetails = input(false, title="Show Cloud Details", group="Ichimoku Cloud")
+
+sStrategy = input(title="Choose Your Strategy", defval="Lines cross above/below CURRENT cloud", options=["Lines cross above/below CURRENT cloud","Lines cross above/below FUTURE cloud","Conversion crosses base ONLY","Price crosses FUTURE cloud"], group="Ichimoku Cloud")  
+
+donchian(len) => avg(lowest(len), highest(len))
+
+conversionLine = donchian(conversionPeriods)
+baseLine = donchian(basePeriods)
+leadLine1 = avg(conversionLine, baseLine)
+leadLine2 = donchian(laggingSpan2Periods)
+
+bGreenCloudCurrent = leadLine1[displacement] > leadLine2[displacement]
+bRedCloudCurrent = not bGreenCloudCurrent
+bGreenCloudFuture = leadLine1 > leadLine2
+bRedCloudFuture = not bGreenCloudFuture
+
+p1C = plot(bShowCloudDetails ? leadLine1 : na, offset = displacement - 1, color=color.new(color.black, 100), title="Leading Span A")
+p2C = plot(bShowCloudDetails ? leadLine2 : na, offset = displacement - 1, color=color.new(color.black, 100), title="Leading Span B")
+fill(p1C, p2C, color = leadLine1 > leadLine2 ? color.rgb(67, 160, 71, 60) : color.rgb(244, 67, 54, 60))
+
+var upwardsC = false
+var downwardsC = false
+
+if sStrategy == "Lines cross above/below CURRENT cloud"
+    upwardsC := bGreenCloudCurrent and conversionLine > baseLine and close > leadLine1[displacement] and close > leadLine2[displacement]
+    downwardsC := bRedCloudCurrent and conversionLine < baseLine and close < leadLine1[displacement] and close < leadLine2[displacement]
+
+if sStrategy == "Lines cross above/below FUTURE cloud"
+    upwardsC := bGreenCloudFuture and conversionLine > baseLine and close > leadLine1 and close > leadLine2
+    downwardsC := bRedCloudFuture and conversionLine < baseLine and close < leadLine1 and close < leadLine2
+
+if sStrategy == "Price crosses FUTURE cloud"
+    upwardsC := bGreenCloudFuture and close > leadLine2 and (close > leadLine1 or close < leadLine2) and (close < leadLine1 or close > leadLine2)  
+    downwardsC := bRedCloudFuture and close < leadLine1 and (close < leadLine1 or close > leadLine2) and (close > leadLine1 or close < leadLine2) 
+
+if sStrategy == "Conversion crosses base ONLY"
+    upwardsC := conversionLine > baseLine
+    downwardsC := conversionLine < baseLine
+
+showUpC = upwardsC and not upwardsC[1] and not upwardsC[2] and not upwardsC[3] and not upwardsC[4] and not upwardsC[5] and not upwardsC[6] and not upwardsC[7]
+showDownC = downwardsC and not downwardsC[1] and not downwardsC[2] and not downwardsC[3] and not downwardsC[4] and not downwardsC[5] and not downwardsC[6] and not downwardsC[7]
+
+plotshape(showUpC ? hl2 : na, title="Cloud", text="Cloud", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.rgb(10, 118, 14), textcolor=color.white)
+plotshape(showDownC ? hl2 : na, title="Cloud", text="Cloud", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.rgb(125, 6, 6), textcolor=color.white)
+
+/////////////////////////////////////////////////////////////////
+
+TimeWindow=time(timeframe.period,"1400-1900", "GMT")
+
+if (showUpC and TimeWindow)
+    strategy.entry("Trade", strategy.long, comment="Long")
+if (showDownC and TimeWindow)
+    strategy.entry("Trade", strategy.short, comment="Short")
+
+trailSource         = input(title="Trail Source", defval="Lows/Highs", options=["Lows/Highs", "Close", "Open"], confirm=true, group="Strategy")
+trailMethod         = input(title="Trail Method", defval="ATR", options=["ATR", "Percent"], confirm=true, group="Strategy")
+trailPercent        = input(title="Trail Percent", defval=10, minval=0.1, confirm=true, group="Strategy")
+swingLookback       = input(title="Lookback", defval=7, confirm=true, group="Strategy")
+atrPeriod           = input(title="ATR Period", defval=14, confirm=true, group="Strategy")
+atrMultiplier       = input(title="ATR Multiplier", defval=1.0, confirm=true, group="Strategy")
+barTime             = input(title="Bar Time", defval=timestamp("01 Jan 2021 13:30 +0000"), confirm=true, group="Strategy")
+
+var float trailPrice    = na
+float next_trailPrice   = na
+
+atrValue                = atr(atrPeriod) * atrMultiplier
+float swingLow          = lowest(low, swingLookback)
+float swingHigh         = highest(high, swingLookback)
+
+
+if trailMethod == "ATR"
+    if trailSource == "Close" 
+        next_trailPrice := strategy.position_size > 0 ? close - atrValue : close + atrValue
+    else if trailSource == "Open" 
+        next_trailPrice := strategy.position_size > 0 ? open - atrValue : open + atrValue
+    else
+        next_trailPrice := strategy.position_size > 0 ? swingLow - atrValue : swingHigh + atrValue
+
+if trailMethod == "Percent" 
+    float percentMulti = strategy.position_size > 0 ? (100 - trailPercent) / 100 : (100 + trailPercent) / 100
+    if trailSource == "Close" 
+        next_trailPrice := close * percentMulti
+    else if trailSource == "Open" 
+        next_trailPrice := open * percentMulti
+    else
+        next_trailPrice := strategy.position_size > 0 ? swingLow * percentMulti : swingHigh * percentMulti
+
+if strategy.position_size != 0 and barstate.isconfirmed
+    if (next_trailPrice > trailPrice or na(trailPrice)) and strategy.position_size > 0
+        trailPrice := next_trailPrice
+    if (next_trailPrice < trailPrice or na(trailPrice)) and strategy.position_size < 0
+        trailPrice := next_trailPrice
+
+plot(strategy.position_size != 0 ? trailPrice : na, color=color.red, title="Trailing Stop")
+
+strategy.exit(id="Trail Exit", from_entry="Trade", limit=na, stop=trailPrice)
+
+if (strategy.position_size > 0 and close < trailPrice) or (strategy.position_size < 0 and close > trailPrice)
+    strategy.close("Trade")
+

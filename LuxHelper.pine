@@ -1,0 +1,134 @@
+//@version=5
+indicator("LuxHelper v1.0", overlay=true)
+
+bPSAR = input(true, "Use PSAR", group="Options")
+bLindaMACD = input(true, "Use Linda MACD", group="Options")
+bHull = input(true, "Use Hull Moving Average", group="Options")
+bFisher = input(true, "Use Fisher Transform", group="Options")
+bCCI = input(true, "Use CCI Double Cross", group="Options")
+bHalf = input(true, "Use HalfTrend", group="Options")
+
+sensitivity = input(150, title="Sensitivity", group="Waddah Explosion")
+fastLength=input(20, title="FastEMA Length", group="Waddah Explosion")
+slowLength=input(40, title="SlowEMA Length", group="Waddah Explosion")
+channelLength=input(20, title="BB Channel Length", group="Waddah Explosion")
+mult=input(2.0, title="BB Stdev Multiplier", group="Waddah Explosion")
+deadZone=input(20, title="No trade zone threshold", group="Waddah Explosion")
+
+calc_macd(source, fastLength, slowLength) =>
+	fastMA = ta.ema(source, fastLength)
+	slowMA = ta.ema(source, slowLength)
+	fastMA - slowMA
+
+calc_BBUpper(source, length, mult) => 
+	basis = ta.sma(source, length)
+	dev = mult * ta.stdev(source, length)
+	basis + dev
+
+calc_BBLower(source, length, mult) => 
+	basis = ta.sma(source, length)
+	dev = mult * ta.stdev(source, length)
+	basis - dev
+
+t1 = (calc_macd(close, fastLength, slowLength) - calc_macd(close[1], fastLength, slowLength))*sensitivity
+t2 = (calc_macd(close[2], fastLength, slowLength) - calc_macd(close[3], fastLength, slowLength))*sensitivity
+
+e1 = (calc_BBUpper(close, channelLength, mult) - calc_BBLower(close, channelLength, mult))
+e2 = (calc_BBUpper(close[1], channelLength, mult) - calc_BBLower(close[1], channelLength, mult))
+
+waeUp = (t1 >= 0) ? t1 : 0
+waeDown = (t1 < 0) ? (-1*t1) : 0
+
+psar = ta.sar(0.02, 0.02, 0.2)
+psarDir = psar < close ? 1 : -1
+
+fast_ma = request.security(syminfo.tickerid, "", ta.sma(close, 3))
+slow_ma = request.security(syminfo.tickerid, "", ta.sma(close, 10))
+macd = fast_ma - slow_ma
+signal = request.security(syminfo.tickerid, "", ta.sma(macd, 16))
+r1 = macd - signal
+LindaUp = (r1 >= 0) ? r1 : 0
+LindaDown = (r1 < 0) ? (-1*r1) : 0
+
+hullma = ta.wma(2*ta.wma(close, 5)-ta.wma(close, 10), math.floor(math.sqrt(10)))
+
+high_ = ta.highest(hl2, 10)
+low_ = ta.lowest(hl2, 10)
+round_(val) => val > .99 ? .999 : val < -.99 ? -.999 : val
+value = 0.0
+value := round_(.66 * ((hl2 - low_) / (high_ - low_) - .5) + .67 * nz(value[1]))
+fish1 = 0.0
+fish1 := .5 * math.log((1 + value) / (1 - value)) + .5 * nz(fish1[1])
+fish2 = fish1[1]
+
+// CCI #1 - red
+ma1 = ta.sma(hlc3, 14)
+cci1 = (close - ma1) / (0.015 * ta.dev(close, 14))
+plot(cci1, "CCI 1", color=#b72842, linewidth=2)
+// CCI #2 - yellow
+ma2 = ta.sma(close, 100)
+cci2 = (close - ma2) / (0.015 * ta.dev(close, 100))
+plot(cci2, "CCI 2", color=#d4cd0f, linewidth=2)
+
+
+
+// Halftrend
+amplitude = input(title="Amplitude", defval=2, group="Halftrend")
+channelDeviation = input(title="Channel Deviation", defval=2, group="Halftrend")
+
+var int trend = 0
+var int nextTrend = 0
+var float maxLowPrice = nz(low[1], low)
+var float minHighPrice = nz(high[1], high)
+
+var float up1 = 0.0
+var float down1 = 0.0
+float atrHigh = 0.0
+float atrLow = 0.0
+float arrowUp = na
+float arrowDown = na
+
+atr2 = ta.atr(100) / 2
+dev = channelDeviation * atr2
+
+highPrice = high[math.abs(ta.highestbars(amplitude))]
+lowPrice = low[math.abs(ta.lowestbars(amplitude))]
+highma = ta.sma(high, amplitude)
+lowma = ta.sma(low, amplitude)
+
+if nextTrend == 1
+	maxLowPrice := math.max(lowPrice, maxLowPrice)
+
+	if highma < maxLowPrice and close < nz(low[1], low)
+		trend := 1
+		nextTrend := 0
+		minHighPrice := highPrice
+else
+	minHighPrice := math.min(highPrice, minHighPrice)
+
+	if lowma > minHighPrice and close > nz(high[1], high)
+		trend := 0
+		nextTrend := 1
+		maxLowPrice := lowPrice
+
+if trend == 0
+	if not na(trend[1]) and trend[1] != 0
+		up1 := na(down1[1]) ? down1 : down1[1]
+		arrowUp := up1 - atr2
+	else
+		up1 := na(up1[1]) ? maxLowPrice : math.max(maxLowPrice, up1[1])
+	atrHigh := up1 + dev
+	atrLow := up1 - dev
+else
+	if not na(trend[1]) and trend[1] != 1 
+		down1 := na(up1[1]) ? up1 : up1[1]
+		arrowDown := down1 + atr2
+	else
+		down1 := na(down1[1]) ? minHighPrice : math.min(minHighPrice, down1[1])
+	atrHigh := down1 + dev
+	atrLow := down1 - dev
+
+HalfTrue = trend == 0
+
+plotshape(true ? 55 : na, style=shape.triangleup, location=location.absolute, size=size.tiny, title="eMAMA Cross Up", color=#00ff84)
+plotshape(true ? 55 : na, style=shape.triangledown, location=location.absolute, size=size.tiny, title="eMAMA Cross Down", color=#ff0000)

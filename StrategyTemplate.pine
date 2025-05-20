@@ -1,0 +1,71 @@
+//@version=4
+strategy("TO Strategy", overlay=true)
+
+
+
+
+TimeWindow=time(timeframe.period,"1400-1900", "GMT")
+
+upwards = (ema(close, 9) > ema(close, 21) and close > ema(close, 50) and open > ema(close, 50))
+downwards = (ema(close, 9) < ema(close, 21) and close < ema(close, 50) and open < ema(close, 50))
+showUp = upwards and not upwards[1]
+showDown = downwards and not downwards[1]
+
+if (showUp and TimeWindow)
+    strategy.entry("Trade", strategy.long, comment="Long")
+if (showDown and TimeWindow)
+    strategy.entry("Trade", strategy.short, comment="Short")
+
+trailSource         = input(title="Trail Source", defval="Lows/Highs", options=["Lows/Highs", "Close", "Open"], confirm=true)
+trailMethod         = input(title="Trail Method", defval="ATR", options=["ATR", "Percent"], confirm=true)
+trailPercent        = input(title="Trail Percent", defval=10, minval=0.1, confirm=true)
+swingLookback       = input(title="Lookback", defval=7, confirm=true)
+atrPeriod           = input(title="ATR Period", defval=14, confirm=true)
+atrMultiplier       = input(title="ATR Multiplier", defval=1.0, confirm=true)
+barTime             = input(title="Bar Time", defval=timestamp("01 Jan 2021 13:30 +0000"), confirm=true)
+
+// Declare trailing price variable (stores our trail stop value)
+var float trailPrice    = na
+float next_trailPrice   = na
+
+// Get required trailing stop variables
+atrValue                = atr(atrPeriod) * atrMultiplier
+float swingLow          = lowest(low, swingLookback)
+float swingHigh         = highest(high, swingLookback)
+
+// Get trailing stop price
+if trailMethod == "ATR" // Determine ATR trailing stop price based on price source
+    if trailSource == "Close" 
+        next_trailPrice := strategy.position_size > 0 ? close - atrValue : close + atrValue
+    else if trailSource == "Open" 
+        next_trailPrice := strategy.position_size > 0 ? open - atrValue : open + atrValue
+    else
+        next_trailPrice := strategy.position_size > 0 ? swingLow - atrValue : swingHigh + atrValue
+
+if trailMethod == "Percent" 
+    float percentMulti = strategy.position_size > 0 ? (100 - trailPercent) / 100 : (100 + trailPercent) / 100
+    if trailSource == "Close" 
+        next_trailPrice := close * percentMulti
+    else if trailSource == "Open" 
+        next_trailPrice := open * percentMulti
+    else
+        next_trailPrice := strategy.position_size > 0 ? swingLow * percentMulti : swingHigh * percentMulti
+
+// Check for trailing stop update
+if strategy.position_size != 0 and barstate.isconfirmed
+    // Trail long stop ONLY IF temp trailPrice is not set or is a higher price
+    if (next_trailPrice > trailPrice or na(trailPrice)) and strategy.position_size > 0
+        trailPrice := next_trailPrice
+    // Trail short stop ONLY IF temp trailPrice is not set or is a lower price
+    if (next_trailPrice < trailPrice or na(trailPrice)) and strategy.position_size < 0
+        trailPrice := next_trailPrice
+
+// Draw data to chart
+plot(strategy.position_size != 0 ? trailPrice : na, color=color.red, title="Trailing Stop")
+
+// Exit trade if stop is hit
+// strategy.exit(id="Trail Exit", from_entry="Trade", limit=na, stop=trailPrice)
+
+if (strategy.position_size > 0 and close < trailPrice) or (strategy.position_size < 0 and close > trailPrice)
+    strategy.close("Trade")
+

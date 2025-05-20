@@ -1,0 +1,264 @@
+//@version=5
+indicator("Killpips Zones", overlay=true)
+// vim: syntax=pine
+
+//---------------------------------------------------------
+// 1. INPUTS
+//---------------------------------------------------------
+reactionString = input.string(title   = "Reaction Levels String", defval  = "", tooltip = "Format: $SYMBOL: label1, level1, label2, level2, ...")
+totalPairs     = input.int(17, "Total Label/Level Pairs", minval=1)
+totalLevels = input.int(17, title="Total Number of Levels", minval=1, group="Reaction Levels")
+
+// Define a color input for each possible rectangle (16 max).
+zoneColor01 = input.color(title="range D min - VAL",        defval=color.new(color.green,  80))
+zoneColor02 = input.color(title="VAL - 1DepMIN",            defval=color.new(color.red,    80))
+zoneColor03 = input.color(title="1Dexp MIN - VIXs2",        defval=color.new(color.blue,   80))
+zoneColor04 = input.color(title="VIXs2 - Vixs1",            defval=color.new(color.purple, 80))
+zoneColor05 = input.color(title="Vixs1 - SD2",              defval=color.new(color.yellow, 80))
+zoneColor06 = input.color(title="SD2 - SD1",                defval=color.new(color.orange, 80))
+zoneColor07 = input.color(title="SD1 - SD0",                defval=color.new(color.teal,   80))
+zoneColor08 = input.color(title="SD0 - HV",                 defval=color.new(color.fuchsia,80))
+zoneColor09 = input.color(title="HV - RD0",                 defval=color.new(color.navy,   80))
+zoneColor10 = input.color(title="RD0 - RD1",                defval=color.new(color.lime,   80))
+zoneColor11 = input.color(title="RD1 - RD2",                defval=color.new(color.gray,   80))
+zoneColor12 = input.color(title="RD2 - VIXr1",              defval=color.new(color.maroon, 80))
+zoneColor13 = input.color(title="VIXr1 - VIXr2",            defval=color.new(color.olive,  80))
+zoneColor14 = input.color(title="VIXr2 - 1DexpMAX",         defval=color.new(color.aqua,   80))
+zoneColor15 = input.color(title="1DexpMAX - VAH",           defval=color.new(color.silver, 80))
+zoneColor16 = input.color(title="VAH - range D max",        defval=color.new(color.black,  80))
+
+// Build an array of the 16 colors. (We do this once, on the very first script run.)
+var color[] zoneColors = array.new_color(0)
+if barstate.isfirst
+    array.push(zoneColors, zoneColor01)
+    array.push(zoneColors, zoneColor02)
+    array.push(zoneColors, zoneColor03)
+    array.push(zoneColors, zoneColor04)
+    array.push(zoneColors, zoneColor05)
+    array.push(zoneColors, zoneColor06)
+    array.push(zoneColors, zoneColor07)
+    array.push(zoneColors, zoneColor08)
+    array.push(zoneColors, zoneColor09)
+    array.push(zoneColors, zoneColor10)
+    array.push(zoneColors, zoneColor11)
+    array.push(zoneColors, zoneColor12)
+    array.push(zoneColors, zoneColor13)
+    array.push(zoneColors, zoneColor14)
+    array.push(zoneColors, zoneColor15)
+    array.push(zoneColors, zoneColor16)
+
+// Line styling
+lineCol  = input.color(color.gray,  "Line Color")
+lineW    = input.int(1, "Line Width", minval=1)
+
+// Extension bars
+extensionBars = input.int(276, "Extension Bars", minval=1)
+
+//---------------------------------------------------------
+// 2. PARSE THE INPUT STRING
+//    Format: "$SYMBOL: label1, level1, label2, level2, ..."
+//---------------------------------------------------------
+var string[] inLabels = array.new_string()
+var float[]  inLevels = array.new_float()
+
+// Clear arrays each bar so we can re-parse
+array.clear(inLabels)
+array.clear(inLevels)
+
+if reactionString != ""
+    // Split into symbol part and the remainder
+    parts = str.split(reactionString, ":")
+    if array.size(parts) == 2
+        symbolStr = str.trim(array.get(parts, 0))
+        symbolStr := str.replace_all(symbolStr, "$", "")
+        // Only proceed if symbol matches the chart
+        if symbolStr == syminfo.ticker
+            tokens    = str.split(array.get(parts, 1), ",")
+            pairCount = math.min(totalPairs, math.floor(array.size(tokens) / 2))
+            for i = 0 to pairCount - 1
+                lbl = str.trim(array.get(tokens, 2*i))
+                lvlStr = str.trim(array.get(tokens, 2*i + 1))
+                lvl = str.tonumber(lvlStr)
+                if not na(lvl)
+                    array.push(inLabels, lbl)
+                    array.push(inLevels, lvl)
+
+//---------------------------------------------------------
+// 3. SORT LEVELS (ASCENDING), SAFELY
+//---------------------------------------------------------
+var float[]  sortedLevels = array.new_float()
+var string[] sortedLabels = array.new_string()
+
+// Clear them each bar
+array.clear(sortedLevels)
+array.clear(sortedLabels)
+
+// Only sort if we actually have more than 1 level
+if array.size(inLevels) > 1
+    // Make copies so we can remove items in a loop
+    localLvls = array.copy(inLevels)
+    localLbls = array.copy(inLabels)
+    
+    // Simple selection sort
+    while array.size(localLvls) > 0
+        // Take the first element as the min
+        minVal = array.get(localLvls, 0)
+        minIdx = 0
+        // Only loop further if there's more than 1 item
+        if array.size(localLvls) > 1
+            for j = 1 to array.size(localLvls) - 1
+                testVal = array.get(localLvls, j)
+                if testVal < minVal
+                    minVal := testVal
+                    minIdx := j
+        // Push the found min to sorted arrays
+        array.push(sortedLevels, minVal)
+        array.push(sortedLabels, array.get(localLbls, minIdx))
+        // Remove it from the local arrays
+        array.remove(localLvls, minIdx)
+        array.remove(localLbls, minIdx)
+    
+// If there's exactly 1 level, we skip sorting and do nothing
+// If we have 0, we also do nothing
+
+//---------------------------------------------------------
+// 5. DRAW HORIZONTAL LINES (NO LABELS)
+//---------------------------------------------------------
+var line[] zoneLines = array.new_line(0)
+array.clear(zoneLines)
+
+if array.size(sortedLevels) > 0
+    for i = 0 to array.size(sortedLevels) - 1
+        float lvl = array.get(sortedLevels, i)
+        line ln = line.new(startBarIndex, lvl, startBarIndex + 1, lvl, extend = extend.both, color = lineCol, width = lineW)
+        array.push(zoneLines, ln)
+
+//---------------------------------------------------------
+// 6. DRAW BOXES (RECTANGLES) BETWEEN CONSECUTIVE LEVELS
+//    START = startBarIndex, EXTEND = user input
+//---------------------------------------------------------
+var box[] zoneBoxes = array.new_box(0)
+array.clear(zoneBoxes)
+
+// Only create rectangles if we have at least 2 sorted levels
+if array.size(sortedLevels) > 1
+    for i = 1 to array.size(sortedLevels) - 1
+        float lvlA = array.get(sortedLevels, i - 1)
+        float lvlB = array.get(sortedLevels, i)
+        
+        float top    = math.max(lvlA, lvlB)
+        float bottom = math.min(lvlA, lvlB)
+        
+        // Pick the user-selected color for rectangle #i (1-based).
+        // If i > 16, we use a fallback color (gray).
+        color rectColor = i - 1 < array.size(zoneColors) ? array.get(zoneColors, i - 1) : color.gray
+        
+        // Create box from startBarIndex to startBarIndex + extensionBars
+        box zoneBox = box.new(bar_index - 500, top, bar_index, bottom, border_color = rectColor, border_width = 1)
+        box.set_bgcolor(zoneBox, rectColor)
+        array.push(zoneBoxes, zoneBox)
+
+    // Show/hide lines globally, and set their shared style/width
+lineShow  = input.bool(true,   title="Show Lines",  group="Reaction Levels")
+lineStyle = input.string("Solid", title="Line Style", options=["Solid", "Dotted", "Dashed"], group="Reaction Levels")
+lineWidth = input.int(2, title="Line Width", minval=1, group="Reaction Levels")
+
+// Show/hide labels globally, and set their shared size/offset
+labelShow   = input.bool(true,  title="Show Labels", group="Reaction Levels")
+labelSize   = input.string("Large", title="Label Size", options=["Auto", "Huge", "Large", "Normal", "Small", "Tiny"], group="Reaction Levels")
+labelOffset = input.int(50, title="Label Offset (Bars to the Right)", group="Reaction Levels")
+
+//=== PER-LINE COLOR INPUTS ===//
+// Each line can have its own color. If fewer than 17 lines are used,
+// the unused color inputs will be ignored.
+lineColor01 = input.color(color.orange, "VIX r1",  group="Per-Line Colors")
+lineColor02 = input.color(color.orange, "VIX r2",  group="Per-Line Colors")
+lineColor03 = input.color(color.orange, "VIX s1",  group="Per-Line Colors")
+lineColor04 = input.color(color.orange, "VIX s2",  group="Per-Line Colors")
+lineColor05 = input.color(color.orange, "1Dexp MAX",  group="Per-Line Colors")
+lineColor06 = input.color(color.orange, "1Dexp MIN",  group="Per-Line Colors")
+lineColor07 = input.color(color.orange, "RD0",  group="Per-Line Colors")
+lineColor08 = input.color(color.orange, "RD1",  group="Per-Line Colors")
+lineColor09 = input.color(color.orange, "RD2",  group="Per-Line Colors")
+lineColor10 = input.color(color.orange, "SD0", group="Per-Line Colors")
+lineColor11 = input.color(color.orange, "SD1", group="Per-Line Colors")
+lineColor12 = input.color(color.orange, "SD2", group="Per-Line Colors")
+lineColor13 = input.color(color.orange, "HV", group="Per-Line Colors")
+lineColor14 = input.color(color.orange, "VAH", group="Per-Line Colors")
+lineColor15 = input.color(color.orange, "VAL", group="Per-Line Colors")
+lineColor16 = input.color(color.orange, "range daily max", group="Per-Line Colors")
+lineColor17 = input.color(color.orange, "range daily min", group="Per-Line Colors")
+
+//=== UTILITY FUNCTIONS ===//
+parseLineStyle(styleStr) =>
+    switch styleStr
+        "Solid"  => line.style_solid
+        "Dotted" => line.style_dotted
+        "Dashed" => line.style_dashed
+
+parseLabelSize(sizeStr) =>
+    switch sizeStr
+        "Auto"   => size.auto
+        "Huge"   => size.huge
+        "Large"  => size.large
+        "Normal" => size.normal
+        "Small"  => size.small
+        "Tiny"   => size.tiny
+
+// Put the per-line color inputs into an array so we can index them in a loop.
+var lineColors = array.new_color()
+if barstate.isfirst
+    array.push(lineColors, lineColor01)
+    array.push(lineColors, lineColor02)
+    array.push(lineColors, lineColor03)
+    array.push(lineColors, lineColor04)
+    array.push(lineColors, lineColor05)
+    array.push(lineColors, lineColor06)
+    array.push(lineColors, lineColor07)
+    array.push(lineColors, lineColor08)
+    array.push(lineColors, lineColor09)
+    array.push(lineColors, lineColor10)
+    array.push(lineColors, lineColor11)
+    array.push(lineColors, lineColor12)
+    array.push(lineColors, lineColor13)
+    array.push(lineColors, lineColor14)
+    array.push(lineColors, lineColor15)
+    array.push(lineColors, lineColor16)
+    array.push(lineColors, lineColor17)
+
+//=== CREATE LINES & LABELS ONLY ONCE ===//
+var bool linesDrawn = false
+
+// Draw lines & labels only on the last bar, and only once
+if barstate.islast and not linesDrawn
+    if reactionString != ""
+        // 1) Split into symbol vs. remainder
+        parts = str.split(reactionString, ":")
+        if array.size(parts) == 2
+            // 2) Extract and clean symbol
+            symbolStr = str.trim(array.get(parts, 0))
+            symbolStr := str.replace_all(symbolStr, "$", "")
+            
+            // 3) Check if symbol matches current chart
+            if symbolStr == syminfo.ticker
+                // 4) Parse the remainder (labels/values)
+                tokens = str.split(array.get(parts, 1), ",")
+                pairCount = math.min(totalLevels, math.floor(array.size(tokens) / 2))
+
+                // 5) Loop through each label/value pair
+                for i = 0 to pairCount - 1
+                    labelText  = str.trim(array.get(tokens, 2 * i))
+                    priceToken = str.trim(array.get(tokens, 2 * i + 1))
+                    priceValue = str.tonumber(priceToken)
+
+                    if not na(priceValue)
+                        // Determine the color for this line index
+                        thisLineColor = array.get(lineColors, math.min(i, array.size(lineColors) - 1))
+
+                        // --- Draw line (using bar-index coords) ---
+                        line.new(x1 = bar_index - 500, y1 = priceValue, x2 = bar_index + 500, y2 = priceValue, extend = extend.both, color  = lineShow ? thisLineColor : color.new(thisLineColor, 100), width = lineWidth, style = parseLineStyle(lineStyle), xloc = xloc.bar_index)
+                        
+                        // --- Draw label (only once) ---
+                        label.new(x = bar_index + labelOffset, y = priceValue, text = labelText, textcolor = labelShow ? thisLineColor : color.new(thisLineColor, 100), style = label.style_none, size = parseLabelSize(labelSize), xloc = xloc.bar_index)
+    // Mark as drawn so it doesn't repeat
+    linesDrawn := true

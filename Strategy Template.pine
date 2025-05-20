@@ -1,0 +1,61 @@
+// @version=5
+strategy("D2 Strategy", 
+     overlay=true, 
+     initial_capital=50000,
+     default_qty_type=strategy.percent_of_equity, 
+     default_qty_value=100, // 100% of balance invested on each trade
+     commission_type=strategy.commission.cash_per_contract, 
+     commission_value=0.005) // Interactive Brokers rate
+
+pctProfit = input.float(0.3, "Percent Profit") * 0.01
+pctLoss = input.float(0.4, "Percent Loss") * 0.01
+
+// Get inputs
+atrLength = input.int(title="ATR Length", defval=14, minval=1)
+useStructure = input.bool(title="Use Structure?", defval=true)
+lookback = input.int(title="How Far To Look Back For High/Lows:", defval=7, minval=1)
+atrStopMultiplier = input.float(title="ATR x ?", defval=1.0, minval=0.1)
+
+highestHigh = ta.highest(high, lookback)
+lowestLow = ta.lowest(low, lookback)
+
+// Calculate data
+atr = ta.atr(atrLength)
+longStop = (useStructure ? lowestLow : close) - atr * atrStopMultiplier
+shortStop = (useStructure ? highestHigh : close) + atr * atrStopMultiplier
+
+ma1 = ta.ema(close, 9)
+ma2 = ta.ema(close, 21)
+ma3 = ta.ema(close, 50)
+ma5 = ta.ema(close, 200)
+
+t = time(timeframe.period, "0930-1600")
+
+buyCondition  = ma1 > ma2 and ma2 > ma3 and close > ma3 // and na(t) and strategy.position_size == 0 
+sellCondition = ma1 < ma2 and ma2 < ma3 and close < ma3 // and na(t) and strategy.position_size == 0
+
+if sellCondition // and ma3 > ma5
+    strategy.entry(id="ES", direction=strategy.short)
+    if (strategy.position_size > 0)
+        strategy.close("EL")
+
+if buyCondition // and ma3 < ma5
+    strategy.entry(id="EL", direction=strategy.long)
+    if (strategy.position_size > 0)
+        strategy.close("ES")
+
+if (strategy.position_size > 0)
+    long_profit = strategy.position_avg_price * (1 + pctProfit)
+    long_stop = strategy.position_avg_price * (1 - pctLoss)
+    if close >= long_profit
+        strategy.exit(id='PROFIT LONG 1', from_entry="EL", limit=long_profit, comment="EL Profit")
+    if close <= long_stop
+        strategy.exit(id="STOP LONG", from_entry="EL", stop=long_stop, comment="EL Stop")
+
+if (strategy.position_size < 0)
+    short_profit = strategy.position_avg_price * (1 - pctProfit)
+    short_stop = strategy.position_avg_price * (1 + pctLoss)
+    if close <= short_profit
+        strategy.exit(id='PROFIT SHORT 1', from_entry="ES", limit=short_profit, comment="ES Profit")
+    if close >= short_stop
+        strategy.exit(id="STOP SHORT", from_entry="ES", stop=short_stop, comment="ES Stop")

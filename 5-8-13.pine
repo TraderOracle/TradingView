@@ -1,0 +1,13 @@
+//@version=4
+study(title="5-8-13", overlay=true, shorttitle="5-8-13")
+
+upwardsBR = ema(close, 5) > ema(close, 8) and close > ema(close, 13)
+downwardsBR = ema(close, 5) < ema(close, 8) and close < ema(close, 13)
+
+showUpBR = upwardsBR and not upwardsBR[1]
+showDownBR = downwardsBR and not downwardsBR[1]
+
+plotshape(showUpBR ? hl2 : na, title="Buy", text="5-8-13", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.rgb(59, 72, 210), textcolor=color.white)
+
+plotshape(showDownBR ? hl2 : na, title="Sell", text="5-8-13", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.rgb(216, 85, 233), textcolor=color.white)
+

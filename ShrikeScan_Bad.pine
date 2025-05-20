@@ -1,0 +1,391 @@
+//@version=6
+import TradingView/ta/9
+indicator("Shrike Scan", overlay=true)
+
+iBBThreshold = input.float(0.0015, minval=0.0, title="Bollinger Lower Threshold", tooltip="0.003 for daily, 0.0015 for 30 min candles", group="General Settings")
+RSILower = input.int(25, minval=1, title="RSI Lower Threshold", tooltip="Normally 25", group="General Settings")
+RSIUpper  = input.int(72, minval=1, title="RSI Upper Threshold", tooltip="Normally 75", group="General Settings")
+
+smEMA = input.int(21, "Standard EMA", minval=1, group="Indicator Settings")
+bigEMA = input.int(200, "Longer EMA", minval=1, group="Indicator Settings")
+rsiLen = input.int(14, "RSI Length", minval=1, group="Indicator Settings")
+bbLength = input.int(20, "Bollinger Length",  minval=1, group="Indicator Settings")
+bbMultiplier = input.float(2, "Bollinger Multiplier", minval=0.1, step=0.1, group="Indicator Settings")
+sensitivity = input.int(150, title="Sensitivity", group="WAE")
+
+sym = "NASDAQ:AAPL"
+
+UltimeBuySell() =>
+    result = 0
+    showAllMA = false
+    showBasisPlot = false
+    showWatchSignals = true
+
+    requireWatchSignals = true
+    watchSignalLookback = 35
+    useSignalWaiting = false
+    signalWaitPeriod = 5
+
+    rsiSource = close
+    rsiLength = 32
+    rsiMaType = "RMA"
+    rsiMaType1 = "WMA"
+    rsiBasisLength = 32
+    rsiMultiplier = 2
+    wmaLength = 3
+    useRsiWatchSignals = true
+    priceBasisLength = 20
+    priceMaType = "SMA"
+    priceInnerMultiplier = 2
+    priceOuterMultiplier = 2.5
+    usePriceBandWatchSignals = true
+    atrPeriod = 30
+    maPeriod = 10
+    atrMult = 1.5
+    atrMaType = "WMA"
+    useAtrWatchSignals = true
+
+    useRsiSignals = true
+    use75Signals = true
+    use25Signals = true
+    useRsiMa = true
+    rsiMaLength = 24
+    rsiMaType2 = "WMA"
+
+    filterBuySell = true
+    fast_length = 12
+    slow_length = 26
+    signal_length = 9
+    sma_source = "EMA"
+    sma_signal = "EMA"
+
+    atrValue = ta.atr(atrPeriod)
+    atrMaValue = ta.wma(close, maPeriod) // atrMa(close, maPeriod, atrMaType)
+
+    upperAtrBand = atrMaValue + atrValue * atrMult
+    middleAtrBand = atrMaValue
+    lowerAtrBand = atrMaValue - atrValue * atrMult
+
+    bbUpper = atrMaValue + atrValue + atrMult * ta.stdev(close, maPeriod)
+    bbLower = atrMaValue - atrValue - atrMult * ta.stdev(close, maPeriod)
+
+    fast_ma = ta.ema(close, fast_length) // maType(close, fast_length, sma_source)
+    slow_ma = ta.ema(close, slow_length) // maType(close, slow_length, sma_source)
+    macd = fast_ma - slow_ma
+    signal = ta.ema(macd, signal_length) // maType(macd, signal_length, sma_signal)
+    hist = macd - signal
+
+    up = ta.rma(math.max(ta.change(rsiSource), 0), rsiLength)
+    down = ta.rma(-math.min(ta.change(rsiSource), 0), rsiLength)
+    rsi = down == 0 ? 100 : up == 0 ? 0 : 100 - (100 / (1 + up / down))
+
+    rsiBasis = ta.wma(rsi, rsiBasisLength) // rsiMa(rsi, rsiBasisLength, rsiMaType1)
+    rsiDeviation = ta.stdev(rsi, rsiBasisLength)
+
+    upperRsi = rsiBasis + rsiMultiplier * rsiDeviation
+    lowerRsi = rsiBasis - rsiMultiplier * rsiDeviation
+
+    rsiMa = ta.wma(rsi, rsiMaLength)
+    //priceMa(src, Length, type) =>
+    //    switch type
+    //        "SMA" => ta.sma(src, Length)
+    //        "EMA" => ta.ema(src, Length)
+    //        "WMA" => ta.wma(src, Length)
+    //        "HMA" => ta.hma(src, Length)
+    //        "VWMA" => ta.vwma(src, Length)
+    //        "RMA" => ta.rma(src, Length)
+
+    //calculateBollingerBands(src, priceBasisLength, priceInnerMultiplier, priceOuterMultiplier, priceMaType) =>
+    //    priceBasis = priceMa(src, priceBasisLength, priceMaType)
+    //    priceInnerDeviation = priceInnerMultiplier * ta.stdev(src, priceBasisLength)
+    //    priceOuterDeviation = priceOuterMultiplier * ta.stdev(src, priceBasisLength)
+    //    [priceBasis, priceBasis + priceInnerDeviation, priceBasis - priceInnerDeviation, priceBasis + priceOuterDeviation, priceBasis - priceOuterDeviation]
+
+    priceBasis = ta.sma(close, priceBasisLength)
+    priceInnerDeviation = priceInnerMultiplier * ta.stdev(close, priceBasisLength)
+    priceOuterDeviation = priceOuterMultiplier * ta.stdev(close, priceBasisLength)
+    upperPriceInner = priceBasis + priceInnerDeviation
+    lowerPriceInner = priceBasis - priceInnerDeviation
+    upperPriceOuter = priceBasis + priceOuterDeviation
+    lowerPriceOuter = priceBasis - priceOuterDeviation
+
+    priceCrossOverInner = ta.crossover(close, lowerPriceInner) // Price over outer band
+    priceCrossUnderInner = ta.crossunder(close, upperPriceInner) // Price under outer band
+
+    rsiCrossOverLower = ta.crossover(rsi, lowerRsi) // RSI over lower band
+    rsiCrossUnderUpper = ta.crossunder(rsi, upperRsi) // RSI under upper band
+
+    rsiCrossOverBasis = ta.crossover(rsi, rsiBasis)
+    rsiCrossUnderBasis = ta.crossunder(rsi, rsiBasis)
+
+    rsiCrossOverMa = ta.crossover(rsi, rsiMa)
+    rsiCrossUnderMa = ta.crossunder(rsi, rsiMa)
+
+    rsiCrossUnder75 = ta.crossunder(rsi, 75) // RSI crossunder 75
+    rsiCrossUnder70 = ta.crossunder(rsi, 70) // RSI crossunder 70
+    rsiCrossUnder50 = ta.crossunder(rsi, 50) // RSI crossover 50
+    rsiCrossOver50 = ta.crossover(rsi, 50) // RSI crossover 50
+    rsiCrossOver30 = ta.crossover(rsi, 30) // RSI crossover 30
+    rsiCrossOver25 = ta.crossover(rsi, 25) // RSI crossover 25
+
+    priceCrossOverBasis = ta.crossover(close, priceBasis)
+    priceCrossUnderBasis = ta.crossunder(close, priceBasis)
+
+    macdBuy = ta.crossover(macd, signal)
+    macdSell = ta.crossunder(macd, signal)
+
+    highUnderAtrLower = ta.crossunder(high, lowerAtrBand)
+    lowOverAtrUpper = ta.crossover(low, upperAtrBand)
+
+    watchesInsideYellowRsi = false
+    buyAndSellInsideYellowRsi = false
+
+    var bool bought = false
+    var bool sold = false
+    var bool signalsBlocked = false
+    var int[] buyWatchArray = array.new_int(na)
+    var int[] sellWatchArray = array.new_int(na)
+    var int lastSignalBarIndex = na
+    bool plotBuy = false
+    bool plotSell = false
+    bool plotBuyBG = false
+    bool plotSellBG = false
+
+    buyWatch1 = (usePriceBandWatchSignals) and (priceCrossOverInner and not rsiCrossOverLower) and (barstate.isconfirmed) and (not watchesInsideYellowRsi) and (not signalsBlocked)
+    buyWatch2 = (useRsiWatchSignals) and (rsiCrossOverLower and not priceCrossOverInner) and (barstate.isconfirmed) and (not watchesInsideYellowRsi) and (not signalsBlocked)
+    buyWatch3 = (usePriceBandWatchSignals) and (priceCrossOverInner and rsiCrossOverLower) and (barstate.isconfirmed) and (not watchesInsideYellowRsi) and (not signalsBlocked)
+    buyWatch4 = (usePriceBandWatchSignals) and (priceCrossOverInner) and (barstate.isconfirmed) and (not watchesInsideYellowRsi) and (not signalsBlocked)
+    buyWatch5 = (useRsiWatchSignals) and (rsiCrossOverLower) and (barstate.isconfirmed) and (not watchesInsideYellowRsi) and (not signalsBlocked)
+    buyWatch6 = (useRsiWatchSignals) and (rsiCrossOver25) and (barstate.isconfirmed) and (not watchesInsideYellowRsi) and (not signalsBlocked)
+    buyWatch7 = (useAtrWatchSignals and highUnderAtrLower) and (barstate.isconfirmed) and (not watchesInsideYellowRsi) and (not signalsBlocked)
+
+    sellWatch1 = (usePriceBandWatchSignals) and (priceCrossUnderInner and not rsiCrossUnderUpper) and (barstate.isconfirmed) and (not watchesInsideYellowRsi) and (not signalsBlocked)
+    sellWatch2 = (useRsiWatchSignals) and (rsiCrossUnderUpper and not priceCrossUnderInner) and (barstate.isconfirmed) and (not watchesInsideYellowRsi) and (not signalsBlocked)
+    sellWatch3 = (usePriceBandWatchSignals) and (priceCrossUnderInner and rsiCrossUnderUpper) and (barstate.isconfirmed) and (not watchesInsideYellowRsi) and (not signalsBlocked)
+    sellWatch4 = (usePriceBandWatchSignals) and (priceCrossUnderInner) and (barstate.isconfirmed) and (not watchesInsideYellowRsi) and (not signalsBlocked)
+    sellWatch5 = (useRsiWatchSignals) and (rsiCrossUnderUpper) and (barstate.isconfirmed) and (not watchesInsideYellowRsi) and (not signalsBlocked)
+    sellWatch6 = (useRsiWatchSignals) and (rsiCrossUnder75) and (barstate.isconfirmed) and (not watchesInsideYellowRsi) and (not signalsBlocked)
+    sellWatch7 = (useAtrWatchSignals) and (lowOverAtrUpper) and (barstate.isconfirmed) and (not watchesInsideYellowRsi) and (not signalsBlocked)
+
+    bool buyWatched = buyWatch1 or buyWatch2 or buyWatch3 or buyWatch4 or buyWatch5 or buyWatch6 or buyWatch7 // or buyWatch8
+    bool sellWatched = sellWatch1 or sellWatch2 or sellWatch3 or sellWatch4 or sellWatch5 or sellWatch6 or sellWatch7 // or sellWatch8
+
+    array.push(buyWatchArray, buyWatched ? 1 : na)
+    array.push(sellWatchArray, sellWatched ? 1 : na)
+
+    while array.size(buyWatchArray) > watchSignalLookback
+        array.shift(buyWatchArray)
+    while array.size(sellWatchArray) > watchSignalLookback
+        array.shift(sellWatchArray)
+
+    buyWatchSumMet = (array.sum(buyWatchArray) >= 1) 
+    sellWatchSumMet = (array.sum(sellWatchArray) >= 1) 
+
+    buyWatchMet = (buyWatchSumMet)
+    sellWatchMet = (sellWatchSumMet)
+
+    combinedBuySignals = rsiCrossOverBasis or rsiCrossOver25 or rsiCrossOverMa // or buySignal7 or buySignal8
+    combinedSellSignals = rsiCrossUnderBasis or rsiCrossUnder75 or rsiCrossUnderMa // or sellSignal7 or sellSignal8
+
+    buySignals = ((not requireWatchSignals and combinedBuySignals) or (requireWatchSignals and buyWatchMet and combinedBuySignals))
+    sellSignals = ((not requireWatchSignals and combinedSellSignals) or (requireWatchSignals and sellWatchMet and combinedSellSignals))
+
+    if (buySignals) and (not buyAndSellInsideYellowRsi) and (not buyWatched) and (not signalsBlocked)
+        plotBuyBG := true
+    else if (sellSignals) and (not buyAndSellInsideYellowRsi) and (not sellWatched) and (not signalsBlocked) 
+        plotSellBG := true
+    else 
+        plotBuyBG := false
+        plotSellBG := false
+
+    if (buySignals) and (barstate.isconfirmed) and (not buyAndSellInsideYellowRsi) and (not buyWatched) and (not signalsBlocked)
+        bought := true
+        sold := false
+        plotBuy := true
+        lastSignalBarIndex := bar_index
+        array.clear(buyWatchArray)
+        array.clear(sellWatchArray)
+    else if (sellSignals) and (barstate.isconfirmed) and (not buyAndSellInsideYellowRsi) and (not sellWatched) and (not signalsBlocked) 
+        sold := true
+        bought := false
+        plotSell := true
+        lastSignalBarIndex := bar_index
+        array.clear(sellWatchArray)
+        array.clear(buyWatchArray)
+    else 
+        plotBuy := false
+        plotSell := false
+
+    bBigBuy1 = plotBuy or plotBuy[1] or plotBuy[2] or plotBuy[3]
+    bBigSell1 = plotSell or plotSell[1] or plotSell[2] or plotSell[3]
+
+    result := bBigBuy1 ? 1 : bBigSell1 ? -1 : 0
+
+    result
+
+Trampoline() =>
+    result = 0
+    isRed = close < open
+    isGreen = close > open
+
+    basisBB = ta.sma(close, 20)
+    devBB = 2.0 * ta.stdev(close, 20)
+    upperBB = basisBB + devBB
+    lowerBB = basisBB - devBB
+    downBB = low < lowerBB or high < lowerBB
+    upBB = low > upperBB or high > upperBB
+    bbw = (upperBB - lowerBB) / basisBB
+
+    up = ta.rma(math.max(ta.change(close), 0), 14)
+    down = ta.rma(-math.min(ta.change(close), 0), 14)
+    rsiM = down == 0 ? 100 : up == 0 ? 0 : 100 - (100 / (1 + up / down))
+
+    back1 = isRed[1] and rsiM[1] <= 25 and close[1] < lowerBB[1] and bbw[1] > 0.0015
+    back2 = isRed[2] and rsiM[2] <= 25 and close[2] < lowerBB[2] and bbw[2] > 0.0015
+    back3 = isRed[3] and rsiM[3] <= 25 and close[3] < lowerBB[3] and bbw[3] > 0.0015
+    back4 = isRed[4] and rsiM[4] <= 25 and close[4] < lowerBB[4] and bbw[4] > 0.0015
+    back5 = isRed[5] and rsiM[5] <= 25 and close[5] < lowerBB[5] and bbw[5] > 0.0015
+
+    for1 = isGreen[1] and rsiM[1] >= 72 and close[1] > upperBB[1] and bbw[1] > 0.0015
+    for2 = isGreen[2] and rsiM[2] >= 72 and close[2] > upperBB[2] and bbw[2] > 0.0015
+    for3 = isGreen[3] and rsiM[3] >= 72 and close[3] > upperBB[3] and bbw[3] > 0.0015
+    for4 = isGreen[4] and rsiM[4] >= 72 and close[4] > upperBB[4] and bbw[4] > 0.0015
+    for5 = isGreen[5] and rsiM[5] >= 72 and close[5] > upperBB[5] and bbw[5] > 0.0015
+
+    weGoUp = isGreen and (back1 or back2 or back3 or back4 or back5) and (high > high[1])
+    upThrust = weGoUp and not weGoUp[1] and not weGoUp[2] and not weGoUp[3] and not weGoUp[4]
+    weGoDown = isRed and (for1 or for2 or for3 or for4 or for5) and (low < low[1])
+    downThrust = weGoDown and not weGoDown[1] and not weGoDown[2] and not weGoDown[3] and not weGoDown[4]
+    result := upThrust ? 1 : downThrust ? -1 : 0
+
+    result
+
+BBUpper0(len, m) =>
+    float basis = ta.sma(close, len)
+    float dev = m * ta.stdev(close, len)
+    basis + dev
+
+BBLower0(len, m) =>
+    float basis = ta.sma(close, len)
+    float dev = m * ta.stdev(close, len)
+    basis - dev
+
+BBUpper1(len, m) =>
+    float basis = ta.sma(close[1], len)
+    float dev = m * ta.stdev(close[1], len)
+    basis + dev
+
+BBLower1(len, m) =>
+    float basis = ta.sma(close[1], len)
+    float dev = m * ta.stdev(close[1], len)
+    basis - dev
+
+calc_macd0() =>
+    fastMA = ta.ema(close, 20)
+    slowMA = ta.ema(close, 40)
+    fastMA - slowMA
+
+calc_macd1() =>
+    fastMA = ta.ema(close[1], 20)
+    slowMA = ta.ema(close[1], 40)
+    fastMA - slowMA
+
+findGreenGaps() =>
+    bool isGreens = close > open and close[1] > open[1] and close[2] > open[2]
+    bool hasGap = isGreens and open > close[1] and open[1] > close[2]
+    bool foundTwoMore = false
+
+    if hasGap
+        for i = 2 to 20
+            // if we find a green gap, leave
+            bool isGreensR = close[i] > open[i] 
+            bool hasGapG = isGreensR and open[i] > close[i+1]
+            if (isGreensR and hasGapG)
+                break
+
+            bool isRed0 = close[i] < open[i] 
+            bool isRed1 = close[i+1] < open[i+1] 
+            bool hasGapR = isRed0 and open[i] < close[i+1]
+            bool hasGapR2 = isRed1 and open[i+1] < close[i+2]
+
+            if(hasGapR and hasGapR2)
+                foundTwoMore := true
+                break
+                
+    hasGap and foundTwoMore
+
+findRedGaps() =>
+    bool isReds = close < open and close[1] < open[1] and close[2] < open[2]
+    bool hasGap = isReds and open < close[1] and open[1] < close[2]
+    bool foundTwoMore = false
+    
+    if hasGap
+        for i = 2 to 20
+            // if we find a red gap, leave
+            bool isRedsR = close[i] < open[i] 
+            bool hasGapR = isRedsR and open[i] < close[i+1]
+            if (isRedsR and hasGapR)
+                break
+
+            bool isGreen0 = close[i] > open[i] 
+            bool isGreen1 = close[i+1] > open[i+1] 
+            bool hasGapG = isGreen0 and open[i] > close[i+1]
+            bool hasGapG2 = isGreen1 and open[i+1] > close[i+2]
+
+            if(hasGapG and hasGapG2)
+                foundTwoMore := true
+                break
+
+    hasGap and foundTwoMore
+
+//updateFIVEminute(sym) =>
+tf = timeframe.period
+
+[Open, Close, High, Low, POpen, PClose, PHigh, PLow, VWAP, Ema, Ema200, rsiM, prsiM, Atr, basisBB, pbasisBB, upper, lower, pupper, plower, macd0, macd1, bShiftG, bShiftR] = request.security(sym, tf, [open, close, high, low, open[1], close[1], high[1], low[1], ta.vwap(close), ta.ema(close, smEMA), ta.ema(close, bigEMA), ta.rsi(close, rsiLen), ta.rsi(close[1], rsiLen), ta.atr(14), ta.sma(close, bbLength), ta.sma(close[1], bbLength), BBUpper0(20,2), BBLower0(20,2), BBUpper1(20,2), BBLower1(20,2), calc_macd0(), calc_macd1(), findGreenGaps(), findRedGaps()]) 
+ 
+[yoTramp, yoBuySell] = request.security(sym, tf, [Trampoline(), UltimeBuySell()]) 
+
+//[Open, Close, High, Low, POpen, PClose, PHigh, PLow, VWAP, Ema, Ema200, rsiM, prsiM, Atr, basisBB, pbasisBB] = request.security(sym, tf, [open, close, high, low, open[1], close[1], high[1], low[1], ta.vwap(close), ta.ema(close, smEMA), ta.ema(close, bigEMA), ta.rsi(close, rsiLen), ta.rsi(close[1], rsiLen), ta.atr(14), ta.sma(close, bbLength), ta.sma(close[1], bbLength)]) 
+ 
+isRed0 = Close < Open
+isRed1 = PClose < POpen
+isGreen0 = Close > Open
+isGreen1 = PClose > POpen
+
+// WADDAH EXPLOSION
+t1 = (macd0 - macd1) * sensitivity
+e1 = (upper - lower)
+
+
+// TRAMPOLINE
+bbw = (upper - lower) / basisBB
+pbbw = (pupper - plower) / pbasisBB
+
+back1 = isRed1 and prsiM <= RSILower and PClose < plower and pbbw > iBBThreshold
+for1 = isGreen1 and prsiM >= RSIUpper and PClose > pupper and pbbw > iBBThreshold
+weGoUp = isGreen0 and back1 and High > PHigh
+GreenTramp = weGoUp and not weGoUp[1] and not weGoUp[2] and not weGoUp[3] and not weGoUp[4]
+weGoDown = isRed0 and for1 and Low < PLow
+RedTramp = weGoDown and not weGoDown[1] and not weGoDown[2] and not weGoDown[3] and not weGoDown[4]
+atrUp = GreenTramp ? High + Atr * 1.2 : High + Atr * 1.6
+atrDown = GreenTramp ? Low - Atr * 1.6 : Low - Atr * 1.2
+
+plotshape(yoTramp == 1 ? hl2 : na, title="Tramp", text="Tramp", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.rgb(46, 173, 84), textcolor=color.white)
+plotshape(yoTramp == -1 ? hl2 : na, title="Tramp", text="Tramp", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.rgb(173, 46, 69), textcolor=color.white)
+
+// CANDLE GAP AT THE BOLLINGER BAND
+bGreenGapAtBB = isGreen0 and isGreen1 and Open > PClose and PLow < plower
+bRedGapAtBB = isRed0 and isRed1 and Open < PClose and PHigh > pupper
+
+plotshape(bGreenGapAtBB ? hl2 : na, title="Gap", text="Gap", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.rgb(46, 173, 84), textcolor=color.white)
+plotshape(bRedGapAtBB ? hl2 : na, title="Gap", text="Gap", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.rgb(173, 46, 69), textcolor=color.white)
+
+plotshape(bShiftG ? hl2 : na, title="Shift", text="Shift", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.rgb(46, 173, 84), textcolor=color.white)
+plotshape(bShiftR ? hl2 : na, title="Shift", text="Shift", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.rgb(173, 46, 69), textcolor=color.white)
+
+plotchar(yoBuySell == 1 ? 1 : na, char="➊", location=location.belowbar, color=color.rgb(0, 255, 132), size=size.tiny, title="Strong Buy Signal")
+plotchar(yoBuySell == -1 ? 1 : na, char="➊", location=location.abovebar, color=color.rgb(255, 0, 0), size=size.tiny, title="Strong Sell Signal")
+
+//if barstate.islast
+ //   updateFIVEminute("NASDAQ:AAPL")
+

@@ -1,0 +1,158 @@
+// Credit @HomelessLemon and @Violents
+
+//@version=4
+
+study("Renko Scalping Idea", shorttitle="Renko Scalping Idea", overlay=true)
+
+iRed = 0
+iGreen = 0
+
+c1 = color.new(#26a69a, 25)
+c2 = color.new(#ef5350, 25)
+
+cTrans = 90
+
+cGreen1 = color.new(#d1fa02, cTrans)
+cGreen2 = color.new(#b0fa02, cTrans)
+cGreen3 = color.new(#82fa02, cTrans)
+cGreen4 = color.new(#17fa02, cTrans)
+
+cYellow = color.new(#baa100, cTrans)
+
+cRed1 = color.new(#fa7a02, cTrans)
+cRed2 = color.new(#fa4d02, cTrans)
+cRed3 = color.new(#fa2c02, cTrans)
+cRed4 = color.new(#fa0202, cTrans)
+
+count = 1 * 5
+maNumber = 16
+
+getMa(c)=>
+    l = count + (1 * c)
+    sma(close, l)
+
+sma6 =  maNumber >= 6  ? getMa(5 ) : na
+sma7 =  maNumber >= 7  ? getMa(6 ) : na
+sma8 =  maNumber >= 8  ? getMa(7 ) : na
+sma9 =  maNumber >= 9  ? getMa(8 ) : na
+sma10 = maNumber >= 10 ? getMa(9 ) : na
+sma11 = maNumber >= 11 ? getMa(10) : na
+sma12 = maNumber >= 12 ? getMa(11) : na
+sma13 = maNumber >= 13 ? getMa(12) : na
+sma14 = maNumber >= 14 ? getMa(13) : na
+sma15 = maNumber >= 15 ? getMa(14) : na
+sma16 = maNumber >= 16 ? getMa(15) : na
+sma17 = maNumber >= 17 ? getMa(16) : na
+sma18 = maNumber >= 18 ? getMa(17) : na
+sma19 = maNumber >= 19 ? getMa(18) : na
+sma20 = maNumber >= 20 ? getMa(19) : na
+sma21 = maNumber >= 21 ? getMa(20) : na
+
+if (sma6 <= close)
+    iGreen := iGreen + 1 
+else
+    iRed := iRed + 1
+if (sma7 <= close)
+    iGreen := iGreen + 1 
+else
+    iRed := iRed + 1
+if (sma8 <= close)
+    iGreen := iGreen + 1 
+else
+    iRed := iRed + 1
+if (sma9 <= close)
+    iGreen := iGreen + 1 
+else
+    iRed := iRed + 1
+if (sma10 <= close)
+    iGreen := iGreen + 1 
+else
+    iRed := iRed + 1
+if (sma11 <= close)
+    iGreen := iGreen + 1 
+else
+    iRed := iRed + 1
+if (sma12 <= close)
+    iGreen := iGreen + 1 
+else
+    iRed := iRed + 1
+if (sma13 <= close)
+    iGreen := iGreen + 1 
+else
+    iRed := iRed + 1
+if (sma14 <= close)
+    iGreen := iGreen + 1 
+else
+    iRed := iRed + 1
+if (sma15 <= close)
+    iGreen := iGreen + 1 
+else
+    iRed := iRed + 1
+if (sma16 <= close)
+    iGreen := iGreen + 1 
+else
+    iRed := iRed + 1
+if (sma17 <= close)
+    iGreen := iGreen + 1 
+else
+    iRed := iRed + 1
+if (sma18 <= close)
+    iGreen := iGreen + 1 
+else
+    iRed := iRed + 1
+if (sma19 <= close)
+    iGreen := iGreen + 1 
+else
+    iRed := iRed + 1
+if (sma20 <= close)
+    iGreen := iGreen + 1 
+else
+    iRed := iRed + 1
+if (sma21 <= close)
+    iGreen := iGreen + 1 
+else
+    iRed := iRed + 1
+
+if (iRed > 14)
+    c1 := color.new(#ff2a2a, cTrans)
+    c2 := color.new(#ff2a2a, 0)
+else if (iGreen > 10)
+    c1 := color.new(color.lime, cTrans)
+    c2 := color.lime
+else
+    c1 := color.new(color.yellow, cTrans)
+
+// WAE - Waddah Attar Explosion v1 by LazyBear
+
+sensitivity = input(150, title="Sensitivity", group="WAE")
+fastLength=input(20, title="FastEMA Length", group="WAE")
+slowLength=input(40, title="SlowEMA Length", group="WAE")
+channelLength=input(20, title="BB Channel Length", group="WAE")
+multWAE=input(2.0, title="BB Stdev Multiplier", group="WAE")
+DeadZone=input(3.7, title="Dead Zone Multiplier", group="WAE")
+
+DEAD_ZONE = nz(rma(tr(true),400)) * DeadZone
+
+calc_macd(source, fastLength, slowLength) =>
+    fastMA = ema(source, fastLength)
+    slowMA = ema(source, slowLength)
+    fastMA - slowMA
+
+calc_BBUpper(source, length, mult) => 
+    basis = sma(source, length)
+    dev = mult * stdev(source, length)
+    basis + dev
+
+calc_BBLower(source, length, mult) => 
+    basis = sma(source, length)
+    dev = mult * stdev(source, length)
+    basis - dev
+
+t1 = (calc_macd(close, fastLength, slowLength) - calc_macd(close[1], fastLength, slowLength))*sensitivity
+e1 = (calc_BBUpper(close, channelLength, multWAE) - calc_BBLower(close, channelLength, multWAE))
+
+trendUp = (t1 >= 0) ? t1 : 0
+trendDown = (t1 < 0) ? (-1*t1) : 0
+
+barcolor((trendUp >= 120 or trendDown >= 120)? c2: c1)
+plot(sma6, color = (trendUp >= 120 or trendDown >= 120)? c2: c1, title="MA21", linewidth=2, style=plot.style_line)

@@ -1,0 +1,225 @@
+//@version=4
+strategy(title="ReneStrategy v1.1")
+
+iMACDGreen = input(-0.000044, title="MACD Green", group="Settings")
+iSQGreen = input(-0.000066, title="Squeeze Green", group="Settings")
+pctProfit = input(0.1, title="Take Profit Percent", group="Settings") * 0.01
+pctLoss = input(0.9, title="Stop Loss Percent", group="Settings") * 0.01
+iWaitGreenBar = input(true, title="Wait for 1st Green Bar", group="Settings")
+
+// IMPULSE MACD
+lengthMA = input(10, title="Length MA", group="Impulse MACD")
+lengthSignal = input(9, title="Length Signal", group="Impulse MACD")
+
+calc_smma(src, len) =>
+    smma = 0.0
+	smma := na(smma[1]) ? sma(src, len) : (smma[1] * (len - 1) + src) / len
+    smma
+
+calc_zlema(src, length) =>
+	ema1 = ema(src, length)
+	ema2 = ema(ema1, length)
+	d = ema1 - ema2
+	ema1 + d
+
+src=hlc3
+hi=calc_smma(high, lengthMA)
+lo=calc_smma(low, lengthMA)
+mi=calc_zlema(src, lengthMA) 
+
+md=(mi>hi)? (mi-hi) : (mi<lo) ? (mi - lo) : 0
+sb=sma(md, lengthSignal)
+sh=md-sb
+mdc= src > mi ? src > hi ? color.lime : color.green : src < lo ? color.red : color.orange
+
+// SQZMOM
+lengthSQ = input(10, title="BB Length", group="Squeeze Momentum")
+mult = input(8.0,title="BB MultFactor", group="Squeeze Momentum")
+lengthKC=input(14, title="KC Length", group="Squeeze Momentum")
+multKC = input(1.5, title="KC MultFactor", group="Squeeze Momentum")
+useTrueRange = input(true, title="Use TrueRange (KC)", group="Squeeze Momentum")
+
+sourceSQ = close
+basisSQ = sma(sourceSQ, lengthSQ)
+dev1 = multKC * stdev(sourceSQ, lengthSQ)
+upperBB = basisSQ + dev1
+lowerBB = basisSQ - dev1
+ma = sma(sourceSQ, lengthKC)
+rangeQ = useTrueRange ? tr : (high - low)
+rangema = sma(rangeQ, lengthKC)
+upperKC = ma + rangema * multKC
+lowerKC = ma - rangema * multKC
+avg1 = avg(highest(high, lengthKC), lowest(low, lengthKC))
+avg2 = avg(avg1, sma(close,lengthKC))
+valSQ = linreg(close - avg2, lengthKC, 0)
+
+// TTF - Trend Trigger Factor script may be freely distributed under the MIT license.
+
+lengthTTF = input(title="Lookback Length", defval=7, group="TTF")
+upperLevel = input(title="Upper Trigger Level", defval=120, minval=1, group="TTF")
+lowerLevel = input(title="Lower Trigger Level", defval=-100, maxval=-1, group="TTF")
+highlightBreakouts = input(title="Highlight Overbought/Oversold Breakouts ?", defval=false, group="TTF")
+srcTTF = input(title="Source", defval=close, group="TTF")
+
+hhTTF = highest(lengthTTF)
+llTTF = lowest(lengthTTF)
+
+buyPower = hhTTF - nz(llTTF[lengthTTF])
+sellPower = nz(hhTTF[lengthTTF]) - llTTF
+ttf = 200 * (buyPower - sellPower) / (buyPower + sellPower) 
+
+// WAE - Waddah Attar Explosion v1 by LazyBear
+sensitivity = input(150, title="Sensitivity", group="WAE")
+fastLength=input(20, title="FastEMA Length", group="WAE")
+slowLength=input(40, title="SlowEMA Length", group="WAE")
+channelLength=input(20, title="BB Channel Length", group="WAE")
+multWAE=input(2.0, title="BB Stdev Multiplier", group="WAE")
+DeadZone=input(3.7, title="Dead Zone Multiplier", group="WAE")
+
+DEAD_ZONE = nz(rma(tr(true),400)) * DeadZone
+
+calc_macd(source, fastLength, slowLength) =>
+    fastMA = ema(source, fastLength)
+    slowMA = ema(source, slowLength)
+    fastMA - slowMA
+
+calc_BBUpper(source, length, mult) => 
+    basis = sma(source, length)
+    dev = mult * stdev(source, length)
+    basis + dev
+
+calc_BBLower(source, length, mult) => 
+    basis = sma(source, length)
+    dev = mult * stdev(source, length)
+    basis - dev
+
+t1 = (calc_macd(close, fastLength, slowLength) - calc_macd(close[1], fastLength, slowLength))*sensitivity
+e1 = (calc_BBUpper(close, channelLength, multWAE) - calc_BBLower(close, channelLength, multWAE))
+
+trendUp = (t1 >= 0) ? t1 : 0
+trendDown = (t1 < 0) ? (-1*t1) : 0
+
+// EMA SLOPE By Pedro Braconnot
+smoothBars = input(3, 'Smooth Bars', minval=1, group="EMA Slope")
+maLength = input(24, 'MA Length', minval=1, group="EMA Slope")
+noTZone = input(true, 'No Trade Zone Threshold', group="EMA Slope")
+maDL = input(24, 'NTZ Threshold', step=1, minval=1, group="EMA Slope")
+hLineHeight = maDL
+maType = input('EMA', 'MA Type', options=['SMA', 'EMA', 'DEMA', 'TEMA', 'WMA', 'VWMA', 'SMWMA', 'SWMA', 'HMA'], group="EMA Slope")
+srcES = input(close, 'MA Source', group="EMA Slope")
+
+fma(type, src, _len) =>
+    float result = 0
+    if type == 'SMA'
+        result := sma(src, _len)
+        result
+    if type == 'EMA'  // Exponential
+        result := ema(src, _len)
+        result
+    if type == 'DEMA'
+        e = ema(src, _len)
+        result := 2 * e - ema(e, _len)
+        result
+    if type == 'TEMA'
+        e = ema(src, _len)
+        result := 3 * (e - ema(e, _len)) + ema(ema(e, _len), _len)
+        result
+    if type == 'WMA'
+        result := wma(src, _len)
+        result
+    if type == 'VWMA'
+        result := vwma(src, _len)
+        result
+    if type == 'SMWMA'  // Smoothed
+        w = wma(src, _len)
+        wb = sma(src, _len)
+        result := na(w[1]) ? wb : (w[1] * (_len - 1) + src) / _len
+        result
+    if type == 'SWMA'  // Symmetrically weighted
+        result := swma(src)
+        result
+    if type == 'HMA'
+        result := wma(2 * wma(src, _len / 2) - wma(src, _len), round(sqrt(_len)))
+        result
+    result
+
+maES = fma(maType, srcES, maLength)
+maDF = maES - maES[smoothBars]
+
+fmaDf(ma, maDF) =>
+    maMax = highest(maDF,500)
+    maMin = lowest(maDF,500)
+    ma_range = maMax - maMin
+    maDf = 100 * maDF / ma_range
+    maDf
+
+maDf = fmaDf(ma, maDF)
+maAcce = abs(maDf - maDf[1]) * smoothBars * 2
+maAccHt = highest(maAcce, 200)
+maAcc = 50 * maAcce / maAccHt
+inChannel = (maDf < hLineHeight) and (maDf > -hLineHeight) and ((maDf[1] >= hLineHeight) or  (maDf[1] <= -hLineHeight))
+cUP = color.rgb(38, 255, 72, 50)
+cUPb = color.rgb(38, 255, 52, 40)
+cLP = color.rgb(255, 20, 20, 40)
+cLPb = color.rgb(229, 18, 18, 40)
+cNTZ = color.rgb(186, 167, 167, 70)
+colorS = maDf > 0 ? cUP : maDf < 0 ? cLP : cNTZ
+
+f_colorN(maDf, maDL, cUP, cUPb, cLP, cLPb, cNTZ) =>
+    colorN = color.rgb(38, 255, 72, 75)
+    colorN := maDf > 0 and maDf > maDL and maDf > maDf[1] ? cUPb : maDf > 0 and maDf > maDL and maDf <= maDf[1] ? cUP : maDf > 0 and maDf <= maDL ? cNTZ : maDf <= 0 and maDf < -maDL and maDf > maDf[1] ? cLPb : maDf <= 0 and maDf < -maDL and maDf <= maDf[1] ? cLP : maDf > -maDL ? cNTZ : na
+    colorN
+
+c_ntz = noTZone ? f_colorN(maDf, maDL, cUP, cUPb, cLP, cLPb, cNTZ) : colorS
+trspa = ((100 - maDL) - maAcc * 2)
+c_Acc = maAcc > 0.3 * maAcc and maDf > 0 ? color.rgb(10, 246, 255, trspa) : maAcc > 0.3 * maAcc  and maDf < 0 ? color.rgb(239, 2, 77, trspa) : color.rgb(160, 160, 160, trspa)
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=    FINAL PLOTS    =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
+cIMACDColor = md < iMACDGreen ? color.green : color.new(color.gray, 70) 
+cSQColor = valSQ < iSQGreen ? color.green : color.new(color.gray, 70) 
+cTTFColor = ttf < lowerLevel ? color.green : color.new(color.gray, 70) 
+cWColor = e1 > DEAD_ZONE ? color.green : color.new(color.gray, 70) 
+cESColor = maDf < maDL * -1 ? color.green : color.new(color.gray, 70) 
+
+iHighScore = 0
+if cIMACDColor == color.green 
+    iHighScore := iHighScore + 1
+if cSQColor == color.green 
+    iHighScore := iHighScore + 1
+if cTTFColor == color.green 
+    iHighScore := iHighScore + 1
+if cWColor == color.green 
+    iHighScore := iHighScore + 1
+if cESColor == color.green 
+    iHighScore := iHighScore + 1
+
+Fourof5Color = (iHighScore >= 4) ? color.lime : color.new(color.gray, 100)
+
+bGreenCandle = close > open and close[1] <= open[1]
+if (not bGreenCandle and iWaitGreenBar)
+    Fourof5Color := color.new(color.gray, 100)
+
+if (Fourof5Color == color.lime)
+    strategy.entry("EL", strategy.long, comment="Long")
+
+plot(Fourof5Color == color.lime ? 1 : na, title="Long")
+
+if (strategy.position_size > 0)
+    long_profit = strategy.position_avg_price * (1 + pctProfit)
+    long_stop = strategy.position_avg_price * (1 - pctLoss)
+    if close >= long_profit
+        strategy.exit(id='PROFIT LONG 1', from_entry="EL", limit=long_profit, comment="EL Profit")
+    if close <= long_stop
+        strategy.exit(id="STOP LONG", from_entry="EL", stop=long_stop, comment="EL Stop")
+
+plot(close >= (strategy.position_avg_price * (1 + pctProfit)) ? 2: na, title="Long")
+
+plot(141.5, title = "4 Meters Align", style=plot.style_circles, color=Fourof5Color, linewidth=3)
+
+plot(111.5, title="Impulse MACD", style=plot.style_circles, color=cIMACDColor, linewidth=2)
+plot(117.5, title="Squeeze", style=plot.style_circles, color=cSQColor, linewidth=2)
+plot(123.5, title="TTF", style=plot.style_circles, color=cTTFColor, linewidth=2)
+plot(129.5, title="WAE", style=plot.style_circles, color=cWColor, linewidth=2)
+plot(135.5, title="Slope", style=plot.style_circles, color=cESColor, linewidth=2)
+

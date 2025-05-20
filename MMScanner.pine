@@ -1,0 +1,169 @@
+// @version=6
+indicator("MarketMaker Scanner", overlay=true)
+import TradingView/ta/10
+
+MQzones = input.text_area("", "Paste MarketMaker values (format: $NQ1: name,value ...)")
+
+tP = input.string("Top Right", "Table Position", options=["Top Center","Bottom Center","Top Right", "Top Left", "Bottom Right", "Bottom Left"], group="Settings")
+sFontSize = input.string(title="Font Size: ", options=["Tiny", "Small", "Normal", "Large"], defval="Small", group="Settings")
+txtC = input.color(defval=color.new(color.white, 20),title = "Text Color", group="Settings") 
+greenC = input.color(defval=color.new(color.green, 50),title = "Green Color", group="Settings") 
+redC = input.color(defval=color.new(color.red, 50),title = "Red Color", group="Settings") 
+yellowC = input.color(defval=color.new(color.yellow, 50),title = "Yellow Color", group="Settings") 
+
+bool showMQRev = input.bool(true, "Show Reversals", group="Paid Lines")
+bool showMQWick = input.bool(true, "Show Wicks", group="Paid Lines")
+bool showOnlyBB = input.bool(false, "ONLY Show when at BB extreme)", group="Paid Lines")
+
+stLength = input.int(11, "RSI Length", minval=1, group="Indicator Settings")
+rsiOB = input.int(80, "RSI Overbought Value", minval=1, group="Indicator Settings")
+rsiOS = input.int(20, "RSI Oversold Value", minval=1, group="Indicator Settings")
+stMultiplier = input.int(2, "SuperTrend Multiplier", minval=0, step=1, group="Indicator Settings")
+rsiLen = input.int(11, "SuperTrend Length", minval=1, group="Indicator Settings")
+bbLength = input.int(20, "Bollinger Length",  minval=1, group="Indicator Settings")
+bbMultiplier = input.float(2, "Bollinger Multiplier", minval=0.1, step=0.1, group="Indicator Settings")
+BBtouchTolerance = input.float(0.05, "BB Touch Tolerance (%)", minval=0, step=0.01, group="Indicator Settings") / 100
+
+mapMQ = map.new<float, string>()
+
+bg = color.new(color.black, 100)
+
+tPos = tP == "Top Left" ? position.top_left : tP == "Bottom Right" ? position.bottom_right : tP == "Bottom Left" ? position.bottom_left : tP == "Top Center" ? position.top_center : tP == "Bottom Center" ? position.bottom_center : position.top_right
+myFont = sFontSize == "Tiny" ? size.tiny : sFontSize == "Small" ? size.small : sFontSize == "Normal" ? size.normal : sFontSize == "Large" ? size.large : size.auto
+
+// Create Table
+var table myTable = table.new(tPos, 17, 20, bgcolor = color.new(color.black, 100), frame_width = 1, frame_color = color.gray, border_width = 1, border_color = color.gray)
+
+// Header
+table.cell(myTable, 1, 1, "Ticker", text_color=txtC, bgcolor=bg, text_size=myFont)
+table.cell(myTable, 2, 1, "MenthorQ Alerts", text_color=txtC, bgcolor=bg, text_size=myFont)
+
+rowG = 2
+
+findMQMap(float Close, float Open, float POpen, float PClose, float High, float Low, float PHigh, float PLow) =>
+    log.info("findMQMap with array size " + str.tostring(map.size(mapMQ)))
+    result = ""
+    bRed = Close < Open
+    bGreen = Open < Close
+    bPRed = PClose < POpen
+    bPGreen = POpen < PClose
+
+    if showMQRev and not showMQWick
+        keys = map.keys(mapMQ)
+        for i = 0 to array.size(keys) - 1
+            keyValue = array.get(keys, i) // 1D Min, key=5659.67
+            if (bGreen and bPRed and High > keyValue and Low < keyValue and PHigh > keyValue and PLow < keyValue)
+                result := map.get(mapMQ, keyValue)
+                break
+            else if (bPGreen and bRed and High > keyValue and Low < keyValue and PHigh > keyValue and PLow < keyValue)
+                result := map.get(mapMQ, keyValue)
+                break
+
+    if showMQWick
+        keys = map.keys(mapMQ)
+        for i = 0 to array.size(keys) - 1
+            keyValue = array.get(keys, i) // 1D Min, key=5659.67
+            if ((High > keyValue and Close < keyValue) or (High > keyValue and Open < keyValue))
+                result := map.get(mapMQ, keyValue)
+                break
+    result
+
+loadUpMQMap(comma) =>
+    log.info("loadUpMQMap started " + str.tostring(comma))
+    map.clear(mapMQ)
+    // $ES1!: HVL, 5725, 1D Min, 5659.67, HVL 0DTE, 5715, GEX 9, 5830, GEX 10, 5820
+    for i = 0 to array.size(comma) - 2 by 2
+        valueStr = str.trim(array.get(comma, i))
+        key = str.trim(array.get(comma, i+1))
+        valueNum = str.tonumber(key)
+        map.put(mapMQ, valueNum, valueStr)
+    log.info("loadUpMQMap finished with " + str.tostring(map.size(mapMQ)))
+
+parseMQLines(string sTicker, float Close) =>
+    log.info("parseMQLines = '" + sTicker + "', close = " + str.tostring(Close))
+    string[] _pair = str.split(MQzones, "\n")
+    string result = ""
+    for s in _pair
+        sw = s
+        if str.contains(sw, ":")
+            string[] parts = str.split(sw, ":")
+            sTick = array.get(parts, 0) // $HG1!: 
+            sw := array.get(parts, 1) // SD2, 5.0530, HV, 5.1130, VAH, 5.2195, VAL, 5.0060
+            if str.contains(sTick, sTicker)
+                sw := str.trim(sw)
+                string[] comma = str.split(sw, ", ") // vix r1, 5788, vix r2, 5793
+                loadUpMQMap(comma)
+    result
+
+
+updateTable(sym, oo) =>
+    row = rowG 
+    tf = timeframe.period
+    string[] xxx = str.split(sym, ":")
+    sins = oo // array.get(xxx, 1)
+
+    [basisBB, devBB, Open, Close, High, Low, POpen, PClose, PHigh, PLow, tickRSI] = request.security(sym, tf, [ta.sma(close, bbLength), ta.stdev(close, bbLength), open, close, high, low, open-1, close-1, high-1, low-1, ta.rsi(close, rsiLen)]) 
+
+    // Old school BB calculation, to avoid another request.security
+    tickBBUpper = basisBB + devBB
+    tickBBLower = basisBB - devBB
+    
+    //[middle, tickBBUpper, tickBBLower] = request.security(sym, tf, ta.bb(close, bbLength, bbMultiplier))
+
+    upWick50PercentLarger = Close > Open and math.abs(High - Close) > math.abs(Open - Close)
+    downWick50PercentLarger = Close < Open and math.abs(Low - Close) > math.abs(Open - Close)
+
+    col = 1
+    sC = color.white
+    table.cell(myTable, col, row, sins, text_color=txtC, bgcolor=bg, text_size=myFont)
+
+    parseMQLines(sins, Close)
+
+    string homies = findMQMap(Close, Open, POpen, PClose, High, Low, PHigh, PLow)
+    log.info("parseMQLines homies = '" + homies + "'")
+
+    if (homies != '')
+        homies := "Bounced off " + homies
+        sC := Close > Open ? greenC : Close < Open ? redC : color.black
+    else
+        sC := color.black
+    col := col + 1
+    table.cell(myTable, col, row, homies, text_color=txtC, bgcolor=sC, text_size=myFont)
+
+    if (true)    
+        tickDayOpen = request.security(sym, "1D", open)
+        col := col + 1
+        percentChange = ta.changePercent(Close, tickDayOpen)
+        sC := percentChange > 0 ? greenC : redC
+        table.cell(myTable, col, row, "CH: " + str.tostring(percentChange, "#.##"), text_color=txtC, bgcolor=sC, text_size=myFont)
+
+    if (true)
+        col := col + 1
+        sC := tickRSI > rsiOB ? greenC : tickRSI < rsiOS ? redC : color.black
+        colTTT = tickRSI > rsiOB ? txtC : tickRSI < rsiOS ? txtC : color.new(color.gray, 10)
+        table.cell(myTable, col, row, "RSI", text_color=colTTT, bgcolor=sC, text_size=myFont)
+
+    if (true)
+        col := col + 1
+        tickTouchingUpperBB = High > tickBBUpper //* BBtouchTolerance
+        tickTouchingLowerBB = Low < tickBBLower //* BBtouchTolerance
+        tickTouchingBB = tickTouchingUpperBB or tickTouchingLowerBB
+        sC := tickTouchingUpperBB ? greenC : tickTouchingLowerBB ? redC : bg
+        colTTT = tickTouchingBB ? txtC : color.new(color.gray, 10)
+        table.cell(myTable, col, row, "BB Touch", text_color=colTTT, bgcolor=sC, text_size=myFont)
+
+
+if barstate.islast
+    rowG := 1
+
+    updateTable("TVC:VIX", "VIX")
+    rowG := rowG + 1
+    updateTable("CME_MINI:ES1!", "ES")
+    rowG := rowG + 1
+    updateTable("CME_MINI:NQ1!", "NQ")
+    rowG := rowG + 1
+    updateTable("CME_MINI:RTY1!", "RTY")
+    rowG := rowG + 1
+    updateTable("COMEX:GC1!", "GC")
+    rowG := rowG + 1
+    updateTable("NYMEX:CL1!", "CL")

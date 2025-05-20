@@ -1,0 +1,94 @@
+//@version=4
+strategy("Green Hulk Strategy", overlay=true)
+
+///////////////////////////////////////////////////
+
+// Movivated by this video by Serious Backtester: https://www.youtube.com/watch?v=lXYGrhZcYBc
+// The Hulk has been many colors, other than green.  But this is entitled Green Hulk, due to only LONGs with this strategy
+// This strategy works best on DAILY candles.  One hour was ok, but anything lower than an hour candle performed poorly
+
+// MACD
+[currMacd,_,_] = macd(close[0], 12, 26, 9)
+[prevMacd,_,_] = macd(close[1], 12, 26, 9)
+signal = ema(currMacd, 9)
+
+// STOCHASTIC RSI
+rsiSR = rsi(close, 14)
+kSR = sma(stoch(rsiSR, rsiSR, rsiSR, 14), 3)
+dSR = sma(kSR, 3)
+
+// RSI with moving average
+up = rma(max(change(close), 0), 14)
+down = rma(-min(change(close), 0), 14)
+rsi = down == 0 ? 100 : up == 0 ? 0 : 100 - (100 / (1 + up / down))
+rsiMA = ema(rsi, 14)
+
+// If MACD is crossing up
+macdGood = (cross(currMacd, signal) and currMacd > signal and currMacd <= 2)
+// And Stochastic between 20 and 80
+stochGood = dSR > 19 and dSR < 80
+// And Stochastic recently below 20 (last 10 bars)
+stochRecent = dSR[1] < 20 or dSR[2] < 20 or dSR[3] < 20 or dSR[4] < 20 or dSR[5] < 20 or dSR[6] < 20 or dSR[7] < 20 or dSR[8] < 20 or dSR[9] < 20
+// And RSI above the MA
+rsiGood = rsi > rsiMA
+
+buySignal = macdGood and stochGood and stochRecent and rsiGood
+buyMe = buySignal and not buySignal[1]
+
+plotshape(buyMe ? close : na, title="Hulk", text="Hulk", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.rgb(40, 154, 71), textcolor=color.white)
+
+/////////////////////////////////////////////////////////////////
+
+TimeWindow=time(timeframe.period,"1400-1900", "GMT")
+
+if (buySignal and TimeWindow)
+    strategy.entry("Trade", strategy.long, comment="Long")
+//if (showSell78 and TimeWindow)
+//    strategy.entry("Trade", strategy.short, comment="Short")
+
+trailSource         = input(title="Trail Source", defval="Lows/Highs", options=["Lows/Highs", "Close", "Open"], confirm=true, group="Strategy")
+trailMethod         = input(title="Trail Method", defval="ATR", options=["ATR", "Percent"], confirm=true, group="Strategy")
+trailPercent        = input(title="Trail Percent", defval=10, minval=0.1, confirm=true, group="Strategy")
+swingLookback       = input(title="Lookback", defval=7, confirm=true, group="Strategy")
+atrPeriod           = input(title="ATR Period", defval=14, confirm=true, group="Strategy")
+atrMultiplier       = input(title="ATR Multiplier", defval=1.0, confirm=true, group="Strategy")
+barTime             = input(title="Bar Time", defval=timestamp("01 Jan 2021 13:30 +0000"), confirm=true, group="Strategy")
+
+var float trailPrice    = na
+float next_trailPrice   = na
+
+atrValue                = atr(atrPeriod) * atrMultiplier
+float swingLow          = lowest(low, swingLookback)
+float swingHigh         = highest(high, swingLookback)
+
+
+if trailMethod == "ATR"
+    if trailSource == "Close" 
+        next_trailPrice := strategy.position_size > 0 ? close - atrValue : close + atrValue
+    else if trailSource == "Open" 
+        next_trailPrice := strategy.position_size > 0 ? open - atrValue : open + atrValue
+    else
+        next_trailPrice := strategy.position_size > 0 ? swingLow - atrValue : swingHigh + atrValue
+
+if trailMethod == "Percent" 
+    float percentMulti = strategy.position_size > 0 ? (100 - trailPercent) / 100 : (100 + trailPercent) / 100
+    if trailSource == "Close" 
+        next_trailPrice := close * percentMulti
+    else if trailSource == "Open" 
+        next_trailPrice := open * percentMulti
+    else
+        next_trailPrice := strategy.position_size > 0 ? swingLow * percentMulti : swingHigh * percentMulti
+
+if strategy.position_size != 0 and barstate.isconfirmed
+    if (next_trailPrice > trailPrice or na(trailPrice)) and strategy.position_size > 0
+        trailPrice := next_trailPrice
+    if (next_trailPrice < trailPrice or na(trailPrice)) and strategy.position_size < 0
+        trailPrice := next_trailPrice
+
+plot(strategy.position_size != 0 ? trailPrice : na, color=color.red, title="Trailing Stop")
+
+strategy.exit(id="Trail Exit", from_entry="Trade", limit=na, stop=trailPrice)
+
+if (strategy.position_size > 0 and close < trailPrice) or (strategy.position_size < 0 and close > trailPrice)
+    strategy.close("Trade")
+

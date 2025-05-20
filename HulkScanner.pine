@@ -1,0 +1,90 @@
+//@version=6
+indicator("HULK Scanner", overlay=true)
+// vim: syntax=pine
+
+// Movivated by this video by Serious Backtester: https://www.youtube.com/watch?v=lXYGrhZcYBc
+// The Hulk has been many colors, other than green.  But this is entitled Green Hulk, due to only LONGs with this strategy
+// This strategy works best on DAILY candles.  One hour was ok, but anything lower than an hour candle performed poorly
+
+bool bf = input.bool(true, "PERIOD MUST BE SET TO ONE DAY !", group="Pay the fuck attention")
+bool bNASDAQ = input.bool(true, "Scan NASDAQ", group="Stocks to scan")
+bool bNYSE = input.bool(false, "Scan NYSE", group="Stocks to scan")
+bool bGold = input.bool(false, "Scan Commodities", group="Stocks to scan")
+
+var tbl = table.new(position.top_right, 2, 50)
+table.cell(tbl, 0, 0, "Ticker", width = 5, height = 2, text_color = color.orange, text_size = size.tiny)
+table.cell(tbl, 1, 0, "Last Hulk", bgcolor = color.rgb(0, 0, 0), width = 5, height = 2, text_color = color.orange, text_size = size.tiny)
+var int iRow = 1
+
+GreenHulk(pair) =>
+    [currMacd, tickM2, tickMacdHist] = request.security(pair, "1D", ta.macd(close, 12, 26, 9))
+    //rsiSR = request.security(pair, "1D", ta.rsi(close, 14))
+    //dSR = request.security(pair, "1D", ta.sma(ta.stoch(ta.rsi(close, 14), ta.rsi(close, 14), ta.rsi(close, 14), 14), 3))
+    [Close, signal, kSR, up, down, rsiMA] = request.security(pair, "1D", [close, ta.ema(currMacd, 9), ta.sma(ta.sma(ta.stoch(ta.rsi(close, 14), ta.rsi(close, 14), ta.rsi(close, 14), 14), 3), 3), ta.rma(math.max(ta.change(close), 0), 14), ta.rma(-math.min(ta.change(close), 0), 14), ta.ema(ta.rsi(close, 14), 14)])
+
+	rsi = down == 0 ? 100 : up == 0 ? 0 : 100 - (100 / (1 + up / down))
+	macdGood = (ta.cross(currMacd, signal) and currMacd > signal and currMacd <= 2)
+
+	stochGood = dSR > 19 and dSR < 80
+	stochRecent = dSR[1] < 20 or dSR[2] < 20 or dSR[3] < 20 or dSR[4] < 20 or dSR[5] < 20 or dSR[6] < 20 or dSR[7] < 20 or dSR[8] < 20 or dSR[9] < 20
+	rsiGood = rsi > rsiMA
+	buySignal = macdGood and stochGood and stochRecent and rsiGood
+	buyMe = buySignal and not buySignal[1]
+    buyMe
+
+InvestCheck(pair, row) =>
+    Time = time(timeframe.period)
+    color Cl = month(Time) == month(timenow) and year(Time) == year(timenow) and dayofmonth(Time) == dayofmonth(timenow)-1 ? color.lime : color.white
+    if GreenHulk(pair) and row < 40 and month(Time) == month(timenow) and year(Time) == year(timenow)
+        table.cell(tbl, 0, row, pair,  bgcolor = color.rgb(0, 0, 0), width = 5, height = 2, text_color = Cl, text_size = size.tiny)
+        table.cell(tbl, 1, row, str.tostring(month(Time)) + "/" + str.tostring(dayofmonth(Time)) + "/" + str.tostring(year(Time)), bgcolor = color.rgb(0, 0, 0), width = 5, height = 2, text_color = Cl, text_size = size.tiny)
+        row + 1
+    else
+        row
+
+if bNASDAQ
+	iRow := InvestCheck("NASDAQ:NVDA", iRow)
+	iRow := InvestCheck("NASDAQ:TSLA", iRow)
+	iRow := InvestCheck("NASDAQ:AAPL", iRow)
+	iRow := InvestCheck("NASDAQ:NFLX", iRow)
+	iRow := InvestCheck("NASDAQ:MSFT", iRow)
+	iRow := InvestCheck("NASDAQ:GOOGL", iRow)
+	iRow := InvestCheck("NASDAQ:COST", iRow)
+	iRow := InvestCheck("NASDAQ:DLTR", iRow)
+	iRow := InvestCheck("NASDAQ:ADBE", iRow)
+	iRow := InvestCheck("NASDAQ:META", iRow)
+	iRow := InvestCheck("NASDAQ:AMD", iRow)
+	iRow := InvestCheck("NASDAQ:COIN", iRow)
+	iRow := InvestCheck("NASDAQ:MSTR", iRow)
+	iRow := InvestCheck("NASDAQ:MU", iRow)
+	iRow := InvestCheck("NASDAQ:SBUX", iRow)
+	iRow := InvestCheck("NASDAQ:QCOM", iRow)
+
+
+if bNYSE
+	//iRow := InvestCheck("NYSE:BABA", iRow)
+	//iRow := InvestCheck("NYSE:SNAP", iRow)
+	//iRow := InvestCheck("NYSE:NKE", iRow)
+	//iRow := InvestCheck("NYSE:UBER", iRow)
+	//iRow := InvestCheck("NYSE:DIS", iRow)
+	//iRow := InvestCheck("NYSE:WMT", iRow)
+	//iRow := InvestCheck("NYSE:DELL", iRow)
+	//iRow := InvestCheck("NYSE:CMG", iRow)
+	//iRow := InvestCheck("NYSE:JPM", iRow)
+	//iRow := InvestCheck("NYSE:BAC", iRow)
+	//iRow := InvestCheck("NYSE:PFE", iRow)
+	//iRow := InvestCheck("NYSE:INFY", iRow)
+	//iRow := InvestCheck("NYSE:MCD", iRow)
+
+if bGold
+	//iRow := InvestCheck("AMEX:GDX", iRow)
+	//iRow := InvestCheck("AMEX:GLD", iRow)
+	//iRow := InvestCheck("AMEX:SLV", iRow)
+	//iRow := InvestCheck("AMEX:COPX", iRow)
+	//iRow := InvestCheck("AMEX:CMDY", iRow)
+	//iRow := InvestCheck("AMEX:DBA", iRow)
+	//iRow := InvestCheck("AMEX:OIH", iRow)
+	//iRow := InvestCheck("AMEX:VTI", iRow)
+
+plotshape(false ? close : na, title="Hulk", text="Hulk", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.rgb(40, 154, 71), textcolor=color.white)
+

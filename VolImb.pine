@@ -1,0 +1,15 @@
+//@version=6
+indicator(title="VolImb Dots", shorttitle="VolImb Dots", overlay=true, max_bars_back = 1000, max_lines_count = 500, max_labels_count = 500)
+
+redCandle = close < open
+greenCandle = close > open
+
+if (redCandle and barstate.isconfirmed)
+    if (redCandle[1] and open < close[1])
+        plotshape(1, title="E", text="E", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.red, textcolor=color.white)
+
+if (greenCandle and barstate.isconfirmed)
+    if (greenCandle[1] and open > close[1])
+        plotshape(1, title="E", text="E", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.green, textcolor=color.white)
+
+alertcondition(bNewGap, "Volume Imbalance Drop", "Volume Imbalance Drop")

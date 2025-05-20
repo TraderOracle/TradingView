@@ -1,0 +1,672 @@
+// © Elite Algo v28
+
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+
+// @version=5
+
+indicator("Elite Algo v28", shorttitle="Elite Algo v28", overlay = true, precision=0, explicit_plot_zorder=true, max_labels_count=500)
+
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+// ------------------------------------ User Inputs ----------------------------------------------------------------------------------------- }}
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+
+signalGroup      = "Signal Settings"
+overlayGroup     = "Chart Overlays"
+dashboardGroup   = "Trend Dashboard"
+advancedGroup    = "Advanced Settings"
+alertGroup       = "Any Alert() Function Call"
+
+// ----------------------------------- }}
+// ------------- signal settings ----- }}
+// ----------------------------------- }}
+
+signalMode         = input.string('Ai Mode', 'Signal Mode⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀', ['Trend Mode', "Ai Mode", 'None'],
+     group = signalGroup, tooltip='Change Your Signal Appearance And Strategies')
+
+sensitivity        = input.float(15, "Sensitivity⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀ ⠀", 1, 100, step=1,
+      group = signalGroup, inline = 'sig1') 
+//autoMaximizer    = input.bool(false, "Auto Tuner", tooltip='Change Your Tuning For Trend Signals...\n\nAutomatically Set To Best Backtested Sensitivity', inline = 'sig1', group="signal settings")
+
+agility            = input.string('Auto Pilot', 'Agility %', ['Auto Pilot', 'High', 'Medium', 'Low', 'Strict'],
+      group = signalGroup, tooltip='Change how often you signals are displayed based on this % system')
+
+enableCandle       = input.bool(true, "", group = signalGroup, inline = "candles1")
+CandleColor        = input.string('Gradient Trend', 'Candle Coloring⠀⠀⠀⠀⠀⠀', ['Gradient Trend', 'TrendEdge'], group = signalGroup, inline = "candles1")
+
+enableStructures   = input.bool(false, "", group = signalGroup, inline = "structure1")
+marketStructures   = input.string("Reversals", "Market Structures⠀⠀⠀ ⠀", ["Reversals", "Engulfing", "Reversals + Eg"], group = signalGroup, inline = "structure1")
+
+
+
+// ----------------------------------- }}
+// ------------- chart overlays ------ }}
+// ----------------------------------- }}
+
+EckoCloud         = input.bool(false, "Ecko Cloud", "Toggle On/Off Cloud on your chart as a slow moving cloud that identifies the longerterm trend", group = overlayGroup)
+
+radientAssistance = input.bool(false, "Radient Assistance", "Toggle On/Off Radient Assistance; Dynamically Moving Average Great For Finding Market Bounces or Tops & Bottoms, Break Outs, Etc", group = overlayGroup)
+
+dynamicTrend      = input.bool(false, "Dynamic Trend", "Toggle On/Off The Dynamic Trailing Price Action Overlay, Great For Finding Bounce & S&R", group = overlayGroup)
+
+trendSniper       = input.bool(false, "Trend Sniper", "Toggle On/Off Trend Sniping Ma great for finding trend establishments, etc.", group = overlayGroup)
+
+reversalCloud     = input.bool(false, "ReversoWave Zones", group = overlayGroup, tooltip = "Toggle On/Off the dynamic support and resistance zones(areas) that highlight key reversal areas\n\nUse to take pre-caution!")
+
+// ----------------------------------- }}
+// ------------- trend dashboard ----- }}
+// ----------------------------------- }}
+
+showDashboard     = input(true, "Show Dashboard⠀⠀⠀⠀⠀⠀", group = dashboardGroup, inline = "dash1")
+statisticsDas     = input(false, "Statistics", group = dashboardGroup, inline = "dash1")
+locationDashboard = input.string("Bottom Right", "Location / Size", ["Top Right", "Middle Right", "Bottom Right", "Top Center", "Middle Center", "Bottom Center", "Top Left", "Middle Left", "Bottom Left"],
+     group = dashboardGroup, inline = "dash2")
+sizeDashboard     = input.string("Auto", "", ["Auto", "Large", "Normal", "Small", "Tiny"], group = dashboardGroup, inline = "dash2")
+
+// ----------------------------------- }}
+// ------------ color palletes ------- }}
+// ----------------------------------- }}
+
+colorScheme = input.string("Elite Mode", "Color Scheme", ["Standard Mode", "Bright Light", "Elite Mode", "Freezer Mode"], inline = "Color Theme", group = advancedGroup)
+aiMinimum   = input.int(0, "Ai Strength | Minimum :", 0, 5, 1, group = advancedGroup)
+
+// ----------------------------------- }}
+// ------------ risk management ------ }}
+// ----------------------------------- }}
+
+TPrisk   = 2
+TPpoints = true
+
+// ----------------------------------- }}
+// ------------- call functions ------ }}
+// ----------------------------------- }}
+
+normalbuy         = input(false, 'Buy⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀', group = alertGroup, inline='normal signals')
+normalsell        = input(false, 'Sell', 'Sends An Alert Everytime A Normal Sell Signal Is Placed \n\nSends An Alert Evertime A Normal Buy Signal Is Placed'
+       , group = alertGroup, inline='normal signals')
+strongbuy         = input(false, 'Strong Buy⠀⠀⠀⠀⠀', group = alertGroup, inline='strong signals')
+strongsell        = input(false, 'Strong Sell', 'Sends An Alert Everytime A Strong Sell Signal Is Placed \n\nSends An Alert Evertime A Strong Buy Signal Is Placed'
+       , group = alertGroup, inline='strong signals')
+
+tp1s              = input(false, 'TakeProfit(s) 1⠀ ⠀', group = alertGroup, inline='tp signals')
+tp2s              = input(false, 'TakeProfit(s) 2', 'Sends An Alert Everytime A TP1 Signal Is Placed \n\nSends An Alert Evertime A TP 2 Signal Is Placed'
+       , group = alertGroup, inline='tp signals')
+tp3s              = input(false, 'TakeProfit(s) 3⠀ ⠀', group = alertGroup, inline='tp signals2')
+tp4s              = input(false, 'TakeProfit(s) 4', 'Sends An Alert Everytime A TP3 Signal Is Placed \n\nSends An Alert Evertime A TP 4 Signal Is Placed'
+       , group = alertGroup, inline='tp signals2')
+
+revu              = input(false, 'Reversal Up⠀⠀⠀⠀', group = alertGroup, inline='rev signals')
+revd              = input(false, 'Reversal Down', 'Sends An Alert Everytime A Reversal Up Signal Placed \n\nSends An Alert Evertime A Reversal Down Signal Is Placed'
+       , group = alertGroup, inline='rev signals')
+
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+// ------------------------------------- Color Schemes -------------------------------------------------------------------------------------- }}
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+
+Light_Pallet = array.new_color(7, na)
+
+array.set(Light_Pallet, 0, color.new(#5BFF29, 0))
+array.set(Light_Pallet, 1, color.new(#affc41, 0))
+array.set(Light_Pallet, 2, color.new(#FF2937, 0))
+array.set(Light_Pallet, 3, color.new(#FF8629, 0))
+array.set(Light_Pallet, 4, color.new(#B029FF, 0))
+array.set(Light_Pallet, 5, color.new(#FF29B8, 0))
+array.set(Light_Pallet, 6, color.new(#29F8FF, 0))
+
+Default_Pallet = array.new_color(7, na)
+
+array.set(Default_Pallet, 0, color.new(#4caf50, 0))
+array.set(Default_Pallet, 1, color.new(#4caf50, 0))
+array.set(Default_Pallet, 2, color.new(#ff5252, 0))
+array.set(Default_Pallet, 3, color.new(#ff5252, 0))
+array.set(Default_Pallet, 4, color.new(color.purple, 0))
+array.set(Default_Pallet, 5, color.new(color.maroon, 0))
+array.set(Default_Pallet, 6, color.new(color.blue, 0))
+
+
+Delta_Pallet = array.new_color(7, na)
+
+array.set(Delta_Pallet, 0, color.new(#00cf4b, 0))
+array.set(Delta_Pallet, 1, color.new(#00cb0a, 0))
+array.set(Delta_Pallet, 2, color.new(#ff1100, 0))
+array.set(Delta_Pallet, 3, color.new(#c90905, 0))
+array.set(Delta_Pallet, 4, color.new(#524678, 0))
+array.set(Delta_Pallet, 5, color.new(#14b0e7, 0))
+array.set(Delta_Pallet, 6, color.new(#C4AD83, 0))
+
+
+Ice_Pallet = array.new_color(7, na)
+
+array.set(Ice_Pallet, 0, color.new(#007BBA, 0))
+array.set(Ice_Pallet, 1, color.new(#0194fe, 0))
+array.set(Ice_Pallet, 2, color.new(#F1F2F6, 0))
+array.set(Ice_Pallet, 3, color.new(#B2B0B0, 0))
+array.set(Ice_Pallet, 4, color.new(#00A9E2, 0))
+array.set(Ice_Pallet, 5, color.new(#EBEBEB, 0))
+array.set(Ice_Pallet, 6, color.new(#FF8600, 0))
+
+
+NA_Palett = array.new_color(7, na)
+
+array.set(NA_Palett, 0, color.new(color.green, 0))
+array.set(NA_Palett, 1, color.new(color.green, 0))
+array.set(NA_Palett, 2, color.new(color.red, 0))
+array.set(NA_Palett, 3, color.new(color.red, 0))
+array.set(NA_Palett, 4, color.new(color.purple, 0))
+array.set(NA_Palett, 5, color.new(color.maroon, 0))
+array.set(NA_Palett, 6, color.new(color.blue, 0))
+
+
+// Pallet Input
+
+
+// Pallet Switch
+Color_Pallet = switch colorScheme
+    "Bright Light" => Light_Pallet
+    "Standard Mode" => Default_Pallet
+    "Elite Mode" => Delta_Pallet
+    "Freezer Mode" => Ice_Pallet
+    "None" => NA_Palett
+    
+// Color Assign
+color_1 = array.get(Color_Pallet, 0) // Buy - Primary
+color_2 = array.get(Color_Pallet, 1) // Buy - Secondary
+color_3 = array.get(Color_Pallet, 2) // Sell - Primary 
+color_4 = array.get(Color_Pallet, 3) // Sell - Secondary
+color_5 = array.get(Color_Pallet, 4) // Supporting 1 
+color_6 = array.get(Color_Pallet, 5) // Supporting 2
+color_7 = array.get(Color_Pallet, 6) // Neutral 
+
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+// ------------------------------------ Signal Concepts ------------------------------------------------------------------------------------- }}
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+
+// ----------------------------------- }}
+// ----------- gloabl variables ------ }}
+// ----------------------------------- }}
+
+src = close
+
+fa(src, len, factor) => ta.ema(src, len) * (1 + factor) - ta.ema(ta.ema(src, len), len) * .7
+smoothedMA(sr , len, factor) => fa(fa(fa(src, len, factor), len, factor), len, factor) 
+
+// ----------------------------------- }}
+// ------------- signal concept ------ }}
+// ----------------------------------- }}
+
+agil = agility == 'Auto Pilot' ? 45 : agility == 'High' ? 5 : agility == 'Medium' ? 25 : agility == 'Low' ? 100 : agility == 'Strict' ? 200 : 315
+
+smoothrng(x, t, m) =>
+    wper  = t * 2 - 1
+    avrng = ta.ema(math.abs(x - x[1]), t)
+    smoothrng = ta.ema(avrng, wper) * m
+    smoothrng
+
+// signal sensitivity
+smrng     = smoothrng(close, agil, (sensitivity + 12) / 10)
+
+rngfilt(x, r) =>
+    rngfilt = x
+    rngfilt := x > nz(rngfilt[1]) ? x - r < nz(rngfilt[1]) ? nz(rngfilt[1]) : x - r : x + r > nz(rngfilt[1]) ? nz(rngfilt[1]) : x + r
+    rngfilt
+filt = rngfilt(src, smrng)
+
+Periods = 24
+Multiplier = 2
+atr = ta.sma(ta.tr, Periods)
+
+upx = hl2 - Multiplier * atr
+up1x = nz(upx[1], upx)
+upx := close[1] > up1x ? math.max(upx, up1x) : upx
+dnx = hl2 + Multiplier * atr
+dn1x = nz(dnx[1], dnx)
+dnx := close[1] < dn1x ? math.min(dnx, dn1x) : dnx
+
+trend = 1
+trend := nz(trend[1], trend)
+trend := trend == -1 and close > dn1x ? 1 : trend == 1 and close < up1x ? -1 : trend
+
+Trend = 0.0
+TrendUp = 0.0
+TrendDown = 0.0
+TrendUp := close[1] > TrendUp[1] ? math.max(upx, TrendUp[1]) : upx
+TrendDown := close[1] < TrendDown[1] ? math.min(dnx, TrendDown[1]) : dnx
+
+upward = 0.0
+upward := filt > filt[1] ? nz(upward[1]) + 1 : filt < filt[1] ? 0 : nz(upward[1])
+downward = 0.0
+downward := filt < filt[1] ? nz(downward[1]) + 1 : filt > filt[1] ? 0 : nz(downward[1])
+
+longCond      = bool(na)
+shortCond     = bool(na)
+longCond     := src > filt and src > src[1] and upward > 0 or src > filt and src < src[1] and upward > 0
+shortCond    := src < filt and src < src[1] and downward > 0 or src < filt and src > src[1] and downward > 0
+CondIni = 0
+CondIni := longCond ? 1 : shortCond ? -1 : CondIni[1]
+// ----------------------------------- }}
+// ------------ signal conditions ---- }}
+// ----------------------------------- }}
+
+buyCond         = longCond and CondIni[1] == -1 and smoothedMA(close, math.round(sensitivity * 2.25), 0.7) > close
+strongBuyCond   = longCond and CondIni[1] == -1 and smoothedMA(close, math.round(sensitivity * 2.25), 0.7) < close
+sellCond        = shortCond and CondIni[1] == 1 and smoothedMA(close, math.round(sensitivity * 2.25), 0.7) < close
+strongSellCond  = shortCond and CondIni[1] == 1 and smoothedMA(close, math.round(sensitivity * 2.25), 0.7) > close
+
+// ----------------------------------- }}
+// ----------------- ai mode --------- }}
+// ----------------------------------- }}
+
+var alrRevUp    = false, var alrRevDn    = false
+var dynamicBull = false, var dynamicBear = false
+var lowVol      = false, var highVol     = false
+
+// ----------------- conditions ------ }}
+
+Long_Signal_Strength = 0
+Short_Signal_Strength = 0 
+
+if buyCond or strongBuyCond
+    if ta.ema(close, 85) < close
+        Long_Signal_Strength += 1
+    if alrRevUp
+        Long_Signal_Strength += 1
+    if dynamicBull
+        Long_Signal_Strength += 1
+    if lowVol
+        Long_Signal_Strength += 1
+    if strongBuyCond
+        Long_Signal_Strength += 1
+
+if sellCond or strongSellCond
+    if ta.ema(close, 85) > close 
+        Short_Signal_Strength += 1
+    if alrRevDn
+        Short_Signal_Strength += 1
+    if dynamicBear
+        Short_Signal_Strength += 1
+    if highVol
+        Short_Signal_Strength += 1
+    if strongSellCond
+        Short_Signal_Strength += 1
+
+// ----------------------------------- }}
+// ------------- other variable ------ }}
+// ----------------------------------- }}
+
+y1 = low - (ta.atr(30) * 1.05), y2 = high + (ta.atr(30) * 1.05)
+
+// ----------------------------------- }}
+// ----------- Plotting Signals ------ }}
+// ----------------------------------- }}
+
+plotshape(signalMode == 'Trend Mode' ? buyCond : na, "Buy", shape.labelup, location.belowbar, color.new(color_1, 40), text = "Buy", textcolor = #ffffff, size = size.normal)
+
+plotshape(signalMode == 'Trend Mode' ? strongBuyCond : na, "Strong Buy", shape.labelup, location.belowbar, color.new(color_1, 50), text = "Strong", textcolor = #ffffff, size = size.normal)
+
+plotshape(signalMode == 'Trend Mode' ? sellCond : na, "Sell", shape.labeldown, location.abovebar, color.new(color_3, 50), text = "Sell", textcolor = #ffffff, size = size.normal)
+
+plotshape(signalMode == 'Trend Mode' ? strongSellCond : na, "Strong Sell", shape.labeldown, location.abovebar, color.new(color_3, 50), text = "Strong", textcolor = #ffffff, size = size.normal)
+
+// -------------- Label Version ---- }}
+
+//if signalMode == 'Trend Mode' and buyCond
+//    label.new(bar_index, y1, "Buy", color = color.new(#00cf4b, 35), textcolor = #ffffff, size = size.normal, style = label.style_label_up) //#363a45
+
+//if signalMode == 'Trend Mode' and strongBuyCond
+//    label.new(bar_index, y1, "Strong", color = color.new(#00cf4b, 35), textcolor = #ffffff, size = size.normal, style = label.style_label_up)
+
+//if signalMode == 'Trend Mode' and sellCond
+//    label.new(bar_index, y2, "Sell", color = color.new(#c90505, 35), textcolor = #ffffff, size = size.normal, style = label.style_label_down)
+
+//if signalMode == 'Trend Mode' and strongSellCond
+//    label.new(bar_index, y2, "Strong", color = color.new(#c90505, 35), textcolor = #ffffff, size = size.normal, style = label.style_label_down)
+
+if signalMode == 'Ai Mode' and buyCond and Long_Signal_Strength >= aiMinimum or signalMode == 'Ai Mode' and strongBuyCond and Long_Signal_Strength >= aiMinimum or signalMode == "Ai + Reversal" and buyCond and Long_Signal_Strength >= aiMinimum or signalMode == "Ai + Reversal" and strongBuyCond and Long_Signal_Strength >= aiMinimum
+    label.new(bar_index, y1, "Buy\n" + str.tostring(Long_Signal_Strength) + "★", color = color.new(color_1, 35), textcolor = #ffffff, size = size.normal, style = label.style_label_up)
+
+if signalMode == 'Ai Mode' and sellCond and Short_Signal_Strength >= aiMinimum or signalMode == 'Ai Mode' and strongSellCond and Short_Signal_Strength >= aiMinimum or signalMode == "Ai + Reversal" and sellCond and Short_Signal_Strength >= aiMinimum or signalMode == "Ai + Reversal" and strongSellCond and Short_Signal_Strength >= aiMinimum
+    label.new(bar_index, y2, str.tostring(Short_Signal_Strength) + "★" + "\nSell", color = color.new(color_4, 35), textcolor = #ffffff, size = size.normal, style = label.style_label_down)
+
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+// ------------------------------------ Candle Concepts ------------------------------------------------------------------------------------- }}
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+
+[macd, signal, hist] = ta.macd(src, math.round(sensitivity * 1.25), math.round(sensitivity * 2.5), math.round(sensitivity))
+
+color barcolor = na
+
+// terms
+
+rsi2 = ta.rsi(close, math.round(sensitivity))
+[macd2, signal2, hist2] = ta.macd(rsi2, math.round(sensitivity * 1.36), math.round(sensitivity * 2.55), math.round(sensitivity))
+
+macdHigh = ta.sma(ta.highest(hist, 100), 25)
+macdLow  = ta.sma(ta.lowest(hist, 35), 25)
+
+color gradientBull = color.from_gradient(ta.rsi(close, math.round(sensitivity)), 32, 75, #67249f, colorScheme == "Elite Mode" ? #30DC1E : color_2)
+color gradientBear = color.from_gradient(ta.rsi(close, math.round(sensitivity)), 25, 72, color_3, #67249f)
+
+// conditions change
+//if CandleColor == 'ConfirmationPlus'
+//    barcolor := macd2 > 0 and upward > downward ? #00db0a : macd2 < 0 and upward < downward ? #ff0000 : #56328f
+    //barcolor := upward > downward and hist > 0 ? #00db0a : upward < downward and hist < 0 ? #ff0000 : #7e7e7e
+
+
+if CandleColor == 'Gradient Trend'
+    barcolor := upward > downward ? gradientBull : gradientBear
+
+if CandleColor == 'TrendEdge'
+    barcolor := upward > downward ? color.new(color_1, 5) : upward < downward ? color.new(color_3, 5) : color.new(color_5, 0)
+
+barcolor(enableCandle ? barcolor : na)
+
+dimGreen = #258E40, dimRed = #C10E40
+
+
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+// -------------------------------------- Ecko Cloud  --------------------------------------------------------------------------------------- }}
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+
+fastEk = ta.ema(close, 95) + (ta.atr(2) * 0.05), slowEk = ta.ema(close, 125) - (ta.atr(11) * 0.08)
+EkF = plot(EckoCloud ? fastEk : na, editable = false, color = fastEk > slowEk ? color.new(color_1, 80) : color.new(color_3, 80))
+EkS = plot(EckoCloud ? slowEk : na, editable = false, color = fastEk > slowEk ? color.new(color_1, 80) : color.new(color_3, 80))
+
+fill(EkF, EkS, color = fastEk > slowEk ? color.new(color_1, 85) : color.new(color_3, 85), title = "Ecko Cloud")
+
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+// ------------------------------------- Trend Sniper --------------------------------------------------------------------------------------- }}
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+
+sniper = smoothrng(close, 50, 2.36)
+trndSniper = rngfilt(close, sniper)
+
+sniperUp = 0.0
+sniperUp := trndSniper > trndSniper[1] ? nz(sniperUp[1]) + 1 : trndSniper < trndSniper[1] ? 0 : nz(sniperUp[1])
+sniperDn = 0.0
+sniperDn := trndSniper < trndSniper[1] ? nz(sniperDn[1]) + 1 : trndSniper > trndSniper[1] ? 0 : nz(sniperDn[1])
+
+plot(trendSniper ? trndSniper : na, "Trend Sniper", sniperUp > sniperDn ? color.new(color_1, 5) : sniperUp <= sniperDn ? color.new(color_3, 5) : na, 2, plot.style_line)
+
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+// ------------------------------------- Dyanmics Trend ------------------------------------------------------------------------------------- }}
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+
+stopTrail(mode, src, len) =>
+    float result = 0.0
+    result := ta.sma(src, len)
+    result
+
+ATR = stopTrail(ta.sma(ta.tr, 7), ta.tr, 7)
+upperTrail = ta.sma(ta.lowest(close, 17) + 4 * ATR, 8)
+lowerTrail = ta.sma(ta.highest(close, 17) - 4 * ATR, 8)
+
+float trailingStop = 0.0
+trailingStop := close < trailingStop[1] ? upperTrail[1] : close > trailingStop[1] ? lowerTrail[1] : trailingStop
+
+//plot 
+plot(dynamicTrend ? trailingStop : na, title='Dynamic Trail', color=close < trailingStop ? color.new(color_3, 0) : color.new(color_1, 0))
+
+// ai stuff
+
+if trailingStop < close
+    dynamicBull := true
+    dynamicBear := false
+if trailingStop > close
+    dynamicBear := true
+    dynamicBull := false
+
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+// ------------------------------------ Radient Assistance ---------------------------------------------------------------------------------- }}
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+
+radientMa         = ta.ema(close, 85)
+
+plot(radientAssistance ? radientMa : na, "radientAssistance", radientMa < close ? color.new(color_1, 35) : color.new(color_3, 35), 6, editable = false)
+plot(radientAssistance ? radientMa : na, "radientAssistance", radientMa < close ? color.new(color_1, 80) : color.new(color_3, 80), 7, editable = false)
+plot(radientAssistance ? radientMa : na, "radientAssistance", radientMa < close ? color.new(color_1, 85) : color.new(color_3, 85), 8, editable = false)
+plot(radientAssistance ? radientMa : na, "radientAssistance", radientMa < close ? color.new(color_1, 90) : color.new(color_3, 89), 9, editable = false)
+plot(radientAssistance ? radientMa : na, "radientAssistance", radientMa < close ? color.new(color_1, 90) : color.new(color_3, 92), 11, editable = false)
+plot(radientAssistance ? radientMa : na, "radientAssistance", radientMa < close ? color.new(color_1, 90) : color.new(color_3, 96), 12, editable = false)
+
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+// ------------------------------------ Reversal Cloud -------------------------------------------------------------------------------------- }}
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+
+s = ta.lowest(10)
+r = ta.highest(10)
+
+[mid, up, dn] = ta.kc(r, 18, 2)
+[mid2, up2, dn2] = ta.kc(r, 10, 2.4)
+[mid3, up3, dn3] = ta.kc(r, 17, 3.7)
+
+[m, u, d] = ta.kc(s, 18, 2)
+[m2, u2, d2] = ta.kc(s, 10, 2.4)
+[m3, u3, d3] = ta.kc(s, 17, 3.7)
+
+rsiR = ta.rsi(close, 16)
+
+color topBandR = color.from_gradient(rsiR, 50, 85, color.new(#df6a26, 100), color.new(#df6a26, 35)) //#df2635
+color botBandR = color.from_gradient(rsiR, 15, 50, color.new(#07b354, 35), color.new(#07b354, 100))
+
+r1 = plot(reversalCloud ? ta.sma(up, 25) : na, color = color.new(#f74444, 80), editable = false)
+r2 = plot(reversalCloud ? ta.sma(up2, 25) + ta.atr(12) : na, color = color.new(#f74444, 100), editable = false)
+r3 = plot(reversalCloud ? ta.sma(up3, 25) + ta.atr(6) : na, color = topBandR, editable = false, linewidth = 4)
+
+s1 = plot(reversalCloud ? ta.sma(d, 25) : na, color = color.new(#4caf50, 80), editable = false)
+s2 = plot(reversalCloud ? ta.sma(d2, 25) - ta.atr(11) : na, color = color.new(#4caf50, 100), editable = false)
+s3 = plot(reversalCloud ? ta.sma(d3, 25) - ta.atr(5) : na, color = botBandR, editable = false, linewidth = 4)
+
+fill(r1, r2, title = "Reversal Cloud (R1, R2)", color = color.new(#e92d3d, 80)) //#f74444
+fill(r2, r3, title = "Reversal Cloud (R2, R3)", color = color.new(#e92d3d, 65))
+
+fill(s1, s2, title = "Reversal Cloud (S1, S2)", color = color.new(#089969, 80)) //#089969
+fill(s2, s3, title = "Reversal Cloud (S2, S3)", color = color.new(#089969, 65))
+
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+// ------------------------------------ Dashboard Concepts ---------------------------------------------------------------------------------- }}
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+
+length = 20
+smoothing = "RMA"
+length_2 = 200
+
+ma_function(source, length) =>
+	switch smoothing
+		"RMA" => ta.rma(source, length)
+		"SMA" => ta.sma(source, length)
+		"EMA" => ta.ema(source, length)
+		=> ta.wma(source, length)
+ATR_Fast = ma_function(ta.tr(true), length)
+
+ATR_Slow = ma_function(ta.tr(true), length_2)
+
+Volitility = ATR_Fast > ATR_Slow ? "High" : "Low" 
+
+if Volitility == "High"
+    highVol := true
+    lowVol  := false
+if Volitility == "Low"
+    lowVol := true
+    lowVol := false
+
+// ------------------------------------------------------------------ }}
+// ----------- Trade Backtesting ------------------------------------ }}
+// ------------------------------------------------------------------ }}
+
+//tradeBacktest() =>
+var trades = 0, var wins = 0, var losses = 0
+
+if (buyCond or strongBuyCond)
+    trades += 1
+if (sellCond or strongSellCond)
+    lastBuyValue = ta.valuewhen(buyCond or strongBuyCond, close, 0)
+    currentValue = close
+    if lastBuyValue < currentValue
+        wins += 1
+    else
+        losses += 1
+
+
+signalWinrate          = (wins / trades) * 100
+
+//trend strength
+strength   = ta.sma(nz(math.abs((open - close) / (high - low) * 100)), 10)
+
+//plotting dashboard
+var dashboard_loc  = locationDashboard == "Top Right" ? position.top_right : locationDashboard == "Middle Right" ? position.middle_right : locationDashboard == "Bottom Right" ? position.bottom_right : locationDashboard == "Top Center" ? position.top_center : locationDashboard == "Middle Center" ? position.middle_center : locationDashboard == "Bottom Center" ? position.bottom_center : locationDashboard == "Top Left" ? position.top_left : locationDashboard == "Middle Left" ? position.middle_left : position.bottom_left
+var dashboard_size = sizeDashboard == "Large" ? size.large : sizeDashboard == "Normal" ? size.normal : sizeDashboard == "Small" ? size.small : sizeDashboard == "Tiny" ? size.tiny : size.auto
+var dashboard      = showDashboard ? table.new(dashboard_loc, 4, 6, #1d1c24, #11121f, 2, color.new(#11121f, 0), 2) : na
+dashboard_cell(column, row, txt, signal=false) => table.cell(dashboard, column, row, txt, 0, 0, signal ? color.new(#ffffff, 5) : color.new(#ffffff, 5), text_size=dashboard_size)
+dashboard_cell_bg(column, row, col) => table.cell_set_bgcolor(dashboard, column, row, col)
+dashboard_txt(column, row, col) => table.cell_set_text_color(dashboard, column, row, col)
+dashboard_txt_pos(column, row, align) => table.cell_set_text_halign(dashboard, column, row, align)
+if barstate.islast and showDashboard
+    dashboard_cell(0, 0 , "Market Strength"), dashboard_txt_pos(0, 0, text.align_left)//, dashboard_cell_bg(0, 0, color.new(#000000, 25))
+    dashboard_cell(1, 0 , "Market Volatility"), dashboard_txt_pos(1, 0, text.align_left)//, dashboard_cell_bg(1, 0, color.new(#000000, 25))
+    dashboard_cell(0, 1 , str.tostring(strength, format.percent), true)//, dashboard_txt(1, 0, strength > 80 ? color.new(#7af080, 20) : strength < 20 ? color.new(#f0675d, 20) : color.new(#ffffff, 5))
+    dashboard_cell(1, 1 , Volitility), dashboard_cell_bg(1, 1, Volitility == "Low" ? #d68812 : #1c51c5)// dashboard_txt_pos(1, 1, text.align_left)
+    if statisticsDas
+        dashboard_cell(2, 0, "Profitability")
+        dashboard_cell(2, 1, str.tostring(trades, "#"))
+
+
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+// ----------------------------------- Reversal Concepts ------------------------------------------------------------------------------------ }}
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+
+rsi = ta.rsi(close, math.round(sensitivity))
+
+revU   = ta.crossover(rsi, 30)
+revD = ta.crossunder(rsi, 70)
+
+reversalUpCond = revU and not revU[1] and not revU[2] and not revU[3] and not revU[4]and not revU[5]and not revU[6]and not revU[7]and not revU[8]and not revU[9]and not revU[10]and not revU[11]and not revU[12]and not revU[13]
+reversalDownCond = revD and not revD[1] and not revD[2] and not revD[3] and not revD[4] and not revD[5] and not revD[6] and not revD[7] and not revD[8] and not revD[9] and not revD[10] and not revD[11] and not revD[12] and not revD[13]
+
+if reversalUpCond
+    alrRevUp := true
+    alrRevDn := false
+
+if reversalDownCond
+    alrRevUp := false
+    alrRevDn := true
+
+revEbull   = rsi < 40 //and open[1] < close and close[1] > open
+revEbear   = rsi > 58 //and open[1] > close and close[1] < open
+
+eBull = revEbull and open[1] > close[1] and close > open[1]
+eBear = revEbear and open[1] < close[1] and close < open[1]
+
+eBull := revEbull and open[1] > close[1] and close > open[1] and not eBull[1] and not eBull[2] and not eBull[3] and not eBull[4]
+eBear := revEbear and open[1] < close[1] and close < open[1] and not eBear[1] and not eBear[2] and not eBear[3] and not eBear[4] 
+
+plotshape(marketStructures == "Reversals" and enableStructures and reversalUpCond and barstate.isconfirmed or marketStructures == "Reversals + Eg" and enableStructures and reversalUpCond and barstate.isconfirmed, "Reversal Up Signals", shape.labelup, location.belowbar, color.new(#56328f, 38), 0, "Reversal Up", #ffffff, size=size.small)
+plotshape(marketStructures == "Reversals" and enableStructures and reversalDownCond and barstate.isconfirmed or marketStructures == "Reversals + Eg" and enableStructures and reversalDownCond and barstate.isconfirmed, "Reversal Down Signals", shape.labeldown, location.abovebar, color.new(#b22833, 38), 0, "Reversal Down", #ffffff, size=size.small)
+
+plotshape(marketStructures == "Engulfing" and enableStructures and eBull and barstate.isconfirmed or marketStructures == "Reversals + Eg" and enableStructures and eBull and barstate.isconfirmed, "Bullish Engulfing", shape.xcross, location.belowbar, color.new(#2157f3, 100), 0, "Eg ©", color.new(#089981, 65), size=size.tiny)
+plotshape(marketStructures == "Engulfing" and enableStructures and eBear and barstate.isconfirmed or marketStructures == "Reversals + Eg" and enableStructures and eBear and barstate.isconfirmed, "Bearish Engulfing", shape.xcross, location.abovebar, color.new(color.orange, 100), 0, "Eg ©", color.new(#ff5252, 65), size=size.tiny)
+
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+// ------------------------------------ TP/SL Concepts -------------------------------------------------------------------------------------- }}
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+
+lvlDistance = (2), atrLen = (14)
+trigger = buyCond or strongBuyCond ? 1 : 0, trigger2 = sellCond or strongSellCond ? 0 : 1
+
+atrBand = ta.atr(atrLen) * TPrisk
+atrStop = trigger == 1 ? low - atrBand : high + atrBand
+
+lastTrade(src) => ta.valuewhen((buyCond or strongBuyCond) or (sellCond or strongSellCond), src, 0)
+
+tp1lvl = (lastTrade(close)-lastTrade(atrStop))*0.75 + lastTrade(close)
+
+tp2lvl = (lastTrade(close)-lastTrade(atrStop))*1.75 + lastTrade(close)
+
+tp3lvl = (lastTrade(close)-lastTrade(atrStop))*2.75 + lastTrade(close)
+
+tp4lvl = (lastTrade(close)-lastTrade(atrStop))*3.75 + lastTrade(close)
+
+
+// -------------------------------------------------------------- }}
+// ---------------- Signal Concepts ----------------------------- }}
+// -------------------------------------------------------------- }}
+
+var alrTP1 = false, var alrTPS1 = false, var alrTP2 = false, var alrTPS2 = false, var alrTP3 = false, var alrTPS3 = false, var alrTP4 = false, var alrTPS4 = false
+
+TP1up   = not alrTP1 and ta.crossover(close, tp1lvl) and not sellCond and not strongSellCond and upward > downward
+TP2up   = not alrTP2 and ta.crossover(close, tp2lvl) and not sellCond and not strongSellCond and upward > downward
+TP3up   = not alrTP3 and ta.crossover(close, tp3lvl) and not sellCond and not strongSellCond and upward > downward
+TP4up   = not alrTP4 and ta.crossover(close, tp4lvl) and not sellCond and not strongSellCond and upward > downward
+TP1dn   = not alrTPS1 and ta.crossunder(close, tp1lvl) and not buyCond and not strongBuyCond and upward < downward
+TP2dn   = not alrTPS2 and ta.crossunder(close, tp2lvl) and not buyCond and not strongBuyCond and upward < downward
+TP3dn   = not alrTPS3 and ta.crossunder(close, tp3lvl) and not buyCond and not strongBuyCond and upward < downward
+TP4dn   = not alrTPS4 and ta.crossunder(close, tp4lvl) and not buyCond and not strongBuyCond and upward < downward
+
+if buyCond or strongBuyCond
+    alrTP1  := false
+    alrTPS1 := true
+    alrTP2  := false
+    alrTPS2 := true
+    alrTP3  := false
+    alrTPS3 := true
+    alrTP4  := false
+    alrTPS4 := true
+if sellCond or strongSellCond
+    alrTP1  := true
+    alrTPS1 := false
+    alrTP2  := true
+    alrTPS2 := false
+    alrTP3  := true
+    alrTPS3 := false
+    alrTP4  := true
+    alrTPS4 := false
+if TP1up
+    alrTP1  := true
+if TP2up
+    alrTP2 := true
+if TP3up
+    alrTP3 := true
+if TP4up
+    alrTP4 := true
+if TP1dn
+    alrTPS1 := true
+if TP2dn
+    alrTPS2 := true
+if TP3dn
+    alrTPS3 := true
+if TP4dn
+    alrTPS4 := true
+
+plotshape(TPpoints ? TP1up : na, 'TakeProfit 1', shape.labeldown, location.abovebar, color.new(#2157f9, 100), 0, '✗', #2157f9, true, size.tiny)
+plotshape(TPpoints ? TP2up : na, 'TakeProfit 2', shape.labeldown, location.abovebar, color.new(#2157f9, 100), 0, '✗', #2157f9, true, size.tiny)
+plotshape(TPpoints ? TP3up : na, 'TakeProfit 3', shape.labeldown, location.abovebar, color.new(#2157f9, 100), 0, '✗', #2157f9, true, size.tiny)
+plotshape(TPpoints ? TP4up : na, 'TakeProfit 4', shape.labeldown, location.abovebar, color.new(#2157f9, 100), 0, '✗', #2157f9, true, size.tiny)
+
+plotshape(TPpoints ? TP1dn : na, 'StopLoss 1', shape.labelup, location.belowbar, color.new(#ff1100, 100), 0, '✗', #ff1100, true, size.tiny)
+plotshape(TPpoints ? TP2dn : na, 'StopLoss 2', shape.labelup, location.belowbar, color.new(#ff1100, 100), 0, '✗', #ff1100, true, size.tiny)
+plotshape(TPpoints ? TP3dn : na, 'StopLoss 3', shape.labelup, location.belowbar, color.new(#ff1100, 100), 0, '✗', #ff1100, true, size.tiny)
+plotshape(TPpoints ? TP4dn : na, 'StopLoss 4', shape.labelup, location.belowbar, color.new(#ff1100, 100), 0, '✗', #ff1100, true, size.tiny)
+ 
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+// ------------------------------------ Alert Concepts -------------------------------------------------------------------------------------- }}
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+
+normBuy   = normalbuy ? buyCond         : na
+normSell  = normalsell ? buyCond        : na
+stroBuy   = strongbuy ? strongBuyCond   : na
+stroSell  = strongsell ? strongSellCond : na
+tp1Alert = tp1s ? TP1up or TP1dn : na
+tp2Alert = tp2s ? TP2up or TP2dn : na
+tp3Alert = tp3s ? TP3up or TP3dn : na
+tp4Alert = tp4s ? TP4up or TP4dn : na
+revUpAlert = revu ? reversalUpCond   : na
+revDnAlert = revd ? reversalDownCond : na
+
+alertFunction = normBuy or normSell or stroBuy or stroSell or tp1Alert or tp2Alert or tp3Alert or tp4Alert or revUpAlert or revDnAlert
+
+alertcondition(alertFunction,  alertGroup, 'Alert Triggered On {{ticker}} @ {{close}}')
+
+
+
+
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}
+// ------------------------------------ Ending Barrier -------------------------------------------------------------------------------------- }}
+// ------------------------------------------------------------------------------------------------------------------------------------------ }}

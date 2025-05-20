@@ -1,0 +1,935 @@
+//@version=5
+indicator(title="Insane Oscillator", shorttitle="Insane Oscillator v1", format=format.price, precision=2, timeframe="", timeframe_gaps=true)
+
+bShowTrend = input.bool(true, "Show trend color", group="Basic Settings")
+bShowTramp = input.bool(true, "Show trampoline", group="Basic Settings")
+bShowSqueeze = input.bool(true, "Show squeeze dot", group="Basic Settings")
+bShowBB = input.bool(true, "Show bollinger bands wicking", group="Basic Settings")
+bShowWAE = input.bool(true, "Show waddah explosion", group="Basic Settings")
+
+bShowMFI = input.bool(false, "Show MFI line", group="Basic Settings")
+bShowVector = input.bool(false, "Show vector candles", group="Basic Settings")
+//bShowHMA = input.bool(false, "Show Hull Moving Average", group="Basic Settings")
+
+threshold = input.int(120, title="WAE Threshold to trigger (lower is more sensitive)", group="Basic Settings")
+
+rsiLengthInput = input.int(14, minval=1, title="RSI Length", group="RSI Settings")
+rsiSourceInput = input.source(close, "Source", group="RSI Settings")
+rsiOS = input.int(30, minval=1, title="RSI Oversold", group="RSI Settings")
+rsiOB = input.int(70, minval=1, title="RSI Overbought", group="RSI Settings")
+
+rsiLowerW = input.int(30, "Lower Limit of RSI", minval = 1, maxval = 500, group="Wicking Settings")
+rsiUpperW = input.int(70, "Upper Limit of RSI", minval = 1, maxval = 500, group="Wicking Settings")
+
+showDivergence = true
+
+mfiLength = input.int(title="MFI Length", defval=14, minval=1, maxval=2000, group="Money Flow Index")
+mfi = ta.mfi(hlc3, mfiLength)
+
+upperColor = color.new(#787B86, 0) 
+lowerColor = color.new(#787B86, 0)
+showMeUp = false
+
+// CCI DOUBLE CROSS
+ma1 = ta.sma(hlc3, 14)
+cci1 = (hlc3 - ma1) / (0.015 * ta.dev(hlc3, 14))
+ma2 = ta.sma(hlc3, 100)
+cci2 = (hlc3 - ma1) / (0.015 * ta.dev(hlc3, 100))
+cci1WasGreen = cci1[1] > cci2[1] or cci1[2] > cci2[2] or cci1[3] > cci2[3] or cci1[4] > cci2[4] or cci1[5] > cci2[5] or cci1[6] > cci2[6] or cci1[7] > cci2[7]
+if (cci1 > cci2 and cci1 >= 100)
+	lowerColor := color.lime
+	showMeUp := true
+if (cci1 < cci2 and cci1 < -100 and cci1WasGreen)
+	upperColor := color.red
+
+up = ta.rma(math.max(ta.change(rsiSourceInput), 0), rsiLengthInput)
+down = ta.rma(-math.min(ta.change(rsiSourceInput), 0), rsiLengthInput)
+rsi = down == 0 ? 100 : up == 0 ? 0 : 100 - (100 / (1 + up / down))
+
+mfiColor = #828282
+if (mfi > 70)
+	mfiColor := color.rgb(0, 148, 76)
+if (mfi < 30)
+	mfiColor := color.rgb(147, 0, 0)
+
+plot(bShowMFI ? mfi : na, "MFI", color=mfiColor)
+
+lengthHMA = input.int(9, minval=1, title="HMA Length", group="HMA Settings")
+srcHMA = input(close, title="HMA Source", group="HMA Settings")
+hullma = ta.wma(2*ta.wma(srcHMA, lengthHMA/2)-ta.wma(srcHMA, lengthHMA), math.floor(math.sqrt(lengthHMA)))
+hmaColor = hullma > hullma[1] ? color.green : color.red
+//plot(bShowHMA ? hullma : na, color=hmaColor, linewidth=1)
+
+
+// Divergence
+lookbackRight = 5
+lookbackLeft = 5
+rangeUpper = 60
+rangeLower = 5
+bearColor = color.red
+bullColor = color.green
+textColor = color.white
+noneColor = color.new(color.white, 100)
+
+plFound = na(ta.pivotlow(rsi, lookbackLeft, lookbackRight)) ? false : true
+phFound = na(ta.pivothigh(rsi, lookbackLeft, lookbackRight)) ? false : true
+_inRange(cond) =>
+	bars = ta.barssince(cond == true)
+	rangeLower <= bars and bars <= rangeUpper
+
+rsiHL = rsi[lookbackRight] > ta.valuewhen(plFound, rsi[lookbackRight], 1) and _inRange(plFound[1])
+priceLL = low[lookbackRight] < ta.valuewhen(plFound, low[lookbackRight], 1)
+bullCondAlert = priceLL and rsiHL and plFound
+bullCond = showDivergence and bullCondAlert
+
+plotshape(
+	 bullCond ? 50 : na,
+	 offset=-lookbackRight,
+	 title="Regular Bullish Label",
+	 text=" Bull ",
+	 style=shape.labelup,
+	 location=location.absolute,
+	 color=bullColor,
+	 textcolor=textColor
+	 )
+
+rsiLH = rsi[lookbackRight] < ta.valuewhen(phFound, rsi[lookbackRight], 1) and _inRange(phFound[1])
+priceHH = high[lookbackRight] > ta.valuewhen(phFound, high[lookbackRight], 1)
+bearCondAlert = priceHH and rsiLH and phFound
+bearCond = showDivergence and bearCondAlert
+
+plotshape(
+	 bearCond ? 50 : na,
+	 offset=-lookbackRight,
+	 title="Regular Bearish Label",
+	 text=" Bear ",
+	 style=shape.labeldown,
+	 location=location.absolute,
+	 color=bearColor,
+	 textcolor=textColor
+	 )
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=   TRAMPOLINE  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+
+// Idea from "Serious Backtester" - https://www.youtube.com/watch?v=2hX7qTamOAQ
+// Defaults are optimized for 30 min candles
+
+// CONFIG
+iBBThreshold = input.float(0.0015, minval=0.0, title="Bollinger Lower Threshold", tooltip="0.003 for daily, 0.0015 for 30 min candles", group="TRAMPOLINE Settings")
+RSIThreshold = input.int(25, minval=1, title="RSI Lower Threshold", tooltip="Normally 25", group="TRAMPOLINE Settings")
+RSIDown = input.int(72, minval=1, title="RSI Upper Threshold", tooltip="Normally 75", group="TRAMPOLINE Settings")
+
+lengthBB = input.int(20, minval=1, group="TRAMPOLINE Bollinger Bands")
+srcBB = input(close, title="Source", group="TRAMPOLINE Bollinger Bands")
+multBB = input.float(2.0, minval=0.001, maxval=50, title="StdDev", group="TRAMPOLINE Bollinger Bands")
+offsetBB = input.int(0, "Offset", minval = -500, maxval = 500, group="TRAMPOLINE Bollinger Bands")
+
+isRed = close < open
+isGreen = close > open
+
+// STANDARD BOLLINGER BANDS
+basisBB = ta.sma(srcBB, lengthBB)
+devBB = multBB * ta.stdev(srcBB, lengthBB)
+upperBB = basisBB + devBB
+lowerBB = basisBB - devBB
+downBB = low < lowerBB or high < lowerBB
+upBB = low > upperBB or high > upperBB
+bbw = (upperBB - lowerBB) / basisBB
+
+back1 = isRed[1] and rsi[1] <= RSIThreshold and close[1] < lowerBB[1] and bbw[1] > iBBThreshold
+back2 = isRed[2] and rsi[2] <= RSIThreshold and close[2] < lowerBB[2] and bbw[2] > iBBThreshold
+back3 = isRed[3] and rsi[3] <= RSIThreshold and close[3] < lowerBB[3] and bbw[3] > iBBThreshold
+back4 = isRed[4] and rsi[4] <= RSIThreshold and close[4] < lowerBB[4] and bbw[4] > iBBThreshold
+back5 = isRed[5] and rsi[5] <= RSIThreshold and close[5] < lowerBB[5] and bbw[5] > iBBThreshold
+
+for1 = isGreen[1] and rsi[1] >= RSIDown and close[1] > upperBB[1] and bbw[1] > iBBThreshold
+for2 = isGreen[2] and rsi[2] >= RSIDown and close[2] > upperBB[2] and bbw[2] > iBBThreshold
+for3 = isGreen[3] and rsi[3] >= RSIDown and close[3] > upperBB[3] and bbw[3] > iBBThreshold
+for4 = isGreen[4] and rsi[4] >= RSIDown and close[4] > upperBB[4] and bbw[4] > iBBThreshold
+for5 = isGreen[5] and rsi[5] >= RSIDown and close[5] > upperBB[5] and bbw[5] > iBBThreshold
+
+weGoUp = isGreen and (back1 or back2 or back3 or back4 or back5) and (high > high[1]) and barstate.isconfirmed
+upThrust = weGoUp and not weGoUp[1] and not weGoUp[2] and not weGoUp[3] and not weGoUp[4]
+weGoDown = isRed and (for1 or for2 or for3 or for4 or for5) and (low < low[1]) and barstate.isconfirmed
+downThrust = weGoDown and not weGoDown[1] and not weGoDown[2] and not weGoDown[3] and not weGoDown[4]
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=   Squeeze Relaxer version 2.1  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+
+// Average Directional Index
+sqTolerance = input.int(2, title="Squeeze Tolerance (lower = more sensitive)", group="Relaxing Settings", tooltip="How many bars to look back on the squeeze indicator")
+adxSqueeze = input.int(21, title="ADX Threshold for TTM Squeeze", group="Relaxing Settings", tooltip="Anything over 19 filters out low volume periods. Set to 11 as a default, feel free to increase to get less noise")
+
+adxlen = input(14, title="ADX Smoothing", group="ADX")
+dilen = input(14, title="DI Length", group="ADX")
+dirmov(len) =>
+	up5 = ta.change(high)
+	down5 = -ta.change(low)
+	plusDM = na(up5) ? na : (up5 > down5 and up5 > 0 ? up5 : 0)
+	minusDM = na(down5) ? na : (down > up5 and down5 > 0 ? down5 : 0)
+	truerange = ta.rma(ta.tr, len)
+	plus = fixnan(100 * ta.rma(plusDM, len) / truerange)
+	minus = fixnan(100 * ta.rma(minusDM, len) / truerange)
+	[plus, minus]
+adx(dilen, adxlen) =>
+	[plus, minus] = dirmov(dilen)
+	sum = plus + minus
+	adx = 100 * ta.rma(math.abs(plus - minus) / (sum == 0 ? 1 : sum), adxlen)
+adxValue = adx(dilen, adxlen)
+sigabove19 = adxValue > adxSqueeze
+
+var cGreen = 0
+var cRed = 0
+var pos = false 
+var neg = false 
+
+sqlength = 20
+multQ = 2.0
+lengthKC = 20
+multKC = 1.5
+
+useTrueRange = true
+source = close
+basis = ta.sma(source, sqlength)
+dev1 = multKC * ta.stdev(source, sqlength)
+upperBBsq = basis + dev1
+lowerBBsq = basis - dev1
+ma = ta.sma(source, lengthKC)
+rangeQ = high - low
+rangema = ta.sma(rangeQ, lengthKC)
+upperKC = ma + rangema * multKC
+lowerKC = ma - rangema * multKC
+sqzOn  = (lowerBBsq > lowerKC) and (upperBBsq < upperKC)
+sqzOff = (lowerBBsq < lowerKC) and (upperBBsq > upperKC)
+noSqz  = (sqzOn == false) and (sqzOff == false)
+
+avg1 = math.avg(ta.highest(high, lengthKC), ta.lowest(low, lengthKC))
+avg2 = math.avg(avg1, ta.sma(close, lengthKC))
+val = ta.linreg(close - avg2, lengthKC, 0)
+
+pos := false
+neg := false
+
+// if squeeze is bright RED, increment by one
+if (val < nz(val[1]) and val < 5 and not sqzOn)
+    cRed := cRed + 1   
+
+// if squeeze is bright GREEN, increment by one
+if (val > nz(val[1]) and val > 5 and not sqzOn)
+    cGreen := cGreen + 1   
+
+// if bright RED squeeze is now dim, momentum has changed.  Is ADX also above 19? - add a marker to chart
+if (val > nz(val[1]) and cRed > sqTolerance and val < 5 and not pos[1] and sigabove19 == true)
+    cRed := 0
+    pos := true  
+
+// if bright GREEN squeeze is now dim, momentum has changed.  Is ADX also above 19? - add a marker to chart
+if (val < nz(val[1]) and cGreen > sqTolerance and val > 5 and not neg[1] and sigabove19 == true)
+    cGreen := 0
+    neg := true  
+
+buySignal1 = pos and barstate.isconfirmed
+sellSignal1 = neg and barstate.isconfirmed
+
+
+// JOHN WICK BOLLINGER BANDS
+wlengthBB = input.int(20, minval=1, group="Wicking Bollinger Bands")
+wsrcBB = input(close, title="Source", group="Wicking Bollinger Bands")
+wmultBB = input.float(2.5, minval=0.001, maxval=50, title="StdDev", group="Wicking Bollinger Bands")
+woffsetBB = input.int(0, "Offset", minval = -500, maxval = 500, group="Wicking Bollinger Bands")
+wbasisBB = ta.sma(wsrcBB, wlengthBB)
+wdevBB = wmultBB * ta.stdev(wsrcBB, wlengthBB)
+wupperBB = wbasisBB + wdevBB
+wlowerBB = wbasisBB - wdevBB
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=   VECTOR CANDLES  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+
+import TradersReality/Traders_Reality_Lib/2 as trLib
+
+color redVectorColor = color.rgb(255, 0, 0)
+color greenVectorColor = color.rgb(0, 255, 132)
+color violetVectorColor = color.fuchsia
+color blueVectorColor = color.rgb(83, 144, 249)
+color regularCandleUpColor = color.new(#999999, 99)
+color regularCandleDownColor = color.new(#4d4d4d, 99)
+
+bool overrideSym = false
+string pvsraSym = 'INDEX:BTCUSD'
+bool colorOverride = true
+
+pvsraVolume(overrideSymbolX, pvsraSymbolX, tickerIdX) =>
+    request.security(overrideSymbolX ? pvsraSymbolX : tickerIdX, '', [volume,high,low,close,open], barmerge.gaps_off, barmerge.lookahead_off)
+[pvsraVolume, pvsraHigh, pvsraLow, pvsraClose, pvsraOpen]  = pvsraVolume(overrideSym, pvsraSym, syminfo.tickerid)
+[pvsraColor, alertFlag, averageVolume, volumeSpread, highestVolumeSpread] = trLib.calcPvsra(pvsraVolume, pvsraHigh, pvsraLow, pvsraClose, pvsraOpen, redVectorColor, greenVectorColor, violetVectorColor, blueVectorColor, regularCandleDownColor, regularCandleUpColor)
+
+
+// IMPULSE MACD
+calc_smma(src, len) =>
+    smma = 0.0
+	smma := na(smma[1]) ? ta.sma(src, len) : (smma[1] * (len - 1) + src) / len
+    smma
+
+calc_zlema(src, length) =>
+	ema1 = ta.ema(src, length)
+	ema2 = ta.ema(ema1, length)
+	d = ema1 - ema2
+	ema1 + d
+ 
+srcMCD = hlc3
+hiMCD = calc_smma(high, 34)
+loMCD = calc_smma(low, 34)
+miMCD = calc_zlema(srcMCD, 34) 
+mdMCD = (miMCD>hiMCD) ? (miMCD-hiMCD) : (miMCD<loMCD) ? (miMCD-loMCD) : 0
+sbMCD = ta.sma(mdMCD, 9)
+shMCD = mdMCD - sbMCD
+
+
+// TRIPLE SUPERTREND
+atr25 = ta.sma(ta.tr, 10)
+atr= atr25
+tx=hl2-(1*atr)
+tx1 = nz(tx[1],tx)
+tx := close[1] > tx1 ? math.max(tx,tx1) : tx
+ty=hl2+(1*atr)
+ty1 = nz(ty[1], ty)
+ty := close[1] < ty1 ? math.min(ty, ty1) : ty
+trend5 = 1
+trend5 := nz(trend5[1], trend5)
+trend5 := trend5 == -1 and close > ty1 ? 1 : trend5 == 1 and close < tx1 ? -1 : trend5
+changeCond = trend5 != trend5[1]
+
+atr20 = ta.sma(ta.tr, 11)
+atr0 = atr20
+tx0 =hl2-(2*atr)
+tx10 = nz(tx0[1],tx0)
+tx0 := close[1] > tx10 ? math.max(tx0,tx10) : tx0
+ty0=hl2+(2*atr)
+ty10 = nz(ty0[1], ty0)
+ty0 := close[1] < ty10 ? math.min(ty0, ty10) : ty0
+trend0 = 1
+trend0 := nz(trend0[1], trend0)
+trend0 := trend0 == -1 and close > ty10 ? 1 : trend0 == 1 and close < tx10 ? -1 : trend0
+changeCond0 = trend0 != trend0[1]
+
+atr29 = ta.sma(ta.tr, 12)
+atr9 = atr29
+tx9=hl2-(3*atr)
+tx19 = nz(tx9[1],tx9)
+tx9 := close[1] > tx19 ? math.max(tx9,tx19) : tx9
+ty9=hl2+(3*atr)
+ty19 = nz(ty9[1], ty9)
+ty9 := close[1] < ty19 ? math.min(ty9, ty19) : ty9
+trend9 = 1
+trend9 := nz(trend9[1], trend9)
+trend9 := trend9 == -1 and close > ty19 ? 1 : trend9 == 1 and close < tx19 ? -1 : trend9
+changeCond9 = trend9 != trend9[1]
+
+var tripBuy = false
+var tripSell = false
+
+tripBuy := (trend9==1 and tx9 and trend5==1 and tx and trend0==1 and tx0) or (trend9==1 and tx9 and trend5==1 and tx) or (trend9==1 and tx9 and trend0==1 and tx0) or (trend5==1 and tx and trend0==1 and tx0) 
+tripSell := (trend9!=1 and ty9 and trend5!=1 and ty and trend0!=1 and ty0) or (trend9!=1 and ty9 and trend5!=1 and ty) or (trend9!=1 and ty9 and trend0!=1 and ty0) or (trend5!=1 and ty and trend0!=1 and ty0) 
+
+// Halftrend
+amplitude = input(title="Amplitude", defval=2, group="Halftrend")
+channelDeviation = input(title="Channel Deviation", defval=2, group="Halftrend")
+
+var int trend = 0
+var int nextTrend = 0
+var float maxLowPrice = nz(low[1], low)
+var float minHighPrice = nz(high[1], high)
+
+var float up1 = 0.0
+var float down1 = 0.0
+float atrHigh = 0.0
+float atrLow = 0.0
+float arrowUp = na
+float arrowDown = na
+
+atr2 = ta.atr(100) / 2
+dev = channelDeviation * atr2
+
+highPrice = high[math.abs(ta.highestbars(amplitude))]
+lowPrice = low[math.abs(ta.lowestbars(amplitude))]
+highma = ta.sma(high, amplitude)
+lowma = ta.sma(low, amplitude)
+
+if nextTrend == 1
+	maxLowPrice := math.max(lowPrice, maxLowPrice)
+
+	if highma < maxLowPrice and close < nz(low[1], low)
+		trend := 1
+		nextTrend := 0
+		minHighPrice := highPrice
+else
+	minHighPrice := math.min(highPrice, minHighPrice)
+
+	if lowma > minHighPrice and close > nz(high[1], high)
+		trend := 0
+		nextTrend := 1
+		maxLowPrice := lowPrice
+
+if trend == 0
+	if not na(trend[1]) and trend[1] != 0
+		up1 := na(down1[1]) ? down1 : down1[1]
+		arrowUp := up1 - atr2
+	else
+		up1 := na(up1[1]) ? maxLowPrice : math.max(maxLowPrice, up1[1])
+	atrHigh := up1 + dev
+	atrLow := up1 - dev
+else
+	if not na(trend[1]) and trend[1] != 1 
+		down1 := na(up1[1]) ? up1 : up1[1]
+		arrowDown := down1 + atr2
+	else
+		down1 := na(down1[1]) ? minHighPrice : math.min(minHighPrice, down1[1])
+	atrHigh := down1 + dev
+	atrLow := down1 - dev
+
+HalfTrue = trend == 0
+htColor = trend == 0 ? #00ffc8 : color.red
+
+
+// BULL RUSH
+bullUp = (ta.ema(close, 9) > ta.ema(close, 21) and close > ta.ema(close, 50) and open > ta.ema(close, 50))
+bullDown = (ta.ema(close, 9) < ta.ema(close, 21) and close < ta.ema(close, 50) and open < ta.ema(close, 50))
+
+
+// KNOW SURE THING
+roclen1 = 10
+roclen2 = 15
+roclen3 = 20
+roclen4 = 30
+smalen1 = 10
+smalen2 = 10
+smalen3 = 10
+smalen4 = 15
+siglen = 9
+smaroc(roclen, smalen) => ta.sma(ta.roc(close, roclen), smalen)
+kst = smaroc(roclen1, smalen1) + 2 * smaroc(roclen2, smalen2) + 3 * smaroc(roclen3, smalen3) + 4 * smaroc(roclen4, smalen4)
+sig = ta.sma(kst, siglen)
+KSTTrue = kst >= sig
+
+
+// =====================================   VODKA SHOT   ==================================================================
+
+var isLong = false
+var isShort = false
+
+// ===================================  NEGLECTED VOL by DGT  ======================================--
+
+nzVolume = nz(volume)
+source5   = barstate.isconfirmed ? close : close[1]
+vsource  = nzVolume ? barstate.isconfirmed ? ta.obv : ta.obv[1] : na
+corr     = ta.correlation(source5, vsource, 14)
+volAvgS  = ta.sma(nzVolume, 14)
+volAvgL  = ta.sma(nzVolume, 14 * 5)
+volDev   = (volAvgL + 1.618034 * ta.stdev(volAvgL, 14 * 5)) / volAvgL * 11 / 100
+volRel   = nzVolume / volAvgL
+momentum = ta.change(vsource, 14) / 14
+momOsc   = ta.linreg(momentum / volAvgS * 1.618034, 5, 0)
+
+vbcbColor = if close < open
+    if nzVolume > volAvgS * 1.618034
+        #910000
+    else if nzVolume >= volAvgS * .618034 and nzVolume <= volAvgS * 1.618034
+        color.red
+    else
+        color.orange
+else
+    if nzVolume > volAvgS * 1.618034
+        #006400
+    else if nzVolume >= volAvgS * .618034 and nzVolume <= volAvgS * 1.618034
+        color.green
+    else
+        #7FFFD4
+
+bColor5 = color.new(color.black, 25)
+gColor = color.new(color.gray, 50)
+
+// ===================================  RedK Dual VADER with Energy Bars [VADER-DEB]  ======================================--
+
+f_derma(_data, _len, MAOption) =>
+    value = 
+      MAOption == 'SMA' ? ta.sma(_data, _len) :
+      MAOption == 'EMA' ? ta.ema(_data, _len) :
+      ta.wma(_data, _len)
+
+rlength  = input.int(12, minval=1)
+DER_avg = input.int(5, 'Average', minval=1, inline='DER', group='RedK Dual VADER')
+MA_Type5 = input.string('WMA', 'DER MA type', options=['WMA', 'EMA', 'SMA'], inline='DER', group='RedK Dual VADER') 
+rsmooth  = input.int(3, 'Smooth', minval=1,  inline='DER_1', group='RedK Dual VADER')
+
+show_senti = input.bool(true, 'Sentiment',  inline='DER_s', group='RedK Dual VADER')
+senti   = input.int(20, 'Length', minval=1, inline='DER_s', group='RedK Dual VADER')
+
+v_calc  = input.string('Relative', 'Calculation', options=['Relative', 'Full', 'None'], group='RedK Dual VADER')
+vlookbk = input.int(20, 'Lookback (for Relative)', minval=1,                            group='RedK Dual VADER')
+
+v5 = volume
+
+vola    = 
+  v_calc == 'None' or na(volume) ? 1 : 
+  v_calc == 'Relative' ?   ta.stoch(v5, v5, v5, vlookbk) / 100 : 
+  v5
+
+R       = (ta.highest(2) - ta.lowest(2)) / 2                    // R is the 2-bar average bar range - this method accomodates bar gaps
+sr      = ta.change(close) / R                                  // calc ratio of change to R
+rsr     = math.max(math.min(sr, 1), -1)                         // ensure ratio is restricted to +1/-1 in case of big moves
+c       = fixnan(rsr * vola)                                    
+
+c_plus  = math.max(c, 0)                                        // calc directional vol-accel energy
+c_minus = -math.min(c, 0)
+
+avg_vola    = f_derma(vola, rlength, MA_Type5)
+dem         = f_derma(c_plus, rlength, MA_Type5)  / avg_vola          // directional energy ratio
+sup         = f_derma(c_minus, rlength, MA_Type5) / avg_vola
+
+adp         = 100 * ta.wma(nz(dem), DER_avg)                        // average DER
+asp         = 100 * ta.wma(nz(sup), DER_avg)
+anp         = adp - asp                                             // net DER..
+anp_s       = ta.wma(anp, rsmooth)
+
+s_adp       = 100 * ta.wma(nz(dem), senti)                            // average DER for sentiment length
+s_asp       = 100 * ta.wma(nz(sup), senti)
+V_senti     = ta.wma(s_adp - s_asp, rsmooth)
+
+c_adp   = color.new(#11ff20, 30)
+c_asp   = color.new(#ff1111, 30)
+c_fd    = color.new(color.green, 80)
+c_fs    = color.new(color.red, 80)
+c_zero  = color.new(#ffee00, 70)
+
+c_up5    = color.new(#11ff20, 0)
+c_dn5    = color.new(#ff1111, 0)
+
+up5      = anp_s >= 0
+s_up    = V_senti >= 0 
+
+c_grow_above = #1b5e2080 
+c_grow_below = #dc4c4a80
+c_fall_above = #66bb6a80  
+c_fall_below = #ef8e9880     
+
+sflag_up = math.abs(V_senti) >= math.abs(V_senti[1])
+
+bo = fixnan(asp)
+bc = fixnan(adp)
+bh = math.max(bo, bc)
+bl = math.min(bo, bc)
+
+rising      = ta.change(bc) > 0
+
+c_barup     = #11ff2088
+c_bardn     = #ff111188
+c_bardj     = #ffffff88
+
+barcolor    = bc > bo and rising ? c_barup : bc < bo and not rising ? c_bardn : c_bardj
+
+// ===================================  RedK Slow_Smooth WMA, RSS_WMA v3 ======================================--
+
+f_LazyLine(_data, _length) =>
+    w1 = 0, w2 = 0, w3 = 0
+    L1 = 0.0, L2 = 0.0, L3 = 0.0
+    w = _length / 3
+    
+    if _length > 2 
+        w2 := math.round(w)
+        w1 := math.round((_length-w2)/2)
+        w3 :=   int((_length-w2)/2)
+        
+        L1 := ta.wma(_data, w1)
+        L2 := ta.wma(L1, w2)
+        L3 := ta.wma(L2, w3)
+    else
+        L3 := _data
+    L3
+
+LL = f_LazyLine(close, 21)
+
+lc_up        = color.new(#33ff00, 0)
+lc_dn        = color.new(#ff1111, 0)
+luptrend     = LL > LL[1]
+SigMulti    = 1.0
+
+SignalOn    = barstate.isconfirmed 
+SwingDn     = luptrend[1] and not(luptrend) and barstate.isconfirmed 
+SwingUp     = luptrend and not(luptrend[1]) and barstate.isconfirmed 
+
+dl = SigMulti / 100 * LL  
+
+upwards = LL > LL[1] and (barcolor == c_barup) and up and (open < close and volRel * .145898 > volDev)
+downwards = LL < LL[1]  and (barcolor == c_bardn) and (open > close and volRel * .145898 > volDev) 
+
+
+
+// ==============================   EVEREST   ====================================
+// Inspired by this video: https://www.youtube.com/watch?v=a7Hd0b5grZs
+
+time_frame = input.timeframe(title='Timeframe for HA candle calculation', defval='', group="Everest") 
+smoothedHALength = input.int(title='HA Price Input Smoothing Length', minval=1, maxval=500, step=1, defval=13, group="Everest")
+smoothedMAType = input.string(title='Moving Average Calculation', group="Everest", options=['Exponential', 'Simple', 'Smoothed', 'Weighted', 'Linear', 'Hull', 'Arnaud Legoux'], defval='Exponential')
+smoothedHAalmaSigma = input.float(title="ALMA Sigma", defval=6, minval=0, maxval=100, step=0.1, group="Everest")
+smoothedHAalmaOffset = input.float(title="ALMA Offset", defval=0.85, minval=0, maxval=1, step=0.01, group="Everest")
+doDoubleSmoothing = input.bool(title='Enable double-smoothing', defval=true, group="Everest")
+doubleSmoothedHALength = input.int(title='HA Second Smoothing Length', minval=1, maxval=500, step=1, defval=10, group="Everest")
+doubleSmoothedMAType = input.string(title='Double-Smoothing Moving Average Calculation', group="Everest", options=['Exponential', 'Simple', 'Smoothed', 'Weighted', 'Linear', 'Hull', 'Arnaud Legoux'], defval='Exponential')
+doubleSmoothedHAalmaSigma = input.float(title="ALMA Sigma", defval=6, minval=0, maxval=100, step=0.1, group="Everest")
+doubleSmoothedHAalmaOffset = input.float(title="ALMA Offset", defval=0.85, minval=0, maxval=1, step=0.01, group="Everest")
+
+smoothedMovingAvg(src, len) => 
+	smma = 0.0
+	smma := na(smma[1]) ? ta.sma(src, len) : (smma[1] * (len - 1) + src) / len 
+	smma
+	
+getHAOpen(prevOpen, prevClose) =>
+    haOpen = 0.0
+    haOpen := ((prevOpen + prevClose)/2)
+    haOpen
+
+getHAHigh(o, h, c) =>
+    haHigh = 0.0
+    haHigh := math.max(h, o, c)
+    haHigh
+
+getHALow(o, l, c) =>
+    haLow = 0.0
+    haLow := math.min(o, l, c)
+    haLow
+    
+getHAClose(o, h, l, c) =>
+    haClose = 0.0
+    haClose := ((o + h + l + c)/4)
+    haClose
+	
+getMAValue(src, len, type, isDoubleSmooth) =>
+	maValue = 0.0
+	if (type == 'Exponential')
+		maValue := ta.ema(source=src, length=len)
+	else if (type == 'Simple')
+		maValue := ta.sma(source=src, length=len)
+	else if (type == 'Smoothed')
+		maValue := smoothedMovingAvg(src=src, len=len)
+	else if (type == 'Weighted')
+		maValue := ta.wma(source=src, length=len)
+	else if (type == 'Linear')
+		maValue := ta.linreg(source=src, length=len, offset=0)
+	else if (type == 'Hull')
+		maValue := ta.hma(source=src, length=len)
+	else if (type == 'Arnaud Legoux')
+		maValue := ta.alma(series=src, length=len, offset=(isDoubleSmooth ? doubleSmoothedHAalmaOffset : smoothedHAalmaOffset), sigma=(isDoubleSmooth ? doubleSmoothedHAalmaSigma : smoothedHAalmaSigma))
+	else 
+		maValue := na
+	maValue
+
+realPriceTicker = ticker.new(prefix=syminfo.prefix, ticker=syminfo.ticker)
+actualOpen = request.security(symbol=realPriceTicker, timeframe=time_frame, expression=open, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+actualHigh = request.security(symbol=realPriceTicker, timeframe=time_frame, expression=high, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+actualLow = request.security(symbol=realPriceTicker, timeframe=time_frame, expression=low, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+actualClose = request.security(symbol=realPriceTicker, timeframe=time_frame, expression=close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+smoothedMA1open = getMAValue(actualOpen, smoothedHALength, smoothedMAType, false) 
+smoothedMA1high = getMAValue(actualHigh, smoothedHALength, smoothedMAType, false) 
+smoothedMA1low = getMAValue(actualLow, smoothedHALength, smoothedMAType, false) 
+smoothedMA1close = getMAValue(actualClose, smoothedHALength, smoothedMAType, false)
+smoothedHAClose = getHAClose(smoothedMA1open, smoothedMA1high, smoothedMA1low, smoothedMA1close)
+
+smoothedHAOpen = smoothedMA1open
+smoothedHAOpen := na(smoothedHAOpen[1]) ? smoothedMA1open : getHAOpen(smoothedHAOpen[1], smoothedHAClose[1])
+smoothedHAHigh = getHAHigh(smoothedHAOpen, smoothedMA1high, smoothedHAClose)
+smoothedHALow =  getHALow(smoothedHAOpen, smoothedMA1low, smoothedHAClose)
+
+openToPlot = smoothedHAOpen
+closeToPlot = smoothedHAClose
+highToPlot = smoothedHAHigh
+lowToPlot = smoothedHALow
+
+if (doDoubleSmoothing)
+    openToPlot := getMAValue(smoothedHAOpen, doubleSmoothedHALength, doubleSmoothedMAType, true)
+    closeToPlot := getMAValue(smoothedHAClose, doubleSmoothedHALength, doubleSmoothedMAType, true)
+    highToPlot := getMAValue(smoothedHAHigh, doubleSmoothedHALength, doubleSmoothedMAType, true)
+    lowToPlot := getMAValue(smoothedHALow, doubleSmoothedHALength, doubleSmoothedMAType, true)
+else
+    na
+
+candleColor = color.rgb(0, 0, 0, 100)
+
+// ===================================   DXF   ======================================================
+
+f_avgdxf(_price, _length, _vol, _avg) =>
+    mf              = ta.change(_price) * _vol
+    SumAbsChange    = math.sum(math.abs(mf), _length)
+    SumUpChange     = math.sum(math.max(mf, 0), _length)
+    o_dxf           = SumUpChange / SumAbsChange * 200 - 100
+    o_avgdxf        = ta.wma(o_dxf, _avg)
+
+price       = input(close, 'Price', group="DXF Settings")
+lookbk      = input.int(15, 'DXF Lookback', minval=1, group="DXF Settings")
+lengthDXF   = input.int(5, 'Avg Length', minval=1, group="DXF Settings")
+smth        = input.int(3, 'Smooth', minval=1, group="DXF Settings")
+step        = input.int(20, 'Step [0 = No Step]', minval=0, step=5, group="DXF Settings")
+s_level     = input(20, 'Significant Trend Level', group="DXF Settings")
+vol_w       = input(false, 'Volume Weighted?', group="DXF Settings")
+
+v           = vol_w ? volume : 1                                   
+dxf_raw     = f_avgdxf(price, lookbk, v, lengthDXF)
+dxf_s       = ta.wma(dxf_raw, smth)                                
+dxf         = step > 0 ? math.round(dxf_s / step) * step : dxf_s
+
+c_up        = color.new(#33ff00, 0)
+c_dn        = color.new(#ff1111, 0)
+upDXF       = dxf >= 0
+downDXF     = dxf < 0
+c_zeroline  = color.new(color.yellow, 70)
+
+// =====================================   REDK EVEREX 2.0   ====================================================
+
+GetAverage(_data, _len, MAOption) =>
+    value = switch MAOption
+        'SMA' => ta.sma(_data, _len) 
+        'EMA' => ta.ema(_data, _len) 
+        'HMA' => ta.hma(_data, _len) 
+        'RMA' => ta.rma(_data, _len) 
+        => 
+            ta.wma(_data, _len)
+
+Normalize(_Value, _Avg) =>
+    _X = _Value / _Avg
+    _Nor = 
+      _X > 1.50 ? 1.00 :
+      _X > 1.20 ? 0.90 :
+      _X > 1.00 ? 0.80 :
+      _X > 0.80 ? 0.70 :
+      _X > 0.60 ? 0.60 :
+      _X > 0.40 ? 0.50 :
+      _X > 0.20 ? 0.25 :
+      0.1
+
+length1    = input.int(10, minval = 1, inline = 'ROF', group = "REDK EVEREX")
+MA_Type   = input.string(defval = 'WMA', title = 'MA type', 
+  options = ['WMA', 'EMA', 'SMA', 'HMA', 'RMA'], inline = 'ROF', group = "REDK EVEREX")
+smooth    = input.int(defval = 3, title = 'Smooth', minval = 1,  inline = 'ROF', group = "REDK EVEREX")
+
+sig_length  = input.int(5, 'Signal Length', minval = 1, inline = 'Signal', group = "REDK EVEREX")
+S_Type      = input.string(defval = 'WMA', title = 'Signal Type', 
+  options = ['WMA', 'EMA', 'SMA', 'HMA', 'RMA'], inline = 'Signal', group = "REDK EVEREX")
+
+lookback    = input.int(defval = 20, title = 'Length', minval = 1, inline = 'Lookback', group = "REDK EVEREX")
+lkbk_Calc   = input.string(defval = 'Simple', title = 'Averaging', 
+  options = ['Simple', 'Same as RRoF'], inline='Lookback', group = "REDK EVEREX")
+
+showBias    = input.bool(defval = false, title = 'Bias Plot ? -- ', inline = 'Bias', group = "REDK EVEREX")
+B_Length    = input.int(defval = 30, title = 'Length', minval = 1, inline = 'Bias', group = "REDK EVEREX")
+B_Type      = input.string(defval = 'WMA', title = 'MA type', 
+  options = ['WMA', 'EMA', 'SMA', 'HMA', 'RMA'], inline = 'Bias', group = "REDK EVEREX")
+
+showEVEREX  = input.bool(true, 'Show EVEREX Bands ? -- ', inline = 'EVEREX', group = "REDK EVEREX")
+
+bandscale   = str.tonumber(input.string("100", title = "Band Scale", 
+  options = ['100', '200', '400'], inline = 'EVEREX', group = "REDK EVEREX"))
+
+DispBias    = showBias ? display.pane : display.none 
+DispBands   = showEVEREX ? display.pane : display.none 
+showhlines  = showEVEREX ? display.all : display.none 
+
+Disp_vals   = display.status_line + display.data_window
+
+v1   = na(volume) ? 1 : volume                  // this part ensures we're not hit with calc issues due to NaN's
+NoVol_Flag = na(volume) ? true : false          // this is a flag to use later 
+
+lkbk_MA_Type = lkbk_Calc == 'Simple' ? 'SMA' : MA_Type
+
+Vola  = GetAverage(v1, lookback, lkbk_MA_Type)
+Vola_n_pre = Normalize(v1, Vola) * 100
+Vola_n = NoVol_Flag ? 100 : Vola_n_pre
+
+BarSpread = close - open 
+BarRange  = high - low
+R2        = ta.highest(2) - ta.lowest(2)
+SrcShift  = ta.change(close)
+
+sign_shift = math.sign(SrcShift) 
+sign_spread = math.sign(BarSpread) 
+barclosing  = 2 * (close - low) / BarRange * 100 - 100
+s2r = BarSpread / BarRange * 100
+
+BarSpread_abs   = math.abs(BarSpread)
+BarSpread_avg   = GetAverage(BarSpread_abs, lookback, lkbk_MA_Type)
+BarSpread_ratio_n = Normalize(BarSpread_abs, BarSpread_avg) * 100 * sign_spread  
+barclosing_2  = 2 * (close - ta.lowest(2)) / R2 * 100 - 100
+Shift2Bar_toR2 = SrcShift / R2 * 100 
+
+SrcShift_abs    = math.abs(SrcShift)
+srcshift_avg    = GetAverage(SrcShift_abs, lookback, lkbk_MA_Type) 
+srcshift_ratio_n   = Normalize(SrcShift_abs, srcshift_avg) * 100 * sign_shift
+
+Pricea_n = (barclosing + s2r + BarSpread_ratio_n + barclosing_2 + Shift2Bar_toR2 + srcshift_ratio_n) / 6
+bar_flow  =   Pricea_n * Vola_n / 100 
+
+bulls = math.max(bar_flow, 0)
+bears = -1 * math.min(bar_flow, 0)
+
+bulls_avg = GetAverage(bulls, length1, MA_Type)
+bears_avg = GetAverage(bears, length1, MA_Type)
+
+dx          = bulls_avg / bears_avg
+RROF         = 2 * (100 - 100 / (1 + dx)) - 100
+RROF_s      = ta.wma(RROF, smooth)
+
+Signal = GetAverage(RROF_s, sig_length, S_Type)
+
+dx_b          = GetAverage(bulls, B_Length, B_Type) / GetAverage(bears, B_Length, B_Type)
+RROF_b       = 2 * (100 - 100 / (1 + dx_b)) - 100
+RROF_bs      = ta.wma(RROF_b, smooth)
+
+up1e      = RROF_s >= 0
+s_up1    = RROF_bs >=0 
+
+Eq_band_option = input.string("Joint", title = 'Band Option', options = ["Joint", "Separate"], group = "REDK EVEREX")
+
+nPrice  = math.max(math.min(Pricea_n, 100), -100)
+nVol    = math.max(math.min(Vola_n, 100), -100)
+
+bar = bar_flow
+
+c_vol_grn   = color.new(#26a69a, 75)
+c_vol_red   = color.new(#ef5350, 75)
+
+cb_vol_grn  = color.new(#26a69a, 20)
+cb_vol_red  = color.new(#ef5350, 20)
+
+c_vol       = bar > 0 ? c_vol_grn : c_vol_red
+cb_vol      = bar > 0 ? cb_vol_grn : cb_vol_red
+
+vc_lo       = 0
+vc_hi       = nVol * bandscale / 100 / 2
+
+c_pri_grn   = color.new(#3ed73e, 75)
+c_pri_red   = color.new(#ff870a, 75)
+
+cb_pri_grn  = color.new(#3ed73e, 20)
+cb_pri_red  = color.new(#ff870a, 20)
+
+c_pri       = bar > 0 ? c_pri_grn : c_pri_red
+cb_pri      = bar > 0 ? cb_pri_grn : cb_pri_red
+
+pc_lo_base  = Eq_band_option == "Joint" ? vc_hi : 0.50 * bandscale
+
+pc_lo       = pc_lo_base
+pc_hi       = pc_lo_base + math.abs(nPrice) * bandscale / 100 / 2
+
+Alert_up    = ta.crossover(RROF_s,0)
+Alert_dn    = ta.crossunder(RROF_s,0)
+Alert_swing = ta.cross(RROF_s,0)
+
+nPrice_abs = math.abs(nPrice)
+EV_Ratio = 100 * nPrice_abs / nVol
+is_positive     = nPrice > 0
+
+is_Compression  = EV_Ratio <= 50
+is_EoM          = EV_Ratio >= 120
+
+EverestUp = upDXF and up1 and (closeToPlot > openToPlot) and pc_hi > 74 and bar > 0
+EverestDown = downDXF and not up1e and (closeToPlot < openToPlot) and pc_hi > 74 and bar < 0
+
+
+// WAE - Waddah Attar Explosion v1 by LazyBear
+
+sensitivity = input.int(150, title="Sensitivity", group="WAE")
+fastLength=input.int(20, title="FastEMA Length", group="WAE")
+slowLength=input.int(40, title="SlowEMA Length", group="WAE")
+channelLength=input.int(20, title="BB Channel Length", group="WAE")
+multWAE=input.float(2.0, title="BB Stdev Multiplier", group="WAE")
+
+calc_macd(source, fastLength, slowLength) =>
+    fastMA = ta.ema(source, fastLength)
+    slowMA = ta.ema(source, slowLength)
+    fastMA - slowMA
+
+calc_BBUpper(source, length, mult) => 
+    basis = ta.sma(source, length)
+    dev = mult * ta.stdev(source, length)
+    basis + dev
+
+calc_BBLower(source, length, mult) => 
+    basis = ta.sma(source, length)
+    dev = mult * ta.stdev(source, length)
+    basis - dev
+
+t1 = (calc_macd(close, fastLength, slowLength) - calc_macd(close[1], fastLength, slowLength))*sensitivity
+e1 = (calc_BBUpper(close, channelLength, multWAE) - calc_BBLower(close, channelLength, multWAE))
+
+trendUpWAE = (t1 >= 0) ? t1 : 0
+trendDownWAE = (t1 < 0) ? (-1*t1) : 0
+
+waeColor = trendUpWAE >= threshold ? color.rgb(0, 255, 132) : trendDownWAE >= threshold ? color.rgb(255, 0, 0) : color.new(color.gray, 80)
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=   FINAL DISPLAY   =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+
+colorGreen = color.new(#66ff00, 30)
+colorRed = color.new(#ff0000, 30)
+
+upWick50PercentLarger = close > open and math.abs(high - close) > math.abs(open - close)
+downWick50PercentLarger = close < open and math.abs(low - close) > math.abs(open - close)
+
+if (upWick50PercentLarger and rsi > rsiUpperW)
+	colorGreen := color.rgb(0, 255, 251)
+if (downWick50PercentLarger and rsi < rsiLowerW)
+	colorRed := color.rgb(255, 0, 255)
+
+rsiColor = rsi > rsiOB ? color.rgb(0, 181, 93) : rsi < rsiOS ? color.rgb(198, 0, 0) : mfi > 50 ? color.rgb(0, 138, 71) : mfi < 50 ? color.rgb(124, 0, 0) : color.gray
+rsiPlot = plot(rsi, "RSI", color=rsiColor, linewidth=3)
+midlinePlot = plot(50, "RSI Middle Band", color=color.new(#787B86, 50))
+
+fill(rsiPlot, midlinePlot, 100, 70, top_color = color.new(#00ff08, 0), bottom_color = color.new(color.lime, 100), title = "Overbought Gradient Fill")
+fill(rsiPlot, midlinePlot, 30,  0,  top_color = color.new(#ff0000, 100), bottom_color = color.new(color.red, 0), title = "Oversold Gradient Fill")
+
+plotchar(upThrust and bShowTramp ? 25 : na, title = 'Trampoline', char='T', color = color.white, location = location.absolute, size = size.tiny)
+plotchar(downThrust and bShowTramp ? 75 : na , title = 'Trampoline', char = 'T', color = color.white, location = location.absolute, size = size.tiny)
+
+plotshape((pvsraColor == greenVectorColor) and bShowVector ? 50 : na, title="Vector Candle", location=location.absolute, style=shape.labelup, color=color.rgb(0, 150, 78))
+plotshape((pvsraColor == redVectorColor) and bShowVector ? 50 : na, title="Vector Candle", location=location.absolute, style=shape.labeldown, color=color.rgb(140, 0, 0))
+
+plotshape(rsi > rsiOB ? 70 : na, title = 'RSI Overbought Square', style = shape.square, color = colorGreen, location = location.absolute, size = size.tiny)
+plotshape(rsi < rsiOS ? 30 : na , title = 'RSI Oversold Square', style = shape.square, color = colorRed, location = location.absolute, size = size.tiny)
+
+plotshape(buySignal1 and bShowSqueeze ? 25 : na, title="Squeeze Buy Signal", style=shape.diamond, location=location.absolute, color=color.yellow, size=size.tiny)
+plotshape(sellSignal1 and bShowSqueeze ? 75 : na, title="Squeeze Sell Signal", style=shape.diamond, location=location.absolute, color=color.yellow, size=size.tiny)
+
+plotchar(low <= wlowerBB and close >= wlowerBB and close < open and bShowBB ? 35 : na, char="ß", title="Bollinger Bands", location=location.absolute, size=size.tiny, color=color.rgb(255, 0, 0))
+plotchar(high >= wupperBB and close < wupperBB and close > open and bShowBB ? 65 : na, char="ß", title="Bollinger Bands", location=location.absolute, size=size.tiny, color=color.rgb(0, 255, 132))
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=   OUTSIDE LINE PLOTS  =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= //
+
+EverColor = EverestDown ? color.red : EverestUp ? color.lime : color.new(color.black, 100)
+vodkaColor = upwards ? #30ce00 : downwards ? color.rgb(211, 1, 1) : color.new(color.black, 100)
+imdColor = srcMCD > miMCD ? srcMCD > hiMCD ? color.lime : color.green : srcMCD < loMCD ? color.red : color.orange
+KSTColor = KSTTrue ? #288a75 : color.red
+bullColor1 = bullDown ? color.red : bullUp ? #288a75 : color.new(color.black, 100)
+tripColor = tripBuy ? color.rgb(0, 253, 8) : tripSell ? color.rgb(255, 0, 0) : color.new(color.black, 100)
+
+cciDoubleColor = color.new(color.black, 100)
+if (cci1 > cci2 and cci1 >= 100)
+	cciDoubleColor := color.lime
+if (cci1 < cci2 and cci1 < -100 and cci1WasGreen)
+	cciDoubleColor := color.red
+
+if (cci1 > 0)
+	cci1 := cci1 - 200
+if (cci1 < 0)
+	cci1 := cci1 + 200
+cci1 := cci1 + 50
+// plot (cci1, color=color.lime)
+
+plot(71, "Vodka Shot", color=vodkaColor, linewidth=2)
+plot(70, "Triple Supertrend", color=tripColor, linewidth=1)
+plot(69, "Half Trend", color=htColor, linewidth=1)
+plot(68, "CCI Double Cross", color=cciDoubleColor, linewidth=1)
+
+plot(31, "Impulse MACD", color=imdColor, linewidth=1)
+plot(30, "Bull Rush", color=bullColor1, linewidth=1)
+plot(29, "Everest", color=EverColor, linewidth=2)
+
+plot(bShowWAE ? 50 : na, "Waddah Explosion", color=waeColor, linewidth=2)

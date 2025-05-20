@@ -1,0 +1,21 @@
+//@version=5
+indicator("Star Fragment", overlay=true, max_bars_back=500, max_labels_count=500, max_lines_count=500)
+
+sessionTimes = input.session("0845-0846", title="45 minutes after NY open, plus one minute")
+timeZone = input.string("GMT-5", title="Time Zone", options=["GMT-10", "GMT-9", "GMT-8", "GMT-7", "GMT-6", "GMT-5", "GMT-4", "GMT-3", "GMT-2", "GMT-1", "GMT-0", "GMT+1", "GMT+2", "GMT+3", "GMT+4", "GMT+5", "GMT+6", "GMT+7", "GMT+8", "GMT+9", "GMT+10"])
+
+[high2D, high10D, low2D, low10D] = request.security(syminfo.tickerid, "1D", [ta.highest(2), ta.highest(10), ta.lowest(2), ta.lowest(10)])
+
+arLow = request.security(syminfo.tickerid, '15', low)
+arHigh = request.security(syminfo.tickerid, '15', high)
+
+timeIsAllowed = time(timeframe.period, sessionTimes)
+if timeIsAllowed
+    line.new(bar_index, arHigh, bar_index + 72, arHigh, extend=extend.right, width = 2, color=color.white, style = line.style_dotted)
+    line.new(bar_index, arLow, bar_index + 72, arLow, extend=extend.right, width = 2, color=color.white, style = line.style_dotted)
+    line.new(bar_index, arLow + (arHigh - arLow) / 2, bar_index + 72, arLow + (arHigh - arLow) / 2, extend=extend.right, width = 2, color=color.white, style = line.style_dotted)
+
+InSession(sessionTimes) =>
+    not na(time(timeframe.period, sessionTimes))
+bool iss = InSession(sessionTimes)
+

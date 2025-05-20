@@ -1,0 +1,8 @@
+//@version=4
+study("Bullrush v1", overlay = true, format=format.price, precision=2, resolution="")
+upwards = (ema(close, 9) > ema(close, 21) and close > ema(close, 50) and open > ema(close, 50))
+downwards = (ema(close, 9) < ema(close, 21) and close < ema(close, 50) and open < ema(close, 50))
+showUp = upwards and not upwards[1]
+showDown = downwards and not downwards[1]
+plotshape(showUp ? hl2 : na, title="Buy", text="Buy", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.green, textcolor=color.white)
+plotshape(showDown ? hl2 : na, title="Sell", text="Sell", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.red, textcolor=color.white)

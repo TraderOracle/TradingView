@@ -1,0 +1,779 @@
+import TradingView/ta/5
+//@version=5
+strategy(title='AlgoPro V3 Reverse', shorttitle='AlgoPro Reverse 💹', overlay=true,initial_capital=10000, pyramiding=0, currency='USD', default_qty_type=strategy.percent_of_equity, default_qty_value=0, commission_value=0.15, commission_type=strategy.commission.percent, use_bar_magnifier=false)
+
+LONGPosition                        = strategy.position_size > 0
+SHORTPosition                       = strategy.position_size < 0
+NOPositionOpened                    = strategy.position_size == 0
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+// ———————————————————— Inputs
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+
+// ————— Automation Commands
+Open_long_command = input.string("X", title="  OPEN LONG COMMAND", group="AUTOMATIONS COMMANDS", tooltip='Once you have input your automation commands and proceeded to the next step of creating an alert, replace the alert message body with only the following command {{strategy.order.alert_message}}')
+Close_long_command = input.string("X", title="  CLOSE LONG COMMAND", group="AUTOMATIONS COMMANDS", tooltip='See the AlgoExpert Bot Command Guide for further details on creating your automation commands.')
+Open_short_command = input.string("X", title="  OPEN SHORT COMMAND", group="AUTOMATIONS COMMANDS")
+Close_short_command = input.string("X", title="  CLOSE SHORT COMMAND", group="AUTOMATIONS COMMANDS")
+Open_DCA_long_command = input.string("X", title="  OPEN DCA LONG COMMAND", group="AUTOMATIONS COMMANDS", tooltip='Opens long trades triggered by the Bollinger Bands Re-Entry Feature.')
+Open_DCA_short_command = input.string("X", title="  OPEN DCA SHORT COMMAND", group="AUTOMATIONS COMMANDS", tooltip='Opens short trades triggered by the Bollinger Bands Re-Entry Feature.')
+
+// ————— Source input
+src = input(hlc3, title='  SOURCE', group='Strategy Source')
+
+// ————— JMA inputs
+Act_JMA = input(true, title='JURIK MOVING AVERAGE', group= 'TREND TRADE SETTINGS')
+JMA_length = input.int(29, title='  JMA LENGTH', minval=0, group= 'TREND TRADE SETTINGS')
+phase = input.int(97, title='  JMA PHASE', minval=0, group= 'TREND TRADE SETTINGS')
+power = input.float(0.2, title='  JMA POWER', minval=0, step=0.5, group= 'TREND TRADE SETTINGS')
+
+// ————— Range Filter inputs
+Act_RF = input(false, title='RANGE FILTER', group= 'TREND TRADE SETTINGS')
+per = input.int(20, title='  SAMPLING PERIOD', minval=1, group= 'TREND TRADE SETTINGS')
+mult = input.float(1.7, title='  RANGE MULTIPLIER', minval=0.1, step=0.1, group= 'TREND TRADE SETTINGS')
+
+// ————— ADX inputs
+Act_ADX = input(false, title='AVERAGE DIRECTIONAL INDEX', group= 'TREND TRADE SETTINGS')
+ADX_options = input.string('CLASSIC', title='  ADX OPTION', options=['CLASSIC', 'MASANAKAMURA'], group= 'TREND TRADE SETTINGS')
+ADX_len = input.int(22, title='  ADX LENGTH', minval=1, group= 'TREND TRADE SETTINGS')
+th = input.float(20, title='  ADX THRESHOLD', minval=0, step=0.5, group= 'TREND TRADE SETTINGS')
+
+// ————— SAR inputs
+Act_SAR = input(false, title='PARABOLIC SAR', group= 'TREND TRADE SETTINGS')
+Sst = input.float(0.25, title='  SAR STAR', minval=0.01, step=0.01, group= 'TREND TRADE SETTINGS')
+Sinc = input.float(0.25, title='  SAR INC', minval=0.01, step=0.01, group= 'TREND TRADE SETTINGS')
+Smax = input.float(0.13, title='  SAR MAX', minval=0.01, step=0.01, group= 'TREND TRADE SETTINGS')
+
+// ————— RSI with volume inputs
+Act_RSI = input(false, title='RSI VOLUME WEIGHTED', group= 'TREND TRADE SETTINGS')
+RSI_len = input.int(34, title='  RSI LENGHT', minval=1, group= 'TREND TRADE SETTINGS')
+RSI_obos = input.int(45, title='  RSI CENTER LINE', minval=1, group= 'TREND TRADE SETTINGS')
+
+// ————— MACD / MAC-Z inputs
+Act_MACD = input(false, title='MA CONVERGENCE/DIVERGENCE', group= 'TREND TRADE SETTINGS')
+MACD_options = input.string('MAC-Z', title='  MACD OPTION', options=['MACD', 'MAC-Z'], group= 'TREND TRADE SETTINGS')
+fastLength = input.int(45, title='  MACD FAST MA LENGTH', minval=1, group= 'TREND TRADE SETTINGS')
+slowLength = input.int(47, title='  MACD SLOW MA LENGTH', minval=1, group= 'TREND TRADE SETTINGS')
+signalLength = input.int(13, title='  MACD SIGNAL LENGTH', minval=1, group= 'TREND TRADE SETTINGS')
+lengthz = input.int(9, title='  Z-VWAP LENGTH', minval=1, group= 'TREND TRADE SETTINGS')
+lengthStdev = input.int(14, title='  STDEV LENGTH', minval=1, group= 'TREND TRADE SETTINGS')
+
+// ————— Volume inputs for entries condition and for calculate quantities later
+Act_Vol = input(false, title='VOLUME CONDITION', group= 'TREND TRADE SETTINGS')
+volume_f = input.float(1.4, title='  VOLUME FACTOR', minval=0, step=0.1, group= 'TREND TRADE SETTINGS')
+sma_length = input.int(61, title='  SMA VOLUME LENGTH', minval=1, group= 'TREND TRADE SETTINGS')
+
+// ————— First take profit input
+tp_long0 = input.float(1.6, title='  TAKE PROFIT LONG %', minval=0, step=0.1, group= 'TAKE PROFIT SETTINGS')
+tp_short0 = input.float(1.05, title='  TAKE PROFIT SHORT %', minval=0, step=0.1, group= 'TAKE PROFIT SETTINGS')
+
+// ————— Stop Loss input
+Act_sl = input(true, title='ACTIVATE STOP LOSS 🧻', group= 'STOP LOSS SETTINGS')
+SL_options = input.string('NORMAL', title='  STOP LOSS OPTION', options=['NORMAL', 'ATR', 'BOTH'], group= 'STOP LOSS SETTINGS')
+sl_l = input.float(6.3, title='  LONG STOP LOSS %', minval=0, step=0.1, group= 'STOP LOSS SETTINGS')
+sl_s = input.float(6.4, title='  SHORT STOP LOSS %', minval=0, step=0.1, group= 'STOP LOSS SETTINGS')
+
+// ————— ATR Inputs
+atrPeriod = input.int(13, title='  ATR SL PERIOD', minval=0, group= 'STOP LOSS SETTINGS')
+multiplierPeriod = input.float(7.0, title='  ATR SL MULTIPLIER', minval=0, step=0.1, group= 'STOP LOSS SETTINGS')
+
+// ————— Confirmed Stop loss
+Act_Conf_SL = input(true, title='STOP LOSS CONFIRMED', group= 'STOP LOSS SETTINGS')
+
+// ————— Risk input
+Risk = input.float(3.5, title='  % RISK ALLOWED', minval=0, step=0.5)
+
+// ————— Bollinger Bands inputs
+Act_BB = input(false, title='ACTIVATE BOLLINGER BANDS RE-ENTRY 🚀')
+BB_length = input.int(20, title='  BB LENGTH', minval=1)
+BB_mult = input.float(1.9, title='  BB MULTIPLIER', minval=0.001, step=0.1)
+bbBetterPrice = input.float(0.5, title='  % MINIMUM BETTER PRICE', minval=0.1, step=0.1)
+Act_divide = input(false, title='ACTIVATE DIVIDE TP')
+
+// ————— Backtest input
+Act_BT = input(true, title='BACKTEST 💹', group='BACKTESTING')
+backtest_time = input.int(100000, title='  BACKTEST DAYS', minval=1, group='BACKTESTING') * 24 * 60 * 60 * 1000
+entry_Type = input.string('% EQUITY', title='  ENTRY TYPE', options=['CONTRACTS', 'CASH', '% EQUITY'], group='BACKTESTING')
+et_Factor = entry_Type == 'CONTRACTS' ? 1 : entry_Type == '% EQUITY' ? 100 / (strategy.equity / close) : close
+quanTity = input.float(8.0, title='  QUANTITY (LEVERAGE 1X)', minval=0, step=0.5, group='BACKTESTING') / et_Factor
+Max_Lev = input.int(8, title='  MAXIMUM LEVERAGE', minval=1, maxval=8, group='BACKTESTING')
+
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+// ———————————————————— Variables
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+
+// ————— Long/Short
+var bool longCond = na
+var bool shortCond = na
+var int CondIni_long = 0
+var int CondIni_short = 0
+var bool _Final_longCondition = na
+var bool _Final_shortCondition = na
+var float last_open_longCondition = na
+var float last_open_shortCondition = na
+var float last_dynamic_Leverage_long = na
+var float last_dynamic_Leverage_short = na
+var int last_longCondition = na
+var int last_shortCondition = na
+var int last_Final_longCondition = na
+var int last_Final_shortCondition = na
+
+// ————— Take profit
+var bool long_tp = na
+var bool short_tp = na
+var int last_long_tp = na
+var int last_short_tp = na
+var bool Final_Long_tp = na
+var bool Final_Short_tp = na
+var float longTakeProfitPrice = na
+var float shortTakeProfitPrice = na
+
+// ————— Stop Loss
+var float longStopLossPrice = 0.0
+var float shortStopLossPrice = 0.0
+var int CondIni_long_sl = 0
+var int CondIni_short_sl = 0
+var bool Final_Long_sl0 = na
+var bool Final_Short_sl0 = na
+var bool Final_Long_sl = na
+var bool Final_Short_sl = na
+var int last_long_sl = na
+var int last_short_sl = na
+
+// ————— Indicators
+var bool JMA_longCond = na
+var bool JMA_shortCond = na
+var bool RF_longCond = na
+var bool RF_shortCond = na
+var bool ADX_longCond = na
+var bool ADX_shortCond = na
+var bool SAR_longCond = na
+var bool SAR_shortCond = na
+var bool RSI_longCond = na
+var bool RSI_shortCond = na
+var bool MACD_longCond = na
+var bool MACD_shortCond = na
+var bool VOL_longCond = na
+var bool VOL_shortCond = na
+var bool JMA_XlongCond = na
+var bool JMA_XshortCond = na
+var bool RF_XlongCond = na
+var bool RF_XshortCond = na
+var bool ADX_XlongCond = na
+var bool ADX_XshortCond = na
+var bool SAR_XlongCond = na
+var bool SAR_XshortCond = na
+var int CondIni_long_BB = 0
+var int CondIni_short_BB = 0
+var bool Final_long_BB = na
+var bool Final_short_BB = na
+var int last_long_BB = na
+var int last_short_BB = na
+
+// ————— Average Price
+var float sum_long = 0.0
+var float sum_short = 0.0
+var float Position_Price = 0.0
+
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+// ———————————————————— Jurik Moving Average
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+
+// ————— JMA calculation
+JMA(_JMA_length, _phase, _power, _src) =>
+    phaseRatio = _phase < -100 ? 0.5 : _phase > 100 ? 2.5 : _phase / 100 + 1.5
+    beta = 0.45 * (_JMA_length - 1) / (0.45 * (_JMA_length - 1) + 2)
+    alpha = math.pow(beta, _power)
+    jma = 0.0
+    e0 = 0.0
+    e0 := (1 - alpha) * _src + alpha * nz(e0[1])
+    e1 = 0.0
+    e1 := (_src - e0) * (1 - beta) + beta * nz(e1[1])
+    e2 = 0.0
+    e2 := (e0 + phaseRatio * e1 - nz(jma[1])) * math.pow(1 - alpha, 2) + math.pow(alpha, 2) * nz(e2[1])
+    jma := e2 + nz(jma[1])
+    jma
+
+// ————— Defining JMA trend
+JMA_Rising = JMA(JMA_length, phase, power, src) > JMA(JMA_length, phase, power, src)[1]
+JMA_Falling = JMA(JMA_length, phase, power, src) < JMA(JMA_length, phase, power, src)[1]
+
+// ————— JMA Plotting
+JMA_color = JMA_Rising ? color.lime : JMA_Falling ? #e91e63 : color.orange
+plot(Act_JMA ? JMA(JMA_length, phase, power, src) : na, color=JMA_color, linewidth=2, title='JMA')
+
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+// ———————————————————— Range Filter
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+
+// ————— Range Filter calculation
+Range_filter(_src, _per, _mult) =>
+    float _upward = 0.0
+    float _downward = 0.0
+    wper = _per * 2 - 1
+    avrng = ta.ema(math.abs(_src - _src[1]), _per)
+    _smoothrng = ta.ema(avrng, wper) * _mult
+    _filt = _src
+    _filt := _src > nz(_filt[1]) ? _src - _smoothrng < nz(_filt[1]) ? nz(_filt[1]) : _src - _smoothrng : _src + _smoothrng > nz(_filt[1]) ? nz(_filt[1]) : _src + _smoothrng
+    _upward := _filt > _filt[1] ? nz(_upward[1]) + 1 : _filt < _filt[1] ? 0 : nz(_upward[1])
+    _downward := _filt < _filt[1] ? nz(_downward[1]) + 1 : _filt > _filt[1] ? 0 : nz(_downward[1])
+    [_smoothrng, _filt, _upward, _downward]
+
+// ————— Defining variables for include in future conditions
+[smoothrng, filt, upward, downward] = Range_filter(src, per, mult)
+
+// ————— Defining high and low bands
+hband = filt + smoothrng
+lband = filt - smoothrng
+
+// ————— Range Filter Plotting
+filtcolor = upward > 0 ? color.lime : downward > 0 ? color.red : color.orange
+filtplot = plot(Act_RF ? filt : na, color=filtcolor, linewidth=1, title='RF')
+hbandplot = plot(Act_RF ? hband : na, color=filtcolor, title='RF High Target')
+lbandplot = plot(Act_RF ? lband : na, color=filtcolor, title='RF Low Target')
+fill(hbandplot, lbandplot, color=filtcolor, title='RF Target Range')
+
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+// ———————————————————— ADX
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+
+// ————— Classic ADX calculating
+calcADX(_len) =>
+    up = ta.change(high)
+    down = -ta.change(low)
+    plusDM = na(up) ? na : up > down and up > 0 ? up : 0
+    minusDM = na(down) ? na : down > up and down > 0 ? down : 0
+    truerange = ta.rma(ta.tr, _len)
+    _plus = fixnan(100 * ta.rma(plusDM, _len) / truerange)
+    _minus = fixnan(100 * ta.rma(minusDM, _len) / truerange)
+    sum = _plus + _minus
+    _adx = 100 * ta.rma(math.abs(_plus - _minus) / (sum == 0 ? 1 : sum), _len)
+    [_plus, _minus, _adx]
+
+// ————— Masanakamura ADX calculating
+calcADX_Masanakamura(_len) =>
+    SmoothedTrueRange = 0.0
+    SmoothedDirectionalMovementPlus = 0.0
+    SmoothedDirectionalMovementMinus = 0.0
+    TrueRange = math.max(math.max(high - low, math.abs(high - nz(close[1]))), math.abs(low - nz(close[1])))
+    DirectionalMovementPlus = high - nz(high[1]) > nz(low[1]) - low ? math.max(high - nz(high[1]), 0) : 0
+    DirectionalMovementMinus = nz(low[1]) - low > high - nz(high[1]) ? math.max(nz(low[1]) - low, 0) : 0
+    SmoothedTrueRange := nz(SmoothedTrueRange[1]) - nz(SmoothedTrueRange[1]) / _len + TrueRange
+    SmoothedDirectionalMovementPlus := nz(SmoothedDirectionalMovementPlus[1]) - nz(SmoothedDirectionalMovementPlus[1]) / _len + DirectionalMovementPlus
+    SmoothedDirectionalMovementMinus := nz(SmoothedDirectionalMovementMinus[1]) - nz(SmoothedDirectionalMovementMinus[1]) / _len + DirectionalMovementMinus
+    DIP = SmoothedDirectionalMovementPlus / SmoothedTrueRange * 100
+    DIM = SmoothedDirectionalMovementMinus / SmoothedTrueRange * 100
+    DX = math.abs(DIP - DIM) / (DIP + DIM) * 100
+    adx = ta.sma(DX, _len)
+    [DIP, DIM, adx]
+
+// ————— Defining variables for include in future conditions   
+[DIPlusC, DIMinusC, ADXC] = calcADX(ADX_len)
+[DIPlusM, DIMinusM, ADXM] = calcADX_Masanakamura(ADX_len)
+DIPlus = ADX_options == 'CLASSIC' ? DIPlusC : DIPlusM
+DIMinus = ADX_options == 'CLASSIC' ? DIMinusC : DIMinusM
+ADX = ADX_options == 'CLASSIC' ? ADXC : ADXM
+
+// ————— Plotting ADX bar colors
+ADX_color = DIPlus > DIMinus and ADX > th ? color.rgb(0, 255, 0) : DIPlus < DIMinus and ADX > th ? color.rgb(255, 0, 0) : color.rgb(255, 255, 255)
+barcolor(color=Act_ADX ? ADX_color : na, title='ADX')
+
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+// ———————————————————— SAR
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+
+// ————— SAR calculation from TV
+SAR = ta.sar(Sst, Sinc, Smax)
+
+// ————— SAR Plotting
+plot(Act_SAR ? SAR : na, color=ADX_color, style=plot.style_circles, title='SAR')
+
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+// ———————————————————— RSI with Volume
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+
+// ————— RSI with volume calculation
+WiMA(_src, W_length) =>
+    var float MA_s = 0.0
+    MA_s := (_src + nz(MA_s[1] * (W_length - 1))) / W_length
+    MA_s
+RSI_Volume(fv, _length) =>
+    up = fv > fv[1] ? math.abs(fv - fv[1]) * volume : 0
+    dn = fv < fv[1] ? math.abs(fv - fv[1]) * volume : 0
+    upt = WiMA(up, _length)
+    dnt = WiMA(dn, _length)
+    100 * (upt / (upt + dnt))
+
+// ————— Defining variable for include in conditions
+RSI_V = RSI_Volume(src, RSI_len)
+
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+// ———————————————————— MACD
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+
+// ————— MAC-Z calculation
+calc_zvwap(pds) =>
+    mean = math.sum(volume * close, pds) / math.sum(volume, pds)
+    vwapsd = math.sqrt(ta.sma(math.pow(close - mean, 2), pds))
+    (close - mean) / vwapsd
+
+zscore = calc_zvwap(lengthz)
+fastMA = ta.sma(src, fastLength)
+slowMA = ta.sma(src, slowLength)
+macd = fastMA - slowMA
+macz = zscore + macd / ta.stdev(src, lengthStdev)
+signal = ta.sma(macz, signalLength)
+histmacz = macz - signal
+
+// ————— MACD calculation
+[_, _, histmacd] = ta.macd(src, fastLength, slowLength, signalLength)
+
+hist = MACD_options == 'MACD' ? histmacd : histmacz
+
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+// ———————————————————— Strategy
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+
+// ————— All indicators with long conditions and enable/disable option
+JMA_longCond := Act_JMA ? JMA_Rising : VOL_longCond
+RF_longCond := Act_RF ? high > hband and upward > 0 : JMA_longCond
+ADX_longCond := Act_ADX ? DIPlus > DIMinus and ADX > th : RF_longCond
+SAR_longCond := Act_SAR ? SAR < close : ADX_longCond
+RSI_longCond := Act_RSI ? RSI_V > RSI_obos : SAR_longCond
+MACD_longCond := Act_MACD ? hist > 0 : RSI_longCond
+VOL_longCond := Act_Vol ? volume > ta.sma(volume, sma_length) * volume_f : MACD_longCond
+
+// ————— All indicators with short conditions and enable/disable option
+JMA_shortCond := Act_JMA ? JMA_Falling : VOL_shortCond
+RF_shortCond := Act_RF ? low < lband and downward > 0 : JMA_shortCond
+ADX_shortCond := Act_ADX ? DIPlus < DIMinus and ADX > th : RF_shortCond
+SAR_shortCond := Act_SAR ? SAR > close : ADX_shortCond
+RSI_shortCond := Act_RSI ? RSI_V < RSI_obos : SAR_shortCond
+MACD_shortCond := Act_MACD ? hist < 0 : RSI_shortCond
+VOL_shortCond := Act_Vol ? volume > ta.sma(volume, sma_length) * volume_f : MACD_shortCond
+
+// ————— Defining long/short condition from indicators + volume
+longCond := JMA_longCond and RF_longCond and ADX_longCond and SAR_longCond and RSI_longCond and MACD_longCond and VOL_longCond
+shortCond := JMA_shortCond and RF_shortCond and ADX_shortCond and SAR_shortCond and RSI_shortCond and MACD_shortCond and VOL_shortCond
+
+// ————— Avoiding confirmed long/short simultaneity
+CondIni_long := longCond[1] ? 1 : shortCond[1] ? -1 : nz(CondIni_long[1])
+CondIni_short := longCond[1] ? 1 : shortCond[1] ? -1 : nz(CondIni_short[1])
+
+// ————— Confirmed long/short conditions
+// longCondition = (longCond[1] and nz(CondIni_long[1]) == -1)
+// shortCondition = (shortCond[1] and nz(CondIni_short[1]) == 1)
+longCondition = longCond[1]
+shortCondition = shortCond[1]
+
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+// ———————————————————— Position Price
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+
+// ————— Last opened long/short price on unconfirmed/confirmed conditions
+last_open_longCondition     := longCondition  or Final_long_BB[1]  ? close[1] : nz(last_open_longCondition[1])
+last_open_shortCondition    := shortCondition or Final_short_BB[1] ? close[1] : nz(last_open_shortCondition[1])
+
+// ————— Check if your last position was a confirmed long or a short
+last_longCondition          := longCondition  or Final_long_BB[1]  ? time : nz(last_longCondition[1])
+last_shortCondition         := shortCondition or Final_short_BB[1] ? time : nz(last_shortCondition[1])
+in_longCondition            = last_longCondition  > last_shortCondition
+in_shortCondition           = last_shortCondition > last_longCondition
+
+// ————— Check if your last position was a confirmed final long or short without BB
+last_Final_longCondition    := longCondition  ? time : nz(last_Final_longCondition[1])
+last_Final_shortCondition   := shortCondition ? time : nz(last_Final_shortCondition[1])
+
+// ————— Calculating and Plotting the price average
+Position_Price := nz(Position_Price[1])
+Position_Price := longCondition or Final_long_BB ? last_open_longCondition : shortCondition or Final_short_BB ? last_open_shortCondition : na
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+// ———————————————————— Take Profit
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+
+// ————— Calculating Take Profit based on user input
+tp_long = tp_long0 / 100
+tp_short = tp_short0 / 100
+
+// ————— First TP Conditions
+long_tp             := high >= (fixnan(Position_Price) * (1 + tp_long))  and in_longCondition
+short_tp            := low  <= (fixnan(Position_Price) * (1 - tp_short)) and in_shortCondition
+
+// ————— Get the time of the last tp close
+last_long_tp        := long_tp  ? time : nz(last_long_tp[1])
+last_short_tp       := short_tp ? time : nz(last_short_tp[1])
+
+// ————— Final Take profit condition (never after the stop loss)
+Final_Long_tp       := (long_tp  and last_longCondition  > nz(last_long_tp[1])  and last_longCondition  > nz(last_long_sl[1]))
+Final_Short_tp      := (short_tp and last_shortCondition > nz(last_short_tp[1]) and last_shortCondition > nz(last_short_sl[1]))
+
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+// ———————————————————— Stop Loss
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+
+// ————— Stop Loss ATR calculation
+ATR_SL_Long = low - ta.atr(atrPeriod) * multiplierPeriod
+ATR_SL_Short = high + ta.atr(atrPeriod) * multiplierPeriod
+longStopPrev = nz(ATR_SL_Long[1], ATR_SL_Long)
+shortStopPrev = nz(ATR_SL_Short[1], ATR_SL_Short)
+ATR_SL_Long := close[1] > longStopPrev ? math.max(ATR_SL_Long, longStopPrev) : ATR_SL_Long
+ATR_SL_Short := close[1] < shortStopPrev ? math.min(ATR_SL_Short, shortStopPrev) : ATR_SL_Short
+
+// ————— Calculating Sl according Risk and Initial Capital
+sl = in_longCondition ? math.min(sl_l, Risk / (100 / (strategy.equity / close)) * 100 / quanTity) : math.min(sl_s, Risk / (100 / (strategy.equity / close)) * 100 / quanTity)
+
+// ————— LONG Stop Loss conditions
+Normal_long_sl      = Act_Conf_SL ?  ((SL_options == "NORMAL") ? ((Act_sl and in_longCondition  and close <= ((1 - (sl_l / 100)) * (fixnan(Position_Price))))) : na) :
+                                     ((SL_options == "NORMAL") ? ((Act_sl and in_longCondition  and low   <= ((1 - (sl_l / 100)) * (fixnan(Position_Price))))) : na)
+ATR_long_sl         = Act_Conf_SL ?  ((SL_options == "ATR") ?    ((Act_sl and in_longCondition  and close <= (ATR_SL_Long))) : na) :
+                                     ((SL_options == "ATR") ?    ((Act_sl and in_longCondition  and low   <= (ATR_SL_Long))) : na)
+Both_long_sl        = Act_Conf_SL ?  ((SL_options == "BOTH") ?   ((Act_sl and in_longCondition  and close <= ((1 - (sl_l / 100)) * (fixnan(Position_Price)))) or 
+                                                                 ((Act_sl and in_longCondition  and close <= (ATR_SL_Long)))) : na) :
+                                     ((SL_options == "BOTH") ?   ((Act_sl and in_longCondition  and low   <= ((1 - (sl_l / 100)) * (fixnan(Position_Price)))) or 
+                                                                 ((Act_sl and in_longCondition  and low   <= (ATR_SL_Long)))) : na)
+// ————— LONG Stop Loss Price Declaration
+if (Act_Conf_SL and SL_options == 'NORMAL')
+    longStopLossPrice := strategy.position_avg_price * (1 - sl_l / 100)
+else if (Act_Conf_SL and SL_options == 'ATR') 
+    longStopLossPrice := ATR_SL_Long
+else if (Act_Conf_SL and SL_options == 'BOTH') 
+    longStopLossPrice := math.min((1 - sl_l / 100) * fixnan(Position_Price), ATR_SL_Long)
+
+// ————— SHORT Stop Loss conditions
+Normal_short_sl     = Act_Conf_SL ?  ((SL_options == "NORMAL") ? ((Act_sl and in_shortCondition and close >= ((1 + (sl_s / 100)) * (fixnan(Position_Price))))) : na) :
+                                     ((SL_options == "NORMAL") ? ((Act_sl and in_shortCondition and high  >= ((1 + (sl_s / 100)) * (fixnan(Position_Price))))) : na)
+ATR_short_sl        = Act_Conf_SL ?  ((SL_options == "ATR") ?    ((Act_sl and in_shortCondition and close >= (ATR_SL_Short))) : na) :
+                                     ((SL_options == "ATR") ?    ((Act_sl and in_shortCondition and high  >= (ATR_SL_Short))) : na)
+Both_short_sl       = Act_Conf_SL ?  ((SL_options == "BOTH") ?   ((Act_sl and in_shortCondition and close >= ((1 + (sl_s/100)) * (fixnan(Position_Price)))) or 
+                                                                 ((Act_sl and in_shortCondition and close >= (ATR_SL_Short)))) : na) :
+                                     ((SL_options == "BOTH") ?   ((Act_sl and in_shortCondition and high  >= ((1 + (sl_s/100)) * (fixnan(Position_Price)))) or 
+                                                                 ((Act_sl and in_shortCondition and high  >= (ATR_SL_Short)))) : na)
+
+// ————— SHORT Stop Loss Price Declaration
+if (Act_Conf_SL and SL_options == 'NORMAL') 
+    shortStopLossPrice := strategy.position_avg_price * (1 + sl_s / 100)
+else if (Act_Conf_SL and SL_options == 'ATR') 
+    shortStopLossPrice := ATR_SL_Short
+else if (Act_Conf_SL and SL_options == 'BOTH') 
+    shortStopLossPrice := math.max((1 + sl_s / 100) * fixnan(Position_Price), ATR_SL_Short)
+
+// ————— Get the time of the last sl close
+last_long_sl := Normal_long_sl or ATR_long_sl or Both_long_sl ? time : nz(last_long_sl[1])
+last_short_sl := Normal_short_sl or ATR_short_sl or Both_short_sl ? time : nz(last_short_sl[1])
+
+// ————— Final Stop Loss condition
+Final_Long_sl := (Normal_long_sl or ATR_long_sl or Both_long_sl) and last_longCondition > nz(last_long_sl[1]) and last_longCondition > nz(last_long_tp[1])
+Final_Short_sl := (Normal_short_sl or ATR_short_sl or Both_short_sl) and last_shortCondition > nz(last_short_sl[1]) and last_shortCondition > nz(last_short_tp[1])
+
+// //Plottin LONG - ATR or Normal Stop Loss
+sllongPlot = plot(LONGPosition ? longStopLossPrice : na, title='Long SL Level', color=color.new(#b300ff, 0), linewidth=1, style=plot.style_circles)
+
+// //Plottin SHORT - ATR or Normal Stop Loss
+slshortPlot = plot(SHORTPosition ? shortStopLossPrice : na, title='Short SL Level', color=color.new(#b300ff, 0), linewidth=1, style=plot.style_circles)
+
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+// ————————————————————  Bollinger Bands Re-entry
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+
+BB_basis = ta.sma(src, BB_length)
+BB_dev = BB_mult * ta.stdev(src, BB_length)
+BB_upper = BB_basis + BB_dev
+BB_lower = BB_basis - BB_dev
+u_BB = plot(Act_BB ? BB_upper : na, title='Upper Bollinger Band', color=color.new(#009688, 0), linewidth=2)
+l_BB = plot(Act_BB ? BB_lower : na, title='Lower Bollinger Band', color=color.new(#f06292, 0), linewidth=2)
+fill(u_BB, l_BB, title='Bollinger Band Background', color=in_longCondition ? #009688 : #f06292)
+
+// ————— Initial Bollinger Bands conditions
+BB_long = Act_BB and in_longCondition and not(DIPlus < DIMinus and ADX > th) and close <= BB_lower and close < last_open_longCondition * (1 - bbBetterPrice / 100)
+BB_short = Act_BB and in_shortCondition and not(DIPlus > DIMinus and ADX > th) and close >= BB_upper and close > last_open_shortCondition * (1 + bbBetterPrice / 100)
+
+// ————— Get the time of the last BB close
+last_long_BB := BB_long ? time : nz(last_long_BB[1])
+last_short_BB := BB_short ? time : nz(last_short_BB[1])
+
+// ————— Final Bollinger Bands condition for long
+Final_long_BB := BB_long and last_Final_longCondition > nz(last_long_BB[1]) and last_longCondition > nz(last_long_tp[1]) and last_longCondition > nz(last_long_sl[1]) and not Final_Long_sl
+
+// ————— Final Bollinger Bands condition for short                 
+Final_short_BB := BB_short and last_Final_shortCondition > nz(last_short_BB[1]) and last_shortCondition > nz(last_short_tp[1]) and last_shortCondition > nz(last_short_sl[1]) and not Final_Short_sl
+
+// ————— Final confirmed Re-entries on long & short conditions
+Final_Long_BB = Final_long_BB[1]
+Final_Short_BB = Final_short_BB[1]
+
+// ————— Weekend
+// W_color = dayofweek == dayofweek.sunday or dayofweek == dayofweek.saturday ? color.white : na
+// bgcolor(W_color, title='Weekend')
+
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+// ————————————————————  Re-entry Conditions
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+
+// ————— Re-entry on long after tp, sl or Xlong
+// if Final_Long_tp or Final_Long_sl
+//     CondIni_long := -1
+
+// // ————— Re-entry on short after tp, sl or Xshort
+// if Final_Short_tp or Final_Short_sl
+//     CondIni_short := 1
+
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+// ————————————————————  Backtest
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+
+// Defining new final unconfirmed long conditions
+// _longCondition = longCond and not in_longCondition or longCond and Final_Long_tp or longCond and Final_Long_sl or longCond and not longCondition and last_long_tp >= nz(last_longCondition) or longCond and not longCondition and last_long_sl >= nz(last_longCondition)
+
+// // Defining new final unconfirmed short conditions
+// _shortCondition = shortCond and not in_shortCondition or shortCond and Final_Short_tp or shortCond and Final_Short_sl or shortCond and not shortCondition and last_short_tp >= nz(last_shortCondition) or shortCond and not shortCondition and last_short_sl >= nz(last_shortCondition)
+
+
+// ————— Defining new final unconfirmed long conditions
+_longCondition      = (longCond and not in_longCondition) or 
+                      (longCond and Final_Long_tp) or 
+                      (longCond and Final_Long_sl) or
+                      (longCond and not longCondition and (last_long_tp >= nz(last_longCondition))) or 
+                      (longCond and not longCondition and (last_long_sl >= nz(last_longCondition)))
+   
+// ————— Defining new final unconfirmed short conditions
+_shortCondition     = (shortCond and not in_shortCondition) or 
+                      (shortCond and Final_Short_tp) or 
+                      (shortCond and Final_Short_sl) or 
+                      (shortCond and not shortCondition and (last_short_tp >= nz(last_shortCondition))) or 
+                      (shortCond and not shortCondition and (last_short_sl >= nz(last_shortCondition)))
+
+// ————— Test period declaration
+testPeriod = time >= timenow - backtest_time
+
+// ————— Volume Factor for determine quantities
+Volume_Factor_Leverage = math.min(Max_Lev, math.max(1, math.round(volume / ta.sma(volume, sma_length))))
+last_dynamic_Leverage_long := _longCondition ? Volume_Factor_Leverage : nz(last_dynamic_Leverage_long[1])
+last_dynamic_Leverage_short := _shortCondition ? Volume_Factor_Leverage : nz(last_dynamic_Leverage_short[1])
+
+//  ————— FINAL Strategy entry conditions
+
+isStrategyFinalLongCondition = _longCondition and Act_BT and testPeriod and NOPositionOpened // To be added more...
+isStrategyFinalShortCondition = _shortCondition and Act_BT and testPeriod and NOPositionOpened // To be added more...
+
+// ————— Plotting Strategy Conditions for entry
+plotshape(series=isStrategyFinalLongCondition, title="Buy Signal", text="LONG", textcolor=color.white, style=shape.labelup, size=size.small, location=location.belowbar, color=color.new(#5bff32, 22))
+plotshape(series=isStrategyFinalShortCondition, title="Sell Signal", text="SHORT", textcolor=color.white, style=shape.labeldown, size=size.small, location=location.abovebar, color=color.new(#ff3232, 22))
+
+
+// ————— Entering long positions
+if (isStrategyFinalLongCondition)
+    strategy.entry(id = 'Long Entry', direction = strategy.long, qty = Volume_Factor_Leverage * quanTity)
+    //strategy.exit(id = 'Long Exit', from_entry = 'Long Entry', profit = math.abs(last_open_longCondition * (1 + tp_long) - last_open_longCondition) / syminfo.mintick, limit = strategy.position_avg_price * (1 + tp_long), stop = longStopLossPrice, comment_profit = 'Long TP', comment_loss = 'Long SL')
+if Final_long_BB
+    strategy.entry(id = 'BB Long Entry', direction = strategy.long, qty = last_dynamic_Leverage_long * quanTity)
+
+// ————— Exiting long positions
+
+// ————— Entering short positions
+if (isStrategyFinalShortCondition)
+    strategy.entry(id = 'Short Entry', direction = strategy.short, qty = Volume_Factor_Leverage * quanTity)
+    //strategy.exit(id = 'Short Exit', from_entry = 'Short Entry', profit = math.abs(last_open_shortCondition * (1 - tp_short) - last_open_shortCondition) / syminfo.mintick, limit = strategy.position_avg_price * (1 - tp_short), stop = shortStopLossPrice, comment_profit = 'Short TP', comment_loss = 'Short SL')
+if Final_short_BB
+    strategy.entry(id = 'BB Short Entry', direction = strategy.short, qty = last_dynamic_Leverage_short * quanTity)
+
+
+//  ————— Long Take Profit Price Declaration & Plotting
+longTakeProfitPrice := if LONGPosition
+    if not(strategy.position_size > 0)
+        strategy.position_avg_price * (1 + tp_long)
+    else
+        nz(longTakeProfitPrice[1], close[1] * (1 + tp_long))
+else
+    na
+
+tplPlot = plot(series = longTakeProfitPrice, title='Long TP Level', style=plot.style_circles, color=color.rgb(0, 255, 255), linewidth=1, offset = 0)
+
+//  ————— Short Take Profit Price Declaration
+shortTakeProfitPrice := if SHORTPosition
+    if not(strategy.position_size < 0)
+        strategy.position_avg_price * (1 - tp_short)
+    else
+        nz(shortTakeProfitPrice[1], close[1] * (1 - tp_short))
+else
+    na
+
+tpsPlot = plot(series = shortTakeProfitPrice, title='Short TP Level', style=plot.style_circles, color=color.rgb(0, 255, 255), linewidth=1, offset = 0)
+
+// ————— Exiting LONG & SHORT positions
+if LONGPosition and Act_BT
+    if high >= strategy.position_avg_price
+        strategy.cancel(id = 'Long Stop Loss')
+        strategy.exit(id = 'Long Take Profit', from_entry = 'Long Entry', limit = longTakeProfitPrice, comment_profit = 'Long TP')
+    else if Act_sl
+        strategy.cancel(id = 'Long Take Profit')
+        strategy.exit(id = 'Long Stop Loss', from_entry = 'Long Entry', stop = longStopLossPrice, comment_loss = 'Long SL')
+else if SHORTPosition and Act_BT //and Act_sl
+    if low <= strategy.position_avg_price
+        strategy.cancel(id = 'Short Stop Loss')
+        strategy.exit(id = 'Short Take Profit', from_entry = 'Short Entry', limit = shortTakeProfitPrice, comment_profit = 'Short TP')
+    else if Act_sl
+        strategy.cancel(id = 'Short Take Profit')
+        strategy.exit(id = 'Short Stop Loss', from_entry = 'Short Entry', stop = shortStopLossPrice, comment_loss = 'Short SL')
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+// ————————————————————  Signal Plotting
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+
+// // ————— TP Long Levels
+entryPositionPrice = strategy.position_avg_price
+// tplLevel = in_longCondition and last_longCondition > nz(last_long_tp[1]) and last_longCondition > nz(last_long_sl[1]) and not Final_Long_sl[1] ? fixnan(Position_Price) * (1 + tp_long) : na
+
+// tplPlot = plot(tplLevel, title='Long TP Level', style=plot.style_circles, color=color.rgb(0, 255, 255), linewidth=1)
+entryPlot = plot(entryPositionPrice, title="Entry Price", style=plot.style_cross, linewidth=1, color=color.rgb(255, 255, 255, 52))
+fill(entryPlot, tplPlot, title="TP Fill", color=color.rgb(0, 255, 255, 77))
+
+// tpsLevel = in_shortCondition and last_shortCondition > nz(last_short_tp[1]) and last_shortCondition > nz(last_short_sl[1]) and not Final_Short_sl[1] ? fixnan(Position_Price) * (1 - tp_short) : na
+
+// tpsPlot = plot(tpsLevel, title='Short TP Level', style=plot.style_circles, color=color.rgb(0, 255, 255), linewidth=1)
+entrysPlot = plot(entryPositionPrice, title="Entry Price", style=plot.style_cross, linewidth=1, color=color.rgb(255, 255, 255, 52))
+fill(entrysPlot, tpsPlot, title="TP Fill", color=color.rgb(0, 255, 255, 78))
+
+// // ————— SL Long Levels
+// normalLongSLLevel = in_longCondition and not Final_Long_sl ? longStopLossPrice : na
+// slshortPlot = plot(normalLongSLLevel, title='Normal Long SL Level', style=plot.style_circles, color=color.new(#b300ff, 0), linewidth=1)
+fill(entrysPlot, slshortPlot, title="SL Long Fill", color=color.new(#b300ff, 78))
+
+// // ————— SL Short Levels
+// normalShortSLLevel = in_shortCondition and not Final_Short_sl ? shortStopLossPrice : na
+// sllongPlot = plot(normalShortSLLevel, title='Normal Short SL Level', style=plot.style_circles, color=color.new(#b300ff, 0), linewidth=1)
+fill(entrysPlot, sllongPlot, title="SL Short Fill", color=color.new(#b300ff, 78))
+
+
+// Canceling long exit orders to avoid simultaneity with re-entry
+if Final_long_BB
+    strategy.cancel('Long exit')
+
+// ————— Closing SHORT with STOP LOSS
+
+
+// Canceling short exit orders to avoid simultaneity with re-entry
+if Final_short_BB
+    strategy.cancel('TP Short')
+
+// ————— Closing all positions with Xlong/Xshort
+// if Final_Long_sl and Act_Conf_SL or Final_Short_sl and Act_Conf_SL
+//     strategy.close_all()
+
+
+// -----------------------------------------------------------------------DASHBOARD ZONE --------------------------------------------------------------------------------------------------------------------------//
+// Global Dashboard Variables
+// Dashboard Table Text Size
+i_tableTextSize = input.string(title="  DASHBOARD SIZE", defval="Normal", options=["Auto",  "Huge",  "Large", "Normal", "Small", "Tiny"], group="DASHBOARD SIZE")
+table_text_size(s) =>
+    switch s
+        "Auto"   => size.auto   
+        "Huge"   => size.huge   
+        "Large"  => size.large  
+        "Normal" => size.normal 
+        "Small"  => size.small
+        => size.tiny
+tableTextSize = table_text_size(i_tableTextSize)
+/// Performance Summary Dashboard
+i_showDashboard = input.bool(title="SHOW DASHBOARD", defval=true, group="PERFORMANCE DASHBOARD")
+f_fillCell(_table, _column, _row, _title, _value, _bgcolor, _txtcolor) =>
+    _cellText = _title + "\n" + _value
+    table.cell(_table, _column, _row, _cellText, bgcolor=_bgcolor, text_color=_txtcolor, text_size=tableTextSize)
+// Draw dashboard table
+if i_showDashboard
+    var bgcolor = color.new(color.black,0)   
+    // Keep track of Wins/Losses streaks
+    newWin  = (strategy.wintrades  > strategy.wintrades[1]) and (strategy.losstrades == strategy.losstrades[1]) and (strategy.eventrades == strategy.eventrades[1])
+    newLoss = (strategy.wintrades == strategy.wintrades[1]) and (strategy.losstrades  > strategy.losstrades[1]) and (strategy.eventrades == strategy.eventrades[1])
+    varip int winRow     = 0
+    varip int lossRow    = 0
+    varip int maxWinRow  = 0
+    varip int maxLossRow = 0
+    if newWin
+        lossRow := 0
+        winRow := winRow + 1
+    if winRow > maxWinRow
+        maxWinRow := winRow        
+    if newLoss
+        winRow := 0
+        lossRow := lossRow + 1
+    if lossRow > maxLossRow
+        maxLossRow := lossRow
+    // Prepare stats table
+    var table dashTable = table.new(position.middle_right, 1, 15, border_width=1)  
+    if barstate.islastconfirmedhistory
+        // Update table
+        dollarReturn = strategy.netprofit
+        f_fillCell(dashTable, 0, 0, "Start:", str.format("{0,date,long}", strategy.closedtrades.entry_time(0)) , bgcolor, color.white) // + str.format(" {0,time,HH:mm}", strategy.closedtrades.entry_time(0)) 
+        f_fillCell(dashTable, 0, 1, "End:", str.format("{0,date,long}", strategy.opentrades.entry_time(0)) , bgcolor, color.white) // + str.format(" {0,time,HH:mm}", strategy.opentrades.entry_time(0))
+        _profit = (strategy.netprofit / strategy.initial_capital) * 100
+        f_fillCell(dashTable, 0, 2, "Net Profit:", str.tostring(_profit, '##.##') + "%", _profit > 0 ? color.teal : color.maroon, color.white)
+        _numOfDaysInStrategy = (strategy.opentrades.entry_time(0) - strategy.closedtrades.entry_time(0)) / (1000 * 3600 * 24)
+        f_fillCell(dashTable, 0, 3, "Percent Per Day", str.tostring(_profit / _numOfDaysInStrategy, '#########################.#####')+"%", _profit > 0 ? color.teal : color.maroon, color.white)
+        _winRate = ( strategy.wintrades / strategy.closedtrades ) * 100
+        f_fillCell(dashTable, 0, 4, "Percent Profitable:", str.tostring(_winRate, '##.##') + "%", _winRate < 50 ? color.maroon : _winRate < 75 ? #999900 : color.teal, color.white)
+        f_fillCell(dashTable, 0, 5, "Profit Factor:", str.tostring(strategy.grossprofit / strategy.grossloss,  '##.###'), strategy.grossprofit > strategy.grossloss ? color.teal : color.maroon, color.white)
+        f_fillCell(dashTable, 0, 6, "Total Trades:", str.tostring(strategy.closedtrades), bgcolor, color.white)
+        f_fillCell(dashTable, 0, 8, "Max Wins In A Row:", str.tostring(maxWinRow, '######') , bgcolor, color.white)
+        f_fillCell(dashTable, 0, 9, "Max Losses In A Row:", str.tostring(maxLossRow, '######') , bgcolor, color.white)
+// Monthly Table Performance Dashboard
+i_showMonthlyPerformance = input.bool(true,'SHOW DASHBOARD', group='MONTHLY RETURNS DASHBOARD')
+i_monthlyReturnPercision = 2
+if i_showMonthlyPerformance
+    new_month = month(time) != month(time[1])
+    new_year  = year(time)  != year(time[1])   
+    eq = strategy.equity    
+    bar_pnl = eq / eq[1] - 1    
+    cur_month_pnl = 0.0
+    cur_year_pnl  = 0.0   
+    // Current Monthly P&L
+    cur_month_pnl := new_month ? 0.0 : 
+                     (1 + cur_month_pnl[1]) * (1 + bar_pnl) - 1    
+    // Current Yearly P&L
+    cur_year_pnl := new_year ? 0.0 : 
+                     (1 + cur_year_pnl[1]) * (1 + bar_pnl) - 1      
+    // Arrays to store Yearly and Monthly P&Ls
+    var month_pnl  = array.new_float(0)
+    var month_time = array.new_int(0) 
+    var year_pnl  = array.new_float(0)
+    var year_time = array.new_int(0)   
+    last_computed = false  
+    if (not na(cur_month_pnl[1]) and (new_month or barstate.islastconfirmedhistory))
+        if (last_computed[1])
+            array.pop(month_pnl)
+            array.pop(month_time)          
+        array.push(month_pnl , cur_month_pnl[1])
+        array.push(month_time, time[1])  
+    if (not na(cur_year_pnl[1]) and (new_year or barstate.islastconfirmedhistory))
+        if (last_computed[1])
+            array.pop(year_pnl)
+            array.pop(year_time)          
+        array.push(year_pnl , cur_year_pnl[1])
+        array.push(year_time, time[1])   
+    last_computed := barstate.islastconfirmedhistory ? true : nz(last_computed[1])   
+    // Monthly P&L Table    
+    var monthly_table = table(na)   
+    if (barstate.islastconfirmedhistory)
+        monthly_table := table.new(position.top_right, columns = 14, rows = array.size(year_pnl) + 1, border_width = 1)
+        table.cell(monthly_table, 0,  0, "Monthly Retun",     bgcolor = #cccccc, text_size=size.small)
+        table.cell(monthly_table, 1,  0, "Jan",  bgcolor = #cccccc, text_size=size.small)
+        table.cell(monthly_table, 2,  0, "Feb",  bgcolor = #cccccc, text_size=size.small)
+        table.cell(monthly_table, 3,  0, "Mar",  bgcolor = #cccccc, text_size=size.small)
+        table.cell(monthly_table, 4,  0, "Apr",  bgcolor = #cccccc, text_size=size.small)
+        table.cell(monthly_table, 5,  0, "May",  bgcolor = #cccccc, text_size=size.small)
+        table.cell(monthly_table, 6,  0, "Jun",  bgcolor = #cccccc, text_size=size.small)
+        table.cell(monthly_table, 7,  0, "Jul",  bgcolor = #cccccc, text_size=size.small)
+        table.cell(monthly_table, 8,  0, "Aug",  bgcolor = #cccccc, text_size=size.small)
+        table.cell(monthly_table, 9,  0, "Sep",  bgcolor = #cccccc, text_size=size.small)
+        table.cell(monthly_table, 10, 0, "Oct",  bgcolor = #cccccc, text_size=size.small)
+        table.cell(monthly_table, 11, 0, "Nov",  bgcolor = #cccccc, text_size=size.small)
+        table.cell(monthly_table, 12, 0, "Dec",  bgcolor = #cccccc, text_size=size.small)
+        table.cell(monthly_table, 13, 0, "Yearly Return", bgcolor = #999999, text_size=size.small)
+        for yi = 0 to array.size(year_pnl) - 1
+            table.cell(monthly_table, 0,  yi + 1, str.tostring(year(array.get(year_time, yi))), bgcolor = #cccccc, text_size=size.small)           
+            y_color = array.get(year_pnl, yi) > 0 ? color.new(color.teal, transp = 40) : color.new(color.gray, transp = 40)
+            table.cell(monthly_table, 13, yi + 1, str.tostring(math.round(array.get(year_pnl, yi) * 100, i_monthlyReturnPercision)), bgcolor = y_color, text_color=color.new(color.white, 0),text_size=size.small)          
+        for mi = 0 to array.size(month_time) - 1
+            m_row   = year(array.get(month_time, mi))  - year(array.get(year_time, 0)) + 1
+            m_col   = month(array.get(month_time, mi)) 
+            m_color = array.get(month_pnl, mi) > 0 ? color.new(color.teal, transp = 40) : color.new(color.maroon, transp = 40)            
+            table.cell(monthly_table, m_col, m_row, str.tostring(math.round(array.get(month_pnl, mi) * 100, i_monthlyReturnPercision)), bgcolor = m_color, text_color=color.new(color.white, 0), text_size=size.small)
+
+// -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- //

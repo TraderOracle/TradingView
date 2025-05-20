@@ -1,0 +1,569 @@
+//@version=6
+import TradingView/ta/10
+indicator("Shrike Marker", "Shrike Marker v2", overlay=true)
+
+//#region SETTINGS
+bShowTrampoline = input.bool(false, title="Show Trampoline", group="General Settings")
+bShowGap = input.bool(true, title="Show Gap", group="General Settings")
+bShowShift = input.bool(true, title="Show Shift", group="General Settings")
+bShowStrongBuy = input.bool(true, title="Show Strong Buy", group="General Settings")
+bShowStrongSell = input.bool(true, title="Show Strong Sell", group="General Settings")
+bShowEngulfing = input.bool(true, title="Show Engulfing off BB", group="General Settings")
+
+smEMA = input.int(21, "Standard EMA", minval=1, group="Indicator Settings")
+bigEMA = input.int(200, "Longer EMA", minval=1, group="Indicator Settings")
+
+iBBThreshold = input.float(0.0015, minval=0.0, title="Bollinger Lower Threshold", tooltip="0.003 for daily, 0.0015 for 30 min candles", group="Indicator Settings")
+RSILower = input.int(25, minval=1, title="RSI Lower Threshold", tooltip="Normally 25", group="Indicator Settings")
+RSIUpper  = input.int(72, minval=1, title="RSI Upper Threshold", tooltip="Normally 75", group="Indicator Settings")
+
+sensitivity = input.int(150, title="Sensitivity", group="Indicator Settings")
+atrTP = input.float(1.6, title="ATR Multiplier for Take Profit")
+
+rsiLen = 14
+bbLength = 20
+bbMultiplier = 2
+var cGreen = 0
+var cRed = 0
+var pos = false 
+var neg = false 
+//#endregion
+
+//#region FUNCTIONS
+
+string jsonS = "{  \"embeds\": [{    \"color\": %COLOR%,    \"title\": \" %TITLE% \",    \"thumbnail\": {      \"url\": \"%THUMB%\"     },    \"fields\":[      {        \"name\": \" %FIELD1_TITLE% \",        \"value\": \" %FIELD1_VALUE% \",        \"inline\": true      }    ],    \"footer\": {      \"text\": \" %FOOTER_TITLE% \",      \"url\": \"http://google.com\"     }  }]}"
+
+BBUpper0(len, m) =>
+    float basis = ta.sma(close, len)
+    float dev = m * ta.stdev(close, len)
+    basis + dev
+
+BBLower0(len, m) =>
+    float basis = ta.sma(close, len)
+    float dev = m * ta.stdev(close, len)
+    basis - dev
+
+BBUpper1(len, m) =>
+    float basis = ta.sma(close[1], len)
+    float dev = m * ta.stdev(close[1], len)
+    basis + dev
+
+BBLower1(len, m) =>
+    float basis = ta.sma(close[1], len)
+    float dev = m * ta.stdev(close[1], len)
+    basis - dev
+
+calc_macd0() =>
+    fastMA = ta.ema(close, 20)
+    slowMA = ta.ema(close, 40)
+    fastMA - slowMA
+
+calc_macd1() =>
+    fastMA = ta.ema(close[1], 20)
+    slowMA = ta.ema(close[1], 40)
+    fastMA - slowMA
+
+Trampoline() =>
+    result = 0
+    isRed = close < open
+    isGreen = close > open
+
+    basisBB = ta.sma(close, 20)
+    devBB = 2.0 * ta.stdev(close, 20)
+    upperBB = basisBB + devBB
+    lowerBB = basisBB - devBB
+    downBB = low < lowerBB or high < lowerBB
+    upBB = low > upperBB or high > upperBB
+    bbw = (upperBB - lowerBB) / basisBB
+
+    up = ta.rma(math.max(ta.change(close), 0), 14)
+    down = ta.rma(-math.min(ta.change(close), 0), 14)
+    rsiM = down == 0 ? 100 : up == 0 ? 0 : 100 - (100 / (1 + up / down))
+
+    back1 = isRed[1] and rsiM[1] <= 25 and close[1] < lowerBB[1] and bbw[1] > 0.0015
+    back2 = isRed[2] and rsiM[2] <= 25 and close[2] < lowerBB[2] and bbw[2] > 0.0015
+    back3 = isRed[3] and rsiM[3] <= 25 and close[3] < lowerBB[3] and bbw[3] > 0.0015
+    back4 = isRed[4] and rsiM[4] <= 25 and close[4] < lowerBB[4] and bbw[4] > 0.0015
+    back5 = isRed[5] and rsiM[5] <= 25 and close[5] < lowerBB[5] and bbw[5] > 0.0015
+
+    for1 = isGreen[1] and rsiM[1] >= 72 and close[1] > upperBB[1] and bbw[1] > 0.0015
+    for2 = isGreen[2] and rsiM[2] >= 72 and close[2] > upperBB[2] and bbw[2] > 0.0015
+    for3 = isGreen[3] and rsiM[3] >= 72 and close[3] > upperBB[3] and bbw[3] > 0.0015
+    for4 = isGreen[4] and rsiM[4] >= 72 and close[4] > upperBB[4] and bbw[4] > 0.0015
+    for5 = isGreen[5] and rsiM[5] >= 72 and close[5] > upperBB[5] and bbw[5] > 0.0015
+
+    weGoUp = isGreen and (back1 or back2 or back3 or back4 or back5) and (high > high[1])
+    upThrust = weGoUp and not weGoUp[1] and not weGoUp[2] and not weGoUp[3] and not weGoUp[4]
+    weGoDown = isRed and (for1 or for2 or for3 or for4 or for5) and (low < low[1])
+    downThrust = weGoDown and not weGoDown[1] and not weGoDown[2] and not weGoDown[3] and not weGoDown[4]
+    result := upThrust ? 1 : downThrust ? -1 : 0
+
+    result
+
+findGreenGaps() =>
+    bool isGreens = close > open and close[1] > open[1] and close[2] > open[2]
+    bool hasGap = isGreens and open > close[1] and open[1] > close[2]
+    bool foundTwoMore = false
+
+    if hasGap
+        for i = 2 to 20
+            // if we find a green gap, leave
+            bool isGreensR = close[i] > open[i] 
+            bool hasGapG = isGreensR and open[i] > close[i+1]
+            if (isGreensR and hasGapG)
+                break
+
+            bool isRed0 = close[i] < open[i] 
+            bool isRed1 = close[i+1] < open[i+1] 
+            bool hasGapR = isRed0 and open[i] < close[i+1]
+            bool hasGapR2 = isRed1 and open[i+1] < close[i+2]
+
+            if(hasGapR and hasGapR2)
+                foundTwoMore := true
+                break
+                
+    hasGap and foundTwoMore
+
+findRedGaps() =>
+    bool isReds = close < open and close[1] < open[1] and close[2] < open[2]
+    bool hasGap = isReds and open < close[1] and open[1] < close[2]
+    bool foundTwoMore = false
+    
+    if hasGap
+        for i = 2 to 20
+            // if we find a red gap, leave
+            bool isRedsR = close[i] < open[i] 
+            bool hasGapR = isRedsR and open[i] < close[i+1]
+            if (isRedsR and hasGapR)
+                break
+
+            bool isGreen0 = close[i] > open[i] 
+            bool isGreen1 = close[i+1] > open[i+1] 
+            bool hasGapG = isGreen0 and open[i] > close[i+1]
+            bool hasGapG2 = isGreen1 and open[i+1] > close[i+2]
+
+            if(hasGapG and hasGapG2)
+                foundTwoMore := true
+                break
+
+    hasGap and foundTwoMore
+
+//#endregion
+
+//#region OPEN AND CLOSE
+tf = timeframe.period
+sym = syminfo.ticker
+
+Open = open
+Close = close
+High = high
+Low = low
+POpen = open[1]
+PPOpen = open[2]
+PClose = close[1]
+PPClose = close[2]
+PHigh =  high[1]
+PLow =  low[1]
+PPLow =  low[2]
+VWAP =  ta.vwap(close)
+Ema =  ta.ema(close, smEMA)
+Ema200 =  ta.ema(close, bigEMA)
+upper =  BBUpper0(20, 2.1)
+lower =  BBLower0(20, 2.1)
+pupper =  BBUpper1(20, 2.1)
+plower =  BBLower1(20, 2.1)
+macd0 =  calc_macd0()
+macd1 =  calc_macd1()
+bShiftG =  findGreenGaps()
+bShiftR =  findRedGaps()
+yoTramp =  Trampoline()
+atr = ta.atr(14)
+
+isRed0 = Close < Open
+isRed1 = PClose < POpen
+isRed2 = PPClose < PPOpen
+isGreen0 = Close > Open
+isGreen1 = PClose > POpen
+isGreen2 = PPClose > PPOpen
+//#endregion
+
+//#region Squeeze Relaxer
+
+ma1 = ta.ema(close, 20)
+rangema1 = ta.atr(10)
+upperKelt = ma1 + rangema1 * 2.0
+lowerKelt = ma1 - rangema1 * 2.0
+
+sqTolerance = input.int(2, title="Squeeze Tolerance (lower = more sensitive)", group="Relaxing Settings", tooltip="How many bars to look back on the squeeze indicator")
+adxSqueeze = input.int(21, title="ADX Threshold for TTM Squeeze", group="Relaxing Settings", tooltip="Anything over 19 filters out low volume periods. Set to 11 as a default, feel free to increase to get less noise")
+
+adxlen = input(14, title="ADX Smoothing", group="ADX")
+dilen = input(14, title="DI Length", group="ADX")
+
+up = ta.rma(math.max(ta.change(close), 0), 14)
+down = ta.rma(-math.min(ta.change(close), 0), 14)
+rsiM = down == 0 ? 100 : up == 0 ? 0 : 100 - (100 / (1 + up / down))
+
+dirmov(len) =>
+	up5 = ta.change(high)
+	down5 = -ta.change(low)
+	plusDM = na(up5) ? na : (up5 > down5 and up5 > 0 ? up5 : 0)
+	minusDM = na(down5) ? na : (down > up5 and down5 > 0 ? down5 : 0)
+	truerange = ta.rma(ta.tr, len)
+	plus = fixnan(100 * ta.rma(plusDM, len) / truerange)
+	minus = fixnan(100 * ta.rma(minusDM, len) / truerange)
+	[plus, minus]
+
+adx(dilen, adxlen) =>
+	[plus, minus] = dirmov(dilen)
+	sum = plus + minus
+	adx = 100 * ta.rma(math.abs(plus - minus) / (sum == 0 ? 1 : sum), adxlen)
+
+adxValue = adx(dilen, adxlen)
+sigabove19 = adxValue > adxSqueeze
+
+sqlength = 20
+multQ = 2.0
+lengthKC = 20
+multKC = 1.5
+
+basis = ta.sma(close, sqlength)
+dev1 = multKC * ta.stdev(close, sqlength)
+upperBBsq = basis + dev1
+lowerBBsq = basis - dev1
+ma = ta.sma(close, lengthKC)
+rangeQ = high - low
+rangema = ta.sma(rangeQ, lengthKC)
+upperKC = ma + rangema * multKC
+lowerKC = ma - rangema * multKC
+sqzOn  = (lowerBBsq > lowerKC) and (upperBBsq < upperKC)
+sqzOff = (lowerBBsq < lowerKC) and (upperBBsq > upperKC)
+noSqz  = (sqzOn == false) and (sqzOff == false)
+
+avg1 = math.avg(ta.highest(high, lengthKC), ta.lowest(low, lengthKC))
+avg2 = math.avg(avg1, ta.sma(close, lengthKC))
+val = ta.linreg(close - avg2, lengthKC, 0)
+
+cSQColor = color.white
+cSQBorder = color.white
+cSQWick = color.white
+
+if val > 0
+    if val > nz(val[1])
+        cSQColor := color.from_gradient(math.abs(val), 0, 30, color.new(color.rgb(0, 255, 132), 50), color.new(color.rgb(0, 255, 132), 0))
+        cSQBorder := color.rgb(0, 255, 132)
+        cSQWick := cSQColor
+    if val < nz(val[1])
+        cSQColor := color.new(color.rgb(0, 156, 81), 50)
+        cSQBorder := color.new(color.black, 100)
+        cSQWick := color.rgb(0, 156, 81)
+else
+    if val < nz(val[1])
+        cSQColor := color.from_gradient(math.abs(val), 0, 30, color.new(color.rgb(255, 0, 0), 50), color.new(color.rgb(255, 0, 0), 0))
+        cSQBorder := color.rgb(255, 0, 0)
+        cSQWick := cSQColor
+    if val > nz(val[1])
+        cSQColor := color.new(color.rgb(176, 0, 0), 50)
+        cSQBorder := color.new(color.black, 100)
+        cSQWick := color.rgb(176, 0, 0)
+
+pos := false
+neg := false
+
+// if squeeze is bright RED, increment by one
+if (val < nz(val[1]) and val < 5 and not sqzOn)
+    cRed := cRed + 1   
+
+// if squeeze is bright GREEN, increment by one
+if (val > nz(val[1]) and val > 5 and not sqzOn)
+    cGreen := cGreen + 1   
+
+// if bright RED squeeze is now dim, momentum has changed.  Is ADX also above 19? - add a marker to chart
+if (val > nz(val[1]) and cRed > sqTolerance and val < 5 and not pos[1] and sigabove19 == true)
+    cRed := 0
+    pos := true  
+
+// if bright GREEN squeeze is now dim, momentum has changed.  Is ADX also above 19? - add a marker to chart
+if (val < nz(val[1]) and cGreen > sqTolerance and val > 5 and not neg[1] and sigabove19 == true)
+    cGreen := 0
+    neg := true  
+
+buySignal1 = pos and barstate.isconfirmed and low < lowerKelt
+sellSignal1 = neg and barstate.isconfirmed and high > upperKelt
+
+plotshape(buySignal1, title="Squeeze Buy Signal", style=shape.diamond, location=location.belowbar, color=color.rgb(255, 230, 0), size=size.tiny)
+plotshape(sellSignal1, title="Squeeze Sell Signal", style=shape.diamond, location=location.abovebar, color=color.rgb(255, 230, 0), size=size.tiny)
+
+//#endregion
+
+vixClose = request.security("TVC:VIX", tf, close) 
+
+bFullGreenAboveBB = false
+bFullRedAboveBB = false
+bGreenGapAtBB = false
+bRedGapAtBB = false
+bEngulingBBGreen = false
+is_1h = timeframe.period == "60" or timeframe.period == "1h"
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=   MAIN CODE STARTS HERE   =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
+if barstate.isconfirmed
+    bShiftGee = findGreenGaps()
+    
+    // WADDAH EXPLOSION
+    t1 = (macd0 - macd1) * sensitivity
+    e1 = (upper - lower)
+
+    // GREEN FULLY ABOVE OR BELOW BB
+    bFullGreenAboveBB := isGreen0 and low < lower and high < lower and low < lowerKelt
+    bFullRedAboveBB := isRed0 and low > upper and high > upper and high > upperKelt
+    // CANDLE GAP AT THE BOLLINGER BAND
+    bGreenGapAtBB := isGreen0 and isGreen1 and Open > PClose and PLow < plower and close > lower
+    bRedGapAtBB := isRed0 and isRed1 and Open < PClose and PHigh > pupper and close < upper
+    // ENGULFING CANDLE OFF THE BOLLINGER BAND
+    bEngulingBBGreen := Close > PClose and isGreen0 and isGreen1 and isRed2 and PLow < plower and PPLow < plower and math.abs(POpen - PClose) > math.abs(PPOpen - PPClose) and close > lower
+    // RSI UNDER 20 - freakish event
+    bRSIUnder20 = rsiM < 20
+    rsibro = ta.rsi(close, 14)
+
+    bSixCandlesUnderKC = close < lowerKelt and close[1] < lowerKelt[1] and close[2] < lowerKelt[2] and close[3] < lowerKelt[3] and close[4] < lowerKelt[4] and close[5] < lowerKelt[5]
+
+    // Williams %R
+	max = ta.highest(14)
+	min = ta.lowest(14)
+	williams = 100 * (close - max) / (max - min)
+
+    atrUp = High + atr * atrTP
+    atrDown = Low - atr * atrTP
+
+//#region STRING HELL
+    sVix = ":bar_chart: VIX " + str.tostring(vixClose, "#.##")
+    sRSI = ":bar_chart: RSI " + str.tostring(rsiM, "#.##")
+    sKC = ""
+    sBB = ""
+    sWilliams = ""
+    sDecay = "Decay " 
+
+    if (vixClose < 20)
+        sVix := " Vix " + str.tostring(vixClose, "#.##") + "    "
+    else if (vixClose < 25)
+        sVix := " Vix " + str.tostring(vixClose, "#.##") + "    "
+    else if (vixClose < 30)
+        sVix := " Vix " + str.tostring(vixClose, "#.##") + "    "
+
+    if (rsiM <= 20)
+        sRSI := ":fire: RSI " + str.tostring(rsiM, "#") + "    "
+    else if (rsiM <= 25)
+        sRSI := " RSI " + str.tostring(rsiM, "#") + "    "
+    else if (rsiM <= 30)
+        sRSI := " RSI " + str.tostring(rsiM, "#") + "    "
+    else if (rsiM >= 70)
+        sRSI := " RSI " + str.tostring(rsiM, "#") + "    "
+    else if (rsiM >= 80)
+        sRSI := ":fire: RSI " + str.tostring(rsiM, "#") + "    "
+    else
+        sRSI := ":yellow_circle: RSI " + str.tostring(rsiM, "#") + "    "
+
+    if (low < lowerKelt)
+        sKC := ":down_arrow: Below KC    "
+    else if (high > upperKelt)
+        sKC := ":up_arrow: Above KC    "
+    else
+        sKC := ""
+
+    if (low < lower)
+        sBB := ":down_arrow: Below BB    "
+    else if (high > upper)
+        sBB := ":up_arrow: Above BB    "
+    else
+        sBB := ""
+
+    if (williams <= -80)
+        sWilliams := ":down_arrow: %R " + str.tostring(williams, "#") + "    "
+    else if (williams <= -20)
+        sWilliams := ":up_arrow: %R " + str.tostring(williams, "#") + "    "
+    else if (williams <= -10)
+        sWilliams := ":fire: %R " + str.tostring(williams, "#") + "    "
+    else if (williams <= -90)
+        sWilliams := ":fire: %R " + str.tostring(williams, "#") + "    "
+    else
+        sWilliams := ""
+//#endregion
+
+    buyBros = syminfo.recommendations_buy + (syminfo.recommendations_buy_strong * 2)
+    sellBros = syminfo.recommendations_sell + (syminfo.recommendations_sell_strong * 2)
+    buyDat = buyBros / syminfo.recommendations_total
+    sellDat = sellBros / syminfo.recommendations_total
+
+    todayOpen = request.security(syminfo.tickerid, "D", open, lookahead=barmerge.lookahead_on)
+    percentChange = ((close - todayOpen) / todayOpen) * 100
+    todayChg = "Today's Change: " + str.tostring(percentChange, "#.##") 
+
+    TSO = syminfo.shares_outstanding_total
+    marketCapMillions = TSO * close
+
+    capClassification = ""
+    if marketCapMillions < 300000000  // Less than 300 million
+        capClassification := "MICRO CAP "
+    else if marketCapMillions >= 300000000 and marketCapMillions < 2000000000  // 300 million to less than 2 billion (2000 million)
+        capClassification := "SMALL CAP "
+    else if marketCapMillions >= 2000000000 and marketCapMillions < 10000000000  // 2 billion to less than 10 billion (10000 million)
+        capClassification := "MID CAP "
+    else if marketCapMillions >= 10000000000 and marketCapMillions < 200000000000  // 10 billion to less than 200 billion (200000 million)
+        capClassification := "LARGE CAP "
+    else if marketCapMillions >= 200000000000  // 200 billion (200000 million) or greater
+        capClassification := "MEGA CAP "
+
+    stockInfo = capClassification + " - " + syminfo.description + " - " + syminfo.sector + " - " + syminfo.industry
+
+    // {  "embeds": [{    "color": 1500059,    "title": " TITLE ",    "thumbnail": {      
+    // "url": "https://i.postimg.cc/dV2JN5VT/stockup.png"     },    "fields":[      {        
+    // "name": " %FIELD1_TITLE% ",        "value": " %FIELD1_VALUE% ",        
+    // "inline": true      }    ],    "footer": {      "text\": " %FOOTER_TITLE% ",      
+    // "url": "http://google.com"     }  }]}"
+
+    sExtraLine = sVix + " " + sRSI + " " + sKC + " " + sBB + " " + sWilliams
+
+//#region ALERTS
+
+    if (bSixCandlesUnderKC)
+        sDiscord = str.replace_all(jsonS, "%COLOR%", "11092722")  
+        sDiscord := str.replace_all(sDiscord, "%TITLE%", "Keltner Stress on " + syminfo.ticker + " at " + str.tostring(Close, "#.##"))
+        sDiscord := str.replace_all(sDiscord, "%THUMB%", "https://i.postimg.cc/dV2JN5VT/stockup.png")
+        sDiscord := str.replace_all(sDiscord, "%FIELD1_TITLE%", sExtraLine)
+        sDiscord := str.replace_all(sDiscord, "%FIELD1_VALUE", todayChg)
+        sDiscord := str.replace_all(sDiscord, "%FOOTER_TITLE%", stockInfo)
+        log.info(sDiscord)
+        alert(sDiscord, alert.freq_once_per_bar)
+
+    if (bRSIUnder20)
+        sDiscord = str.replace_all(jsonS, "%COLOR%", "11092722") 
+        sDiscord := str.replace_all(sDiscord, "%TITLE%", "Low RSI on " + syminfo.ticker + " at " + str.tostring(Close, "#.##"))
+        sDiscord := str.replace_all(sDiscord, "%THUMB%", "https://i.postimg.cc/dV2JN5VT/stockup.png")
+        sDiscord := str.replace_all(sDiscord, "%FIELD1_TITLE%", sExtraLine)
+        sDiscord := str.replace_all(sDiscord, "%FIELD1_VALUE", todayChg)
+        sDiscord := str.replace_all(sDiscord, "%FOOTER_TITLE%", stockInfo)
+        log.info(sDiscord)
+        alert(sDiscord, alert.freq_once_per_bar)
+
+    if (buySignal1 and false)
+        sDiscord = str.replace_all(jsonS, "%COLOR%", "1500059") 
+        sDiscord := str.replace_all(sDiscord, "%TITLE%", "Squeeze Green on " + syminfo.ticker + " at " + str.tostring(Close, "#.##"))
+        sDiscord := str.replace_all(sDiscord, "%THUMB%", "https://i.postimg.cc/dV2JN5VT/stockup.png")
+        sDiscord := str.replace_all(sDiscord, "%FIELD1_TITLE%", sExtraLine)
+        sDiscord := str.replace_all(sDiscord, "%FIELD1_VALUE", todayChg)
+        sDiscord := str.replace_all(sDiscord, "%FOOTER_TITLE%", stockInfo)
+        log.info(sDiscord)
+        alert(sDiscord, alert.freq_once_per_bar)
+
+    if (sellSignal1 and false)
+        sDiscord = str.replace_all(jsonS, "%COLOR%", "16711680") // 
+        sDiscord := str.replace_all(sDiscord, "%TITLE%", "Squeeze Red  on " + syminfo.ticker + " at " + str.tostring(Close, "#.##"))
+        sDiscord := str.replace_all(sDiscord, "%THUMB%", "https://i.postimg.cc/HxssFRSh/redbars.png")
+        sDiscord := str.replace_all(sDiscord, "%FIELD1_TITLE%", sExtraLine)
+        sDiscord := str.replace_all(sDiscord, "%FIELD1_VALUE", todayChg)
+        sDiscord := str.replace_all(sDiscord, "%FOOTER_TITLE%", stockInfo)
+        log.info(sDiscord)
+        alert(sDiscord, alert.freq_once_per_bar)
+
+    if (bGreenGapAtBB)
+        sDiscord = str.replace_all(jsonS, "%COLOR%", "1500059") // 
+        sDiscord := str.replace_all(sDiscord, "%TITLE%", "CandleGap Green on " + syminfo.ticker + " at " + str.tostring(Close, "#.##"))
+        sDiscord := str.replace_all(sDiscord, "%THUMB%", "https://i.postimg.cc/dV2JN5VT/stockup.png")
+        sDiscord := str.replace_all(sDiscord, "%FIELD1_TITLE%", sExtraLine)
+        sDiscord := str.replace_all(sDiscord, "%FIELD1_VALUE", todayChg)
+        sDiscord := str.replace_all(sDiscord, "%FOOTER_TITLE%", stockInfo)
+        log.info(sDiscord)
+        alert(sDiscord, alert.freq_once_per_bar)
+
+    if (bRedGapAtBB)
+        sDiscord = str.replace_all(jsonS, "%COLOR%", "16711680") // 
+        sDiscord := str.replace_all(sDiscord, "%TITLE%", "CandleGap Red on " + syminfo.ticker + " at " + str.tostring(Close, "#.##"))
+        sDiscord := str.replace_all(sDiscord, "%THUMB%", "https://i.postimg.cc/HxssFRSh/redbars.png")
+        sDiscord := str.replace_all(sDiscord, "%FIELD1_TITLE%", sExtraLine)
+        sDiscord := str.replace_all(sDiscord, "%FIELD1_VALUE", todayChg)
+        sDiscord := str.replace_all(sDiscord, "%FOOTER_TITLE%", stockInfo)
+        log.info(sDiscord)
+        alert(sDiscord, alert.freq_once_per_bar)
+
+    if (bShiftG and is_1h)
+        sDiscord = str.replace_all(jsonS, "%COLOR%", "1500059") // 
+        sDiscord := str.replace_all(sDiscord, "%TITLE%", "Direction Shift on " + syminfo.ticker + " at " + str.tostring(Close, "#.##"))
+        sDiscord := str.replace_all(sDiscord, "%THUMB%", "https://i.postimg.cc/dV2JN5VT/stockup.png")
+        sDiscord := str.replace_all(sDiscord, "%FIELD1_TITLE%", sExtraLine)
+        sDiscord := str.replace_all(sDiscord, "%FIELD1_VALUE", todayChg)
+        sDiscord := str.replace_all(sDiscord, "%FOOTER_TITLE%", stockInfo)
+        log.info(sDiscord)
+        alert(sDiscord, alert.freq_once_per_bar)
+
+    if (bShiftR and is_1h)
+        sDiscord = str.replace_all(jsonS, "%COLOR%", "16711680") 
+        sDiscord := str.replace_all(sDiscord, "%TITLE%", "Direction Shift on " + syminfo.ticker + " at " + str.tostring(Close, "#.##"))
+        sDiscord := str.replace_all(sDiscord, "%THUMB%", "https://i.postimg.cc/HxssFRSh/redbars.png")
+        sDiscord := str.replace_all(sDiscord, "%FIELD1_TITLE%", sExtraLine)
+        sDiscord := str.replace_all(sDiscord, "%FIELD1_VALUE", todayChg)
+        sDiscord := str.replace_all(sDiscord, "%FOOTER_TITLE%", stockInfo)
+        log.info(sDiscord)
+        alert(sDiscord, alert.freq_once_per_bar)
+
+    if (bFullGreenAboveBB)
+        sDiscord = str.replace_all(jsonS, "%COLOR%", "1500059") 
+        sDiscord := str.replace_all(sDiscord, "%TITLE%", "Unleashed Candle on " + syminfo.ticker + " at " + str.tostring(Close, "#.##"))
+        sDiscord := str.replace_all(sDiscord, "%THUMB%", "https://i.postimg.cc/dV2JN5VT/stockup.png")
+        sDiscord := str.replace_all(sDiscord, "%FIELD1_TITLE%", sExtraLine)
+        sDiscord := str.replace_all(sDiscord, "%FIELD1_VALUE", todayChg)
+        sDiscord := str.replace_all(sDiscord, "%FOOTER_TITLE%", stockInfo)
+        log.info(sDiscord)
+        alert(sDiscord, alert.freq_once_per_bar)
+
+    if (bFullRedAboveBB)
+        sDiscord = str.replace_all(jsonS, "%COLOR%", "16711680") 
+        sDiscord := str.replace_all(sDiscord, "%TITLE%", "Unleashed Candle on " + syminfo.ticker + " at " + str.tostring(Close, "#.##"))
+        sDiscord := str.replace_all(sDiscord, "%THUMB%", "https://i.postimg.cc/HxssFRSh/redbars.png")
+        sDiscord := str.replace_all(sDiscord, "%FIELD1_TITLE%", sExtraLine)
+        sDiscord := str.replace_all(sDiscord, "%FIELD1_VALUE", todayChg)
+        sDiscord := str.replace_all(sDiscord, "%FOOTER_TITLE%", stockInfo)
+        log.info(sDiscord)
+        alert(sDiscord, alert.freq_once_per_bar)
+
+    if (yoTramp == 1 and is_1h)
+        sDiscord = str.replace_all(jsonS, "%COLOR%", "1500059") 
+        sDiscord := str.replace_all(sDiscord, "%TITLE%", "Trampoline Green on " + syminfo.ticker + " at " + str.tostring(Close, "#.##"))
+        sDiscord := str.replace_all(sDiscord, "%THUMB%", "https://i.postimg.cc/dV2JN5VT/stockup.png")
+        sDiscord := str.replace_all(sDiscord, "%FIELD1_TITLE%", sExtraLine)
+        sDiscord := str.replace_all(sDiscord, "%FIELD1_VALUE", todayChg)
+        sDiscord := str.replace_all(sDiscord, "%FOOTER_TITLE%", stockInfo)
+        log.info(sDiscord)
+        alert(sDiscord, alert.freq_once_per_bar)
+
+    if (yoTramp == -1 and is_1h)
+        sDiscord = str.replace_all(jsonS, "%COLOR%", "16755200") 
+        sDiscord := str.replace_all(sDiscord, "%TITLE%", "Trampoline Red on " + syminfo.ticker + " at " + str.tostring(Close, "#.##"))
+        sDiscord := str.replace_all(sDiscord, "%THUMB%", "https://i.postimg.cc/HxssFRSh/redbars.png")
+        sDiscord := str.replace_all(sDiscord, "%FIELD1_TITLE%", sExtraLine)
+        sDiscord := str.replace_all(sDiscord, "%FIELD1_VALUE", todayChg)
+        sDiscord := str.replace_all(sDiscord, "%FOOTER_TITLE%", stockInfo)
+        log.info(sDiscord)
+        alert(sDiscord, alert.freq_once_per_bar)
+
+//#endregion
+
+//#region PLOTS
+plotshape(bEngulingBBGreen ? hl2 : na, title="EngBB_", text="EngBB", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.rgb(46, 173, 84), textcolor=color.white)
+
+plotshape(bShowTrampoline and yoTramp == 1 ? hl2 : na, title="Tramp_", text="Tramp", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.rgb(46, 173, 84), textcolor=color.white)
+plotshape(bShowTrampoline and yoTramp == -1 ? hl2 : na, title="Tramp_", text="Tramp", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.rgb(173, 46, 69), textcolor=color.white)
+
+plotshape(bGreenGapAtBB ? hl2 : na, title="Gap_", text="Gap", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.rgb(46, 173, 84), textcolor=color.white)
+plotshape(bRedGapAtBB ? hl2 : na, title="Gap_", text="Gap", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.rgb(173, 46, 69), textcolor=color.white)
+
+plotshape(bShiftG ? hl2 : na, title="Shift_", text="Shift", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.rgb(46, 173, 84), textcolor=color.white)
+plotshape(bShiftR ? hl2 : na, title="Shift_", text="Shift", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.rgb(173, 46, 69), textcolor=color.white)
+
+plotshape(bFullGreenAboveBB ? hl2 : na, title="BB Pull Green_", text="Pull", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.rgb(46, 173, 84), textcolor=color.white)
+plotshape(bFullRedAboveBB ? hl2 : na, title="BB Pull Red_", text="Pull", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.rgb(173, 46, 69), textcolor=color.white)
+
+//#endregion

@@ -1,0 +1,24 @@
+//@version=4
+// Idea from this video: https://www.youtube.com/watch?v=ZRihb2T-xWQ
+study(title="CCI Double Cross", format=format.price, precision=2)
+
+src = input(hlc3, title="Source")
+bBack = input(true, title="Show background on video rules condition")
+
+// CCI #1 - red
+ma1 = sma(hlc3, 14)
+cci1 = (src - ma1) / (0.015 * dev(src, 14))
+plot(cci1, "CCI 1", color=#b72842, linewidth=2)
+
+// CCI #2 - yellow
+ma2 = sma(src, 100)
+cci2 = (src - ma2) / (0.015 * dev(src, 100))
+plot(cci2, "CCI 2", color=#d4cd0f, linewidth=2)
+
+band1 = hline(100, "Upper Band", color=#787B86, linestyle=hline.style_dashed)
+hline(0, "Middle Band", color=color.new(#787B86, 50))
+band0 = hline(-100, "Lower Band", color=#787B86, linestyle=hline.style_dashed)
+
+cci1WasGreen = cci1[1] > cci2[1] or cci1[2] > cci2[2] or cci1[3] > cci2[3] or cci1[4] > cci2[4] or cci1[5] > cci2[5] or cci1[6] > cci2[6] or cci1[7] > cci2[7]
+
+bgcolor(bBack and cci1 > cci2 and cci1 >= 100 ? color.green : bBack and cci1 < cci2 and cci1 < -100 and cci1WasGreen ? color.red : na, transp = 65, editable = false)

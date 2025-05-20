@@ -1,0 +1,46 @@
+//@version=5
+indicator(title = 'Vector Candles', shorttitle='Vector Candles', overlay=true, max_bars_back=300,max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+import TradersReality/Traders_Reality_Lib/2 as trLib
+
+color redVectorColor = input.color(title='Vector: Red', group='PVSRA Colors', defval=color.red, inline='vectors')
+color greenVectorColor = input.color(title='Green', group='PVSRA Colors', defval=color.lime, inline='vectors')
+color violetVectorColor = input.color(title='Violet', group='PVSRA Colors', defval=color.fuchsia, inline='vectors')
+color blueVectorColor = input.color(title='Blue', group='PVSRA Colors', defval=color.blue, inline='vectors', tooltip='Bull bars are green and bear bars are red when the bar is with volume >= 200% of the average volume of the 10 previous bars, or bars where the product of candle spread x candle volume is >= the highest for the 10 previous bars.\n Bull bars are blue and bear are violet when the bar is with with volume >= 150% of the average volume of the 10 previous bars.')
+color regularCandleUpColor = input.color(title='Regular: Up Candle', group='PVSRA Colors', defval=#999999, inline='nonVectors')
+color regularCandleDownColor = input.color(title='Down Candle', group='PVSRA Colors', defval=#4d4d4d, inline='nonVectors', tooltip='Bull bars are light gray and bear are dark gray when none of the red/green/blue/violet vector conditions are met.')
+
+bool overrideSym = input.bool(group='PVSRA Override', title='Override chart symbol?', defval=false, inline='pvsra')
+string pvsraSym = input.string(group='PVSRA Override', title='', defval='INDEX:BTCUSD', tooltip='You can use INDEX:BTCUSD or you can combine multiple feeds, for example BINANCE:BTCUSDT+COINBASE:BTCUSD. Note that adding too many will slow things down.', inline='pvsra')
+bool colorOverride = input.bool(true, 'Override color?' , group='Vector Candle Zones', inline="vcz1")
+
+pvsraVolume(overrideSymbolX, pvsraSymbolX, tickerIdX) =>
+    request.security(overrideSymbolX ? pvsraSymbolX : tickerIdX, '', [volume,high,low,close,open], barmerge.gaps_off, barmerge.lookahead_off)
+
+[pvsraVolume, pvsraHigh, pvsraLow, pvsraClose, pvsraOpen]  = pvsraVolume(overrideSym, pvsraSym, syminfo.tickerid)
+
+[pvsraColor, alertFlag, averageVolume, volumeSpread, highestVolumeSpread] = trLib.calcPvsra(pvsraVolume, pvsraHigh, pvsraLow, pvsraClose, pvsraOpen, redVectorColor, greenVectorColor, violetVectorColor, blueVectorColor, regularCandleDownColor, regularCandleUpColor)
+barcolor(pvsraColor)
+
+alertcondition(alertFlag, title='Alert on Any Vector Candle', message='{{ticker}} Vector Candle on the {{interval}}')
+
+alertcondition(pvsraColor == greenVectorColor, title='Green Vector Candle', message='{{ticker}} Green Vector Candle on the {{interval}} Note: alert triggers in real time before the candle is closed unless you choose "once per bar close" option - ie the alert might trigger at some point and the pa after that could change the vector color completely. Use with caution.')
+alertcondition(pvsraColor == redVectorColor, title='Red Vector Candle', message='{{ticker}} Red Vector Candle on the {{interval}} Note: alert triggers in real time before the candle is closed unless you choose "once per bar close" option- ie the alert might trigger at some point and the pa after that could change the vector color completely. Use with caution.')
+alertcondition(pvsraColor == blueVectorColor, title='Blue Vector Candle', message='{{ticker}} Blue Vector Candle on the {{interval}} Note: alert triggers in real time before the candle is closed unless you choose "once per bar close" option- ie the alert might trigger at some point and the pa after that could change the vector color completely. Use with caution.')
+alertcondition(pvsraColor == violetVectorColor, title='Purple Vector Candle', message='{{ticker}} Purple Vector Candle on the {{interval}} Note: alert triggers in real time before the candle is closed unless you choose "once per bar close" option- ie the alert might trigger at some point and the pa after that could change the vector color completely. Use with caution.')
+
+redGreen = pvsraColor == greenVectorColor and pvsraColor[1] == redVectorColor
+greenRed = pvsraColor == redVectorColor and pvsraColor[1] == greenVectorColor
+redBlue = pvsraColor == blueVectorColor and pvsraColor[1] == redVectorColor
+blueRed = pvsraColor == redVectorColor and pvsraColor[1] == blueVectorColor
+greenPurpule = pvsraColor ==  violetVectorColor and pvsraColor[1] == greenVectorColor
+purpleGreen = pvsraColor ==  greenVectorColor and pvsraColor[1] == violetVectorColor
+bluePurpule = pvsraColor ==  violetVectorColor and pvsraColor[1] == blueVectorColor
+purpleBlue = pvsraColor == blueVectorColor and pvsraColor[1] == violetVectorColor
+alertcondition(redGreen, title='Red/Green Vector Candle Pattern', message='{{ticker}} Red/Green Vector Candle Pattern on the {{interval}}')
+alertcondition(greenRed, title='Green/Red Vector Candle Pattern', message='{{ticker}} Green/Red Vector Candle Pattern on the {{interval}}')
+alertcondition(redBlue, title='Red/Blue Vector Candle Pattern', message='{{ticker}} Red/Blue Vector Candle Pattern on the {{interval}}')
+alertcondition(blueRed, title='Blue/Red Vector Candle Pattern', message='{{ticker}} Blue/Red Vector Candle Pattern on the {{interval}}')
+alertcondition(greenPurpule, title='Green/Purple Vector Candle Pattern', message='{{ticker}} Green/Purple Vector Candle Pattern on the {{interval}}')
+alertcondition(purpleGreen, title='Purple/Green Vector Candle Pattern', message='{{ticker}} Purple/Green Vector Candle Pattern on the {{interval}}')
+alertcondition(bluePurpule, title='Blue/Purple Vector Candle Pattern', message='{{ticker}} Blue/Purple Vector Candle Pattern on the {{interval}}')
+alertcondition(purpleBlue, title='Purple/Blue Vector Candle Pattern', message='{{ticker}} Purple/Blue Vector Candle Pattern on the {{interval}}')

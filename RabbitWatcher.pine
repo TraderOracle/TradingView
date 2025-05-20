@@ -1,0 +1,15 @@
+//@version=5
+indicator(title="Rabbit Watcher v1.0", shorttitle="Rabbit Watcher", overlay=true, timeframe="", timeframe_gaps=true)
+ema = ta.ema(close, 100)
+mfi = ta.mfi(close, 14)
+colMFI = mfi >= 50 ? #00ff84 : #ff0000
+plot(ema, title="EMA", color=colMFI, linewidth = 2, style = plot.style_line)
+bgcolor(mfi > 75 ? color.new(#00ff84, 80) : mfi < 25 ? color.new(#ff0000, 80) : na)
+[macd, signal, hist] = ta.macd(close, 12, 26, 9)
+downwards = ta.crossunder(macd, signal)
+upwards = ta.crossover(macd, signal)
+showUp = upwards and not upwards[1] 
+showDown = downwards and not downwards[1] 
+plotshape(showUp and close > ema ? hl2 : na, title="Buy", text="Buy", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.green, textcolor=color.white)
+plotshape(showDown and close < ema ? hl2 : na, title="Sell", text="Sell", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.red, textcolor=color.white)
+

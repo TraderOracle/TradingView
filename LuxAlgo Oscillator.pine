@@ -1,0 +1,566 @@
+//@version=5
+indicator(title='LuxAlgo Oscillator Matrix [6.0]', shorttitle='LuxAlgo Oscillator Matrix [6.0]')
+n1 = input(4, 'Channel Length')
+n2 = input(15, 'Average Length')
+obLevel1 = input(88, 'Over Bought Level 1')
+obLevel2 = input(81, 'Over Bought Level 2')
+osLevel1 = input(-83, 'Over Sold Level 1')
+osLevel2 = input(-76, 'Over Sold Level 2')
+
+ap = hlc3
+esa = ta.ema(ap, n1)
+d = ta.ema(math.abs(ap - esa), n1)
+ci = (ap - esa) / (0.015 * d)
+tci = ta.ema(ci, n2)
+
+wt1 = tci
+wt2 = ta.sma(wt1, 4)
+var indbot=0
+var indtop=0
+
+if wt1 > wt2 and wt1[1] < wt2[1]
+    indbot := bar_index
+if wt1 < wt2 and wt1[1] > wt2[1]
+    indtop := bar_index
+
+bott = bar_index - indbot
+topp = bar_index - indtop
+
+// Histogram
+
+lookbackPeriod = input(35, "Lookback Period")
+
+// Calculate the percentage change in price for each bar
+priceChange = close - close[1]
+priceChangePercentage = priceChange / close[1] * 100
+
+// Calculate the average volume over the lookback period
+averageVolume = ta.ema(volume, lookbackPeriod)
+
+// Initialize the counters for upward and downward trends
+upwardTrends = 0
+downwardTrends = 0
+
+// Iterate over the lookback period and count the number of upward and downward trends
+for i = 1 to lookbackPeriod
+    if priceChangePercentage[i] > 0
+        upwardTrends := upwardTrends + 1
+    else if priceChangePercentage[i] < 0
+        downwardTrends := downwardTrends + 1
+
+// Calculate the probabilities of upward, downward, and neutral trends
+totalTrends = upwardTrends + downwardTrends
+probabilityUpward = math.round(upwardTrends / totalTrends, 2) * 100
+probabilityDownward = math.round(downwardTrends / totalTrends, 2) * 100
+
+// Determine the probability trend based on the probabilities
+probabilityTrend = ""
+if probabilityUpward > probabilityDownward
+    probabilityTrend := "Upward"
+else if probabilityUpward < probabilityDownward
+    probabilityTrend := "Downward"
+
+
+
+// Calculate the oscillator value based on the difference between upward and downward trends
+oscillatorValue = probabilityUpward - probabilityDownward
+
+// Determine the histogram color based on the difference between the oscillator value and zero line
+histogramColor = oscillatorValue >= 0 ? (oscillatorValue[1] < oscillatorValue ? color.new(#089981, 50) : color.new(#089981, 50)) : (oscillatorValue[1] < oscillatorValue ? color.new(#f23645, 50) : color.new(#f23645, 50))
+
+
+// Smoothning the Histogram
+smooth_hist = input.bool(true, "Smoothen Histogram", inline="smooth_hist")
+smoothning_scale = input.int(defval=3, title="", minval=1, maxval=10, step=1, inline="smooth_hist")
+smooth_len = smoothning_scale * 2
+
+smooth_hist_val = smooth_hist ? ta.ema(oscillatorValue, smooth_len) : oscillatorValue
+
+// Plot the histogram
+plot(smooth_hist_val, color=histogramColor, style=plot.style_area, linewidth=1, title="Probability Histogram")
+
+
+// Histogram
+
+plot(0, color=color.new(#787b86, 100))
+top1 = plot(obLevel1, color=color.new(#4caf4f, 100))
+top2 = plot(osLevel1, color=color.new(#ff5252, 100))
+bottom1 = plot(obLevel2, color=color.new(#4caf4f, 100))
+bottom2 = plot(osLevel2, color=color.new(#ff5252, 100))
+
+fill(plot1=top1, plot2=bottom1, color=wt2 > 0 and (wt1 - wt2) > 0 ? #089981 : wt2 > 0 or (wt1 - wt2) > 0 ?color.new(#363a45, 60) : color.new(#363a45, 70))
+fill(plot1=top2, plot2=bottom2, color=wt2 < 0 and (wt1 - wt2) < 0 ? #f23645 : wt2 < 0 or (wt1 - wt2) < 0 ? color.new(#363a45, 60) : color.new(#363a45, 70))
+
+plot1 = plot(wt1, color=wt1 > wt2 ? color.new(color.green, 0) : color.gray ,title="Signal")
+plot2 = plot(wt2, color=color.new(#ff5252, 100),title="Signal Dots")
+
+fill(plot1=plot1, plot2=plot2, color=wt1 > wt2 ? color.rgb(8, 153, 129, 80) : color.rgb(120, 123, 134, 80),title="Signal Shadow")
+
+plot(ta.cross(wt1, wt2) ? wt2 : na, color=color.new(color.black, 0), style=plot.style_circles, linewidth=3,title="Dot Shadows")
+plot(ta.cross(wt1, wt2) ? wt2 : na, color=wt2 - wt1 > 0 ? color.gray : color.green , style=plot.style_circles, linewidth=2)
+
+// Divergences Module
+tsi1 = wt1
+tsi2 = ta.sma(wt2, 4)
+long = n1
+short = n2
+signal22 = n2
+price = hlc3
+src2 = hlc3
+src = hlc3
+input_src = tsi1
+
+// Divergences Options
+up = ta.rma(math.max(ta.change(src), 0), short)
+down = ta.rma(-math.min(ta.change(src), 0), short)
+lbR = input(title='Divergence Pivot Lookback Right', defval=1)
+lbL = input(title='Divergence Pivot Lookback Left', defval=5)
+rangeUpper = input(title='Max of Lookback Range', defval=100)
+rangeLower = input(title='Min of Lookback Range', defval=2)
+plotBull = input(title='Plot Bullish', defval=true)
+plotHiddenBull = input(title='Plot Hidden Bullish', defval=false)
+plotBear = input(title='Plot Bearish', defval=true)
+plotHiddenBear = input(title='Plot Hidden Bearish', defval=false)
+bearColor = color.new(#f23645, 10)
+bullColor = color.new(#2157f3, 10)
+hiddenBullColor = color.new(color.aqua, 0)
+hiddenBearColor = color.new(color.orange, 0)
+textColor = color.new(color.white, 0)
+noneColor = color.new(color.white, 100)
+osc = tsi1
+plFound = na(ta.pivotlow(osc, lbL, lbR)) ? false : true
+phFound = na(ta.pivothigh(osc, lbL, lbR)) ? false : true
+_inRange(cond) =>
+    bars = ta.barssince(cond == true)
+    rangeLower <= bars and bars <= rangeUpper
+
+//------------------------------------------------------------------------------
+// Regular Bullish
+// Osc: Higher Low
+
+oscHL = osc[lbR] > ta.valuewhen(plFound, osc[lbR], 1) and _inRange(plFound[1])
+
+// Price: Lower Low
+
+priceLL = low[lbR] < ta.valuewhen(plFound, low[lbR], 1)
+bullCond = plotBull and priceLL and oscHL and plFound
+
+plot(plFound ? osc[lbR] : na, offset=-lbR, title='Regular Bullish', linewidth=1, color=bullCond ? bullColor : noneColor, transp=0)
+
+
+//------------------------------------------------------------------------------
+// Hidden Bullish
+// Osc: Lower Low
+
+oscLL = osc[lbR] < ta.valuewhen(plFound, osc[lbR], 1) and _inRange(plFound[1])
+
+// Price: Higher Low
+
+priceHL = low[lbR] > ta.valuewhen(plFound, low[lbR], 1)
+hiddenBullCond = plotHiddenBull and priceHL and oscLL and plFound
+
+plot(plFound ? osc[lbR] : na, offset=-lbR, title='Hidden Bullish', linewidth=1, color=hiddenBullCond ? hiddenBullColor : noneColor, transp=0)
+
+
+//------------------------------------------------------------------------------
+// Regular Bearish
+// Osc: Lower High
+
+oscLH = osc[lbR] < ta.valuewhen(phFound, osc[lbR], 1) and _inRange(phFound[1])
+
+// Price: Higher High
+
+priceHH = high[lbR] > ta.valuewhen(phFound, high[lbR], 1)
+
+bearCond = plotBear and priceHH and oscLH and phFound
+
+plot(phFound ? osc[lbR] : na, offset=-lbR, title='Regular Bearish', linewidth=1, color=bearCond ? bearColor : noneColor, transp=0)
+
+
+//------------------------------------------------------------------------------
+// Hidden Bearish
+// Osc: Higher High
+
+oscHH = osc[lbR] > ta.valuewhen(phFound, osc[lbR], 1) and _inRange(phFound[1])
+
+// Price: Lower High
+
+priceLH = high[lbR] < ta.valuewhen(phFound, high[lbR], 1)
+
+hiddenBearCond = plotHiddenBear and priceLH and oscHH and phFound
+
+plot(phFound ? osc[lbR] : na, offset=-lbR, title='Hidden Bearish', linewidth=1, color=hiddenBearCond ? hiddenBearColor : noneColor, transp=0)
+
+// Signals Module
+
+string TT_HARSI = 'Period for the RSI calculations used to generate the' + 'candles. This seperate from the RSI plot/histogram length.'
+
+string TT_PBIAS = 'Smoothing feature for the OPEN of the HARSI candles.' + '\n\nIncreases bias toward the prior open value which can' + ' help provide better visualisation of trend strength.' + '\n\n** By changing the Open values, High and Low can also' + ' be distorted - however Close will remain unchanged.'
+
+string TT_SMRSI = 'This option smoothes the RSI in a manner similar to HA' + ' open, but uses the realtime rsi rather than the prior' + ' close value.'
+
+string TT_STOCH = 'Uses the RSI generated by the above settings, and as such' + ' will be affected by the smoothing option.'
+
+string TT_STFIT = 'Adjusts the vertical scaling of the stochastic, can help' + ' to prevent distortion of other data in the channel.' + '\n\nHas no impact cross conditions.'
+
+////////////////////////////////////////////////////////////////////////////////
+//                                                                            //
+//                            ====== INPUTS ======                            //
+//                                                                            //
+////////////////////////////////////////////////////////////////////////////////
+
+
+// -- Candle config
+
+string GROUP_CAND = 'Config » HARSI Candles'
+i_lenHARSI = input.int(10, 'Length', group=GROUP_CAND, minval=1, tooltip=TT_HARSI)
+i_smoothing = input.int(5, 'Open Smoothing', group=GROUP_CAND, minval=1, maxval=100, tooltip=TT_PBIAS)
+string INLINE_COL = 'Colour Pallette'
+i_colUp = input.color(color.teal, 'Colour Pallette  ', group=GROUP_CAND, inline=INLINE_COL)
+i_colDown = input.color(color.red, ' ', group=GROUP_CAND, inline=INLINE_COL)
+i_colWick = input.color(color.gray, ' ', group=GROUP_CAND, inline=INLINE_COL)
+
+
+// -- RSI plot config
+
+string GROUP_PLOT = 'Config » RSI Plot'
+i_source = input.source(ohlc4, 'Source', group=GROUP_PLOT)
+i_lenRSI = input.int(7, 'Length', group=GROUP_PLOT, minval=1)
+i_mode = input.bool(true, 'Smoothed Mode RSI?', group=GROUP_PLOT, tooltip=TT_SMRSI)
+i_showPlot = input.bool(true, 'Show RSI Plot?', group=GROUP_PLOT)
+i_showHist = input.bool(true, 'Show RSI Histogram?', group=GROUP_PLOT)
+
+
+// -- Channel OB/OS config
+
+string GROUP_CHAN = 'Config » OB/OS Boundaries'
+i_upper = input.int(50, 'OB', group=GROUP_CHAN, inline='OB', minval=1, maxval=50)
+i_upperx = input.int(30, 'OB Extreme', group=GROUP_CHAN, inline='OB', minval=1, maxval=50)
+
+i_lower = input.int(-50, 'OS', group=GROUP_CHAN, inline='OS', minval=-50, maxval=-1)
+i_lowerx = input.int(-30, 'OS Extreme', group=GROUP_CHAN, inline='OS', minval=-50, maxval=-1)
+
+// Settins
+
+// WaveTrend
+wwttShow = input(false, title='Show WaveTrend')
+wwttBuyShow = input(true, title='Show Buy dots')
+wwttGoldShow = input(true, title='Show Gold dots')
+wwttSellShow = input(true, title='Show Sell dots')
+wwttDivShow = input(true, title='Show Div. dots')
+vwapShow = input(true, title='Show Fast wwtt')
+wwttChannelLen = input(9, title='wwtt Channel Length')
+wwttAverageLen = input(12, title='wwtt Average Length')
+wwttMASource = input(hlc3, title='wwtt MA Source')
+wwttMALen = input(3, title='wwtt MA Length')
+
+// WaveTrend Overbought & Oversold lines
+OOBBLevel = input(53, title='wwtt Overbought Level 1')
+OOBBLevel2 = input(60, title='wwtt Overbought Level 2')
+OOBBLevel3 = input(100, title='wwtt Overbought Level 3')
+oosLevel = input(-53, title='wwtt Oversold Level 1')
+oosLevel2 = input(-60, title='wwtt Oversold Level 2')
+oosLevel3 = input(-75, title='wwtt Oversold Level 3')
+
+// Divergence wwtt
+wwttShowDiv = input(true, title='Show wwtt Regular Divergences')
+wwttShowHiddenDiv = input(false, title='Show wwtt Hidden Divergences')
+showHiddenDiv_nl = input(true, title='Not apply OB/OS Limits on Hidden Divergences')
+wwttDivOOBBLevel = input(45, title='wwtt Bearish Divergence min')
+wwttDivoosLevel = input(-65, title='wwtt Bullish Divergence min')
+
+// Divergence extra range
+wwttDivOOBBLevel_addshow = input(true, title='Show 2nd wwtt Regular Divergences')
+wwttDivOOBBLevel_add = input(15, title='wwtt 2nd Bearish Divergence')
+wwttDivoosLevel_add = input(-40, title='wwtt 2nd Bullish Divergence 15 min')
+
+// RSI+MFI
+rsiMFIShow = input(true, title='Show MFI')
+rsiMFIperiod = input(60, title='MFI Period')
+rsiMFIMultiplier = input.float(150, title='MFI Area multiplier')
+rsiMFIPosY = input(2.5, title='MFI Area Y Pos')
+
+// RSI
+rsiShow = input(false, title='Show RSI')
+rsiSRC = input(close, title='RSI Source')
+rsiLen = input(14, title='RSI Length')
+rsiOversold = input.int(30, title='RSI Oversold', minval=29, maxval=100)
+rsiOverbought = input.int(60, title='RSI Overbought', minval=0, maxval=60)
+
+// Divergence RSI
+rsiShowDiv = input(false, title='Show RSI Regular Divergences')
+rsiShowHiddenDiv = input(false, title='Show RSI Hidden Divergences')
+rsiDivOOBBLevel = input(60, title='RSI Bearish Divergence min')
+rsiDivoosLevel = input(30, title='RSI Bullish Divergence min')
+
+
+
+
+// Colors
+colorRed = #ff0000
+colorPurple = #e600e6
+colorGreen = #3fff00
+colorOrange = #e2a400
+colorYellow = #ffe500
+colorWhite = #ffffff
+colorPink = #ff00f0
+colorBluelight = #31c0ff
+
+colorwwtt1 = #49536195
+colorwwtt2 = #7b9fd596
+
+colorwwtt2_ = #131722
+
+colormacdwwtt1a = #4caf58
+colormacdwwtt1b = #af4c4c
+colormacdwwtt1c = #7ee57e
+colormacdwwtt1d = #ff3535
+
+colormacdwwtt2a = #305630
+colormacdwwtt2b = #310101
+colormacdwwtt2c = #132213
+colormacdwwtt2d = #770000
+
+
+////////////////////////////////////////////////////////////////////////////////
+//                                                                            //
+//                          ====== FUNCTIONS ======                           //
+//                                                                            //
+////////////////////////////////////////////////////////////////////////////////
+
+
+// FUNCTIONS 
+
+
+//  zero median rsi helper function, just subtracts 50.
+f_zrsi(_source, _length) =>
+    ta.rsi(_source, _length) - 50
+
+//  zero median stoch helper function, subtracts 50 and includes % scaling
+f_zstoch(_source, _length, _smooth, _scale) =>
+    float _zstoch = ta.stoch(_source, _source, _source, _length) - 50
+    float _smoothed = ta.sma(_zstoch, _smooth)
+    float _scaled = _smoothed / 100 * _scale
+    _scaled
+
+//  mode selectable rsi function for standard, or smoothed output
+f_rsi(_source, _length, _mode) =>
+
+    //  get base rsi
+    float _zrsi = f_zrsi(_source, _length)
+
+    //  smoothing in a manner similar to HA open, but rather using the realtime
+    //  rsi in place of the prior close value.
+    var float _smoothed = na
+    _smoothed := na(_smoothed[1]) ? _zrsi : (_smoothed[1] + _zrsi) / 2
+
+    //  return the requested mode
+    _mode ? _smoothed : _zrsi
+
+//  RSI Heikin-Ashi generation function
+f_rsiHeikinAshi(_length) =>
+
+    //  get close rsi
+    float _closeRSI = f_zrsi(close, _length)
+
+    //  emulate "open" simply by taking the previous close rsi value
+    float _openRSI = nz(_closeRSI[1], _closeRSI)
+
+    //  the high and low are tricky, because unlike "high" and "low" by
+    //  themselves, the RSI results can overlap each other. So first we just go
+    //  ahead and get the raw results for high and low, and then..
+    float _highRSI_raw = f_zrsi(high, _length)
+    float _lowRSI_raw = f_zrsi(low, _length)
+    //  ..make sure we use the highest for high, and lowest for low
+    float _highRSI = math.max(_highRSI_raw, _lowRSI_raw)
+    float _lowRSI = math.min(_highRSI_raw, _lowRSI_raw)
+
+    //  ha calculation for close
+    float _close = (_openRSI + _highRSI + _lowRSI + _closeRSI) / 4
+
+    //  ha calculation for open, standard, and smoothed/lagged
+    var float _open = na
+    _open := na(_open[i_smoothing]) ? (_openRSI + _closeRSI) / 2 : (_open[1] * i_smoothing + _close[1]) / (i_smoothing + 1)
+
+    //  ha high and low min-max selections
+    float _high = math.max(_highRSI, math.max(_open, _close))
+    float _low = math.min(_lowRSI, math.min(_open, _close))
+
+    //  return the OHLC values
+    [_open, _high, _low, _close]
+
+
+
+
+
+
+// Divergences 
+f_top_fractal(src) =>
+    src[4] < src[2] and src[3] < src[2] and src[2] > src[1] and src[2] > src[0]
+f_bot_fractal(src) =>
+    src[4] > src[2] and src[3] > src[2] and src[2] < src[1] and src[2] < src[0]
+f_fractalize(src) =>
+    f_top_fractal(src) ? 1 : f_bot_fractal(src) ? -1 : 0
+
+f_findDivs(src, topLimit, botLimit, useLimits) =>
+    fractalTop = f_fractalize(src) > 0 and (useLimits ? src[2] >= topLimit : true) ? src[2] : na
+    fractalBot = f_fractalize(src) < 0 and (useLimits ? src[2] <= botLimit : true) ? src[2] : na
+    highPrev = ta.valuewhen(fractalTop, src[2], 0)[2]
+    highPrice = ta.valuewhen(fractalTop, high[2], 0)[2]
+    lowPrev = ta.valuewhen(fractalBot, src[2], 0)[2]
+    lowPrice = ta.valuewhen(fractalBot, low[2], 0)[2]
+    bearSignal = fractalTop and high[2] > highPrice and src[2] < highPrev
+    bullSignal = fractalBot and low[2] < lowPrice and src[2] > lowPrev
+    bearDivHidden = fractalTop and high[2] < highPrice and src[2] > highPrev
+    bullDivHidden = fractalBot and low[2] > lowPrice and src[2] < lowPrev
+    [fractalTop, fractalBot, lowPrev, bearSignal, bullSignal, bearDivHidden, bullDivHidden]
+
+// RSI+MFI
+f_rsimfi(_period, _multiplier, _tf) =>
+    request.security(syminfo.tickerid, _tf, ta.sma((close - open) / (high - low) * _multiplier, _period) - rsiMFIPosY)
+
+// WaveTrend
+f_wavetrend(src, chlen, avg, malen, tf) =>
+    tfsrc = request.security(syminfo.tickerid, tf, src)
+    esa = ta.ema(tfsrc, chlen)
+    de = ta.ema(math.abs(tfsrc - esa), chlen)
+    ci = (tfsrc - esa) / (0.015 * de)
+    wwtt1 = request.security(syminfo.tickerid, tf, ta.ema(ci, avg))
+    wwtt2 = request.security(syminfo.tickerid, tf, ta.sma(wwtt1, malen))
+    wwttVwap = wwtt1 - wwtt2
+    wwttOversold = wwtt2 <= oosLevel
+    wwttOverbought = wwtt2 >= OOBBLevel
+    wwttCross = ta.cross(wwtt1, wwtt2)
+    wwttCrossUp = wwtt2 - wwtt1 <= 0
+    wwttCrossDown = wwtt2 - wwtt1 >= 0
+    wwttCrosslast = ta.cross(wwtt1[2], wwtt2[2])
+    wwttCrossUplast = wwtt2[2] - wwtt1[2] <= 0
+    wwttCrossDownlast = wwtt2[2] - wwtt1[2] >= 0
+    [wwtt1, wwtt2, wwttOversold, wwttOverbought, wwttCross, wwttCrossUp, wwttCrossDown, wwttCrosslast, wwttCrossUplast, wwttCrossDownlast, wwttVwap]
+
+
+// MACD
+f_macd(src, fastlen, slowlen, sigsmooth, tf) =>
+    fast_ma = request.security(syminfo.tickerid, tf, ta.ema(src, fastlen))
+    slow_ma = request.security(syminfo.tickerid, tf, ta.ema(src, slowlen))
+    macd = fast_ma - slow_ma
+    signal = request.security(syminfo.tickerid, tf, ta.sma(macd, sigsmooth))
+    hist = macd - signal
+    [macd, signal, hist]
+
+
+// Get higher timeframe candle
+f_getTFCandle(_tf) =>
+    _open = request.security(ticker.heikinashi(syminfo.tickerid), _tf, open, barmerge.gaps_off, barmerge.lookahead_on)
+    _close = request.security(ticker.heikinashi(syminfo.tickerid), _tf, close, barmerge.gaps_off, barmerge.lookahead_on)
+    _high = request.security(ticker.heikinashi(syminfo.tickerid), _tf, high, barmerge.gaps_off, barmerge.lookahead_on)
+    _low = request.security(ticker.heikinashi(syminfo.tickerid), _tf, low, barmerge.gaps_off, barmerge.lookahead_on)
+    hl2 = (_high + _low) / 2.0
+    newBar = ta.change(_open)
+    candleBodyDir = _close > _open
+    [candleBodyDir, newBar]
+
+
+  
+
+
+
+
+    
+////////////////////////////////////////////////////////////////////////////////
+//                                                                            //
+//                   ====== SERIES, LINES and LABELS ======                   //
+//                                                                            //
+////////////////////////////////////////////////////////////////////////////////
+
+// CALCULATE INDICATORS {
+
+// RSI
+rsi = ta.rsi(rsiSRC, rsiLen)
+rsiColor = rsi <= rsiOversold ? colorGreen : rsi >= rsiOverbought ? colorRed : colorPurple
+
+
+// Calculates WaveTrend
+[wwtt1, wwtt2, wwttOversold, wwttOverbought, wwttCross, wwttCrossUp, wwttCrossDown, wwttCross_last, wwttCrossUp_last, wwttCrossDown_last, wwttVwap] = f_wavetrend(wwttMASource, wwttChannelLen, wwttAverageLen, wwttMALen, timeframe.period)
+
+
+
+// wwtt Divergences
+[wwttFractalTop, wwttFractalBot, wwttLow_prev, wwttBearDiv, wwttBullDiv, wwttBearDivHidden, wwttBullDivHidden] = f_findDivs(wwtt2, wwttDivOOBBLevel, wwttDivoosLevel, true)
+
+[wwttFractalTop_add, wwttFractalBot_add, wwttLow_prev_add, wwttBearDiv_add, wwttBullDiv_add, wwttBearDivHidden_add, wwttBullDivHidden_add] = f_findDivs(wwtt2, wwttDivOOBBLevel_add, wwttDivoosLevel_add, true)
+[wwttFractalTop_nl, wwttFractalBot_nl, wwttLow_prev_nl, wwttBearDiv_nl, wwttBullDiv_nl, wwttBearDivHidden_nl, wwttBullDivHidden_nl] = f_findDivs(wwtt2, 0, 0, false)
+
+wwttBearDivHidden_ = showHiddenDiv_nl ? wwttBearDivHidden_nl : wwttBearDivHidden
+wwttBullDivHidden_ = showHiddenDiv_nl ? wwttBullDivHidden_nl : wwttBullDivHidden
+
+wwttBearDivColor = wwttShowDiv and wwttBearDiv or wwttShowHiddenDiv and wwttBearDivHidden_ ? colorRed : na
+wwttBullDivColor = wwttShowDiv and wwttBullDiv or wwttShowHiddenDiv and wwttBullDivHidden_ ? colorGreen : na
+
+wwttBearDivColor_add = wwttShowDiv and wwttDivOOBBLevel_addshow and wwttBearDiv_add or wwttShowHiddenDiv and wwttDivOOBBLevel_addshow and wwttBearDivHidden_add ? #9a0202 : na
+wwttBullDivColor_add = wwttShowDiv and wwttDivOOBBLevel_addshow and wwttBullDiv_add or wwttShowHiddenDiv and wwttDivOOBBLevel_addshow and wwttBullDivHidden_add ? #1b5e20 : na
+
+// RSI Divergences
+[rsiFractalTop, rsiFractalBot, rsiLow_prev, rsiBearDiv, rsiBullDiv, rsiBearDivHidden, rsiBullDivHidden] = f_findDivs(rsi, rsiDivOOBBLevel, rsiDivoosLevel, true)
+[rsiFractalTop_nl, rsiFractalBot_nl, rsiLow_prev_nl, rsiBearDiv_nl, rsiBullDiv_nl, rsiBearDivHidden_nl, rsiBullDivHidden_nl] = f_findDivs(rsi, 0, 0, false)
+
+rsiBearDivHidden_ = showHiddenDiv_nl ? rsiBearDivHidden_nl : rsiBearDivHidden
+rsiBullDivHidden_ = showHiddenDiv_nl ? rsiBullDivHidden_nl : rsiBullDivHidden
+
+rsiBearDivColor = rsiShowDiv and rsiBearDiv or rsiShowHiddenDiv and rsiBearDivHidden_ ? colorRed : na
+rsiBullDivColor = rsiShowDiv and rsiBullDiv or rsiShowHiddenDiv and rsiBullDivHidden_ ? colorGreen : na
+
+// Buy signal.
+buySignal = wwttCross and wwttCrossUp and wwttOversold
+
+buySignalDiv = wwttShowDiv and wwttBullDiv or wwttShowDiv and wwttBullDiv_add or rsiShowDiv and rsiBullDiv
+
+buySignalDiv_color = wwttBullDiv ? colorGreen : wwttBullDiv_add ? color.new(colorGreen, 60) : rsiShowDiv ? colorGreen : na
+
+// Sell signal
+sellSignal = wwttCross and wwttCrossDown and wwttOverbought
+
+sellSignalDiv = wwttShowDiv and wwttBearDiv or wwttShowDiv and wwttBearDiv_add or rsiShowDiv and rsiBearDiv
+
+sellSignalDiv_color = wwttBearDiv ? colorRed : wwttBearDiv_add ? color.new(colorRed, 60) : rsiBearDiv ? colorRed : na
+
+
+//  standard, or ha smoothed rsi for the line plot and/or histogram
+float RSI = f_rsi(i_source, i_lenRSI, i_mode)
+
+
+//  get OHLC values to use in the plotcandle()
+[O, H, L, C] = f_rsiHeikinAshi(i_lenHARSI)
+
+//  shadow, invisible
+color colShadow = color.rgb(0, 0, 0, 100)
+color colNone = color.rgb(0, 0, 0, 100)
+
+//  rsi color
+//color colRSI        = RSI >=30 ? color.red : color.gray
+color colRSI = RSI < -31 ? color.lime : RSI > 31 ? color.red : color.gray
+
+
+cross_up = RSI[1] > 30
+cross_down = RSI[1] < -30
+
+//  candle body colouring
+color bodyColour = C > O ? i_colUp : i_colDown
+color wickColour = i_colWick
+
+////////////////////////////////////////////////////////////////////////////////
+//                                                                            //
+//                     ====== DRAWING and PLOTTING ======                     //
+//                                                                            //
+////////////////////////////////////////////////////////////////////////////////
+
+plotchar(cross_down[1] and wwttBuyShow and buySignal  ? -107 : na, title='Buy circle', char='·', color=color.new(colorGreen, 10), location=location.absolute, size=size.small)
+plotchar(cross_up[1] and wwttSellShow and sellSignal ? 105 : na, title='Sell circle', char='·', color=color.new(colorRed, 10), location=location.absolute, size=size.small)
+
+plotchar(cross_down[1] and wwttDivShow and buySignalDiv and wwttBuyShow and buySignal[2] ? -106 : na, title='Divergence buy circle', char='▲', color=buySignalDiv_color, location=location.absolute, size=size.tiny, offset=-2, transp=10)
+plotchar(cross_up[1] and wwttDivShow and sellSignalDiv and wwttSellShow and sellSignal[2] ? 106 : na, title='Divergence sell circle', char='▼', color=sellSignalDiv_color, location=location.absolute, size=size.tiny, offset=-2, transp=10)
+
+
+//Alerts
+alertcondition((cross_down[1] and wwttBuyShow and buySignal[2] and wwttDivShow and buySignalDiv) or (cross_up[1] and wwttSellShow and sellSignal[2] and wwttDivShow and sellSignalDiv), title='Buy/Sell Signal', message='Buy/Sell Signal')
+

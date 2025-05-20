@@ -1,0 +1,253 @@
+//@version=4
+study(title="TORene v1.91")
+
+iMACDGreen = input(-0.000044, title="MACD Green", group="Green Alerts")
+iSQGreen = input(-0.000066, title="Squeeze Green", group="Green Alerts")
+iWaitGreenBar = input(false, title="Wait for 1st Green Bar", group="Green Alerts")
+
+// IMPULSE MACD
+lengthMA = input(10, title="Length MA", group="Impulse MACD")
+lengthSignal = input(9, title="Length Signal", group="Impulse MACD")
+
+calc_smma(src, len) =>
+    smma = 0.0
+	smma := na(smma[1]) ? sma(src, len) : (smma[1] * (len - 1) + src) / len
+    smma
+
+calc_zlema(src, length) =>
+	ema1 = ema(src, length)
+	ema2 = ema(ema1, length)
+	d = ema1 - ema2
+	ema1 + d
+
+src=hlc3
+hi=calc_smma(high, lengthMA)
+lo=calc_smma(low, lengthMA)
+mi=calc_zlema(src, lengthMA) 
+
+md=(mi>hi)? (mi-hi) : (mi<lo) ? (mi - lo) : 0
+sb=sma(md, lengthSignal)
+sh=md-sb
+mdc= src > mi ? src > hi ? color.lime : color.green : src < lo ? color.red : color.orange
+// plot(0, color=color.gray, linewidth=1, title="MidLine")
+// plot(md, color=color.new(color.teal,50), linewidth=2, title="ImpulseMACD", style=plot.style_histogram)
+// plot(sh, color=color.blue, linewidth=2, title="ImpulseHistogram", style=plot.style_histogram)
+// plot(sb, color=color.maroon, linewidth=2, title="ImpulseMACDCDSignal")
+
+// SQZMOM
+
+lengthSQ = input(10, title="BB Length", group="Squeeze Momentum")
+mult = input(8.0,title="BB MultFactor", group="Squeeze Momentum")
+lengthKC=input(14, title="KC Length", group="Squeeze Momentum")
+multKC = input(1.5, title="KC MultFactor", group="Squeeze Momentum")
+useTrueRange = input(true, title="Use TrueRange (KC)", group="Squeeze Momentum")
+
+sourceSQ = close
+basisSQ = sma(sourceSQ, lengthSQ)
+dev1 = multKC * stdev(sourceSQ, lengthSQ)
+upperBB = basisSQ + dev1
+lowerBB = basisSQ - dev1
+ma = sma(sourceSQ, lengthKC)
+rangeQ = useTrueRange ? tr : (high - low)
+rangema = sma(rangeQ, lengthKC)
+upperKC = ma + rangema * multKC
+lowerKC = ma - rangema * multKC
+avg1 = avg(highest(high, lengthKC), lowest(low, lengthKC))
+avg2 = avg(avg1, sma(close,lengthKC))
+valSQ = linreg(close - avg2, lengthKC, 0)
+
+// TTF - Trend Trigger Factor script may be freely distributed under the MIT license.
+
+lengthTTF = input(title="Lookback Length", defval=7, group="TTF")
+upperLevel = input(title="Upper Trigger Level", defval=120, minval=1, group="TTF")
+lowerLevel = input(title="Lower Trigger Level", defval=-100, maxval=-1, group="TTF")
+highlightBreakouts = input(title="Highlight Overbought/Oversold Breakouts ?", defval=false, group="TTF")
+srcTTF = input(title="Source", defval=close, group="TTF")
+
+hhTTF = highest(lengthTTF)
+llTTF = lowest(lengthTTF)
+
+buyPower = hhTTF - nz(llTTF[lengthTTF])
+sellPower = nz(hhTTF[lengthTTF]) - llTTF
+ttf = 200 * (buyPower - sellPower) / (buyPower + sellPower) 
+
+//plot(ttf, title="TTF", linewidth=2, color=ttfColor, transp=0)
+// transparent = color.new(color.white, 100)
+//maxLevelPlot = hline(200, title="Max Level", linestyle=dotted, color=transparent)
+//upperLevelPlot = hline(upperLevel, title="Upper Trigger Level", linestyle=dotted)
+//hline(0, title="Zero Level", linestyle=dotted)
+//lowerLevelPlot = hline(lowerLevel, title="Lower Trigger Level", linestyle=dotted)
+//minLevelPlot = hline(-200, title="Min Level", linestyle=dotted, color=transparent)
+//fill(upperLevelPlot, lowerLevelPlot, color=purple, transp=95)
+//upperFillColor = ttf > upperLevel and highlightBreakouts ? color.green : color.gray
+//lowerFillColor = ttf < lowerLevel and highlightBreakouts ? color.red : color.gray
+//fill(maxLevelPlot, upperLevelPlot, color=upperFillColor, transp=90)
+//fill(minLevelPlot, lowerLevelPlot, color=lowerFillColor, transp=90)
+
+// WAE - Waddah Attar Explosion v1 by LazyBear
+
+sensitivity = input(150, title="Sensitivity", group="WAE")
+fastLength=input(20, title="FastEMA Length", group="WAE")
+slowLength=input(40, title="SlowEMA Length", group="WAE")
+channelLength=input(20, title="BB Channel Length", group="WAE")
+multWAE=input(2.0, title="BB Stdev Multiplier", group="WAE")
+DeadZone=input(3.7, title="Dead Zone Multiplier", group="WAE")
+
+DEAD_ZONE = nz(rma(tr(true),400)) * DeadZone
+
+calc_macd(source, fastLength, slowLength) =>
+    fastMA = ema(source, fastLength)
+    slowMA = ema(source, slowLength)
+    fastMA - slowMA
+
+calc_BBUpper(source, length, mult) => 
+    basis = sma(source, length)
+    dev = mult * stdev(source, length)
+    basis + dev
+
+calc_BBLower(source, length, mult) => 
+    basis = sma(source, length)
+    dev = mult * stdev(source, length)
+    basis - dev
+
+t1 = (calc_macd(close, fastLength, slowLength) - calc_macd(close[1], fastLength, slowLength))*sensitivity
+e1 = (calc_BBUpper(close, channelLength, multWAE) - calc_BBLower(close, channelLength, multWAE))
+
+trendUp = (t1 >= 0) ? t1 : 0
+trendDown = (t1 < 0) ? (-1*t1) : 0
+
+//plot(trendUp, style=columns, linewidth=1, color=(trendUp<trendUp[1])?lime:green, transp=45, title="UpTrend")
+//plot(trendDown, style=columns, linewidth=1, color=(trendDown<trendDown[1])?orange:red, transp=45, title="DownTrend")
+//plot(e1, style=line, linewidth=2, color=#A0522D, title="ExplosionLine")
+//plot(DEAD_ZONE, color=blue, linewidth=1, style=cross, title="DeadZoneLine")
+
+// EMA SLOPE By Pedro Braconnot
+
+smoothBars = input(3, 'Smooth Bars', minval=1, group="EMA Slope")
+maLength = input(24, 'MA Length', minval=1, group="EMA Slope")
+noTZone = input(true, 'No Trade Zone Threshold', group="EMA Slope")
+maDL = input(24, 'NTZ Threshold', step=1, minval=1, group="EMA Slope")
+hLineHeight = maDL
+maType = input('EMA', 'MA Type', options=['SMA', 'EMA', 'DEMA', 'TEMA', 'WMA', 'VWMA', 'SMWMA', 'SWMA', 'HMA'], group="EMA Slope")
+srcES = input(close, 'MA Source', group="EMA Slope")
+
+fma(type, src, _len) =>
+    float result = 0
+    if type == 'SMA'
+        result := sma(src, _len)
+        result
+    if type == 'EMA'  // Exponential
+        result := ema(src, _len)
+        result
+    if type == 'DEMA'
+        e = ema(src, _len)
+        result := 2 * e - ema(e, _len)
+        result
+    if type == 'TEMA'
+        e = ema(src, _len)
+        result := 3 * (e - ema(e, _len)) + ema(ema(e, _len), _len)
+        result
+    if type == 'WMA'
+        result := wma(src, _len)
+        result
+    if type == 'VWMA'
+        result := vwma(src, _len)
+        result
+    if type == 'SMWMA'  // Smoothed
+        w = wma(src, _len)
+        wb = sma(src, _len)
+        result := na(w[1]) ? wb : (w[1] * (_len - 1) + src) / _len
+        result
+    if type == 'SWMA'  // Symmetrically weighted
+        result := swma(src)
+        result
+    if type == 'HMA'
+        result := wma(2 * wma(src, _len / 2) - wma(src, _len), round(sqrt(_len)))
+        result
+    result
+
+maES = fma(maType, srcES, maLength)
+maDF = maES - maES[smoothBars]
+
+fmaDf(ma, maDF) =>
+    maMax = highest(maDF,500)
+    maMin = lowest(maDF,500)
+    ma_range = maMax - maMin
+    maDf = 100 * maDF / ma_range
+    maDf
+
+maDf = fmaDf(ma, maDF)
+maAcce = abs(maDf - maDf[1]) * smoothBars * 2
+maAccHt = highest(maAcce, 200)
+maAcc = 50 * maAcce / maAccHt
+inChannel = (maDf < hLineHeight) and (maDf > -hLineHeight) and ((maDf[1] >= hLineHeight) or  (maDf[1] <= -hLineHeight))
+cUP = color.rgb(38, 255, 72, 50)
+cUPb = color.rgb(38, 255, 52, 40)
+cLP = color.rgb(255, 20, 20, 40)
+cLPb = color.rgb(229, 18, 18, 40)
+cNTZ = color.rgb(186, 167, 167, 70)
+colorS = maDf > 0 ? cUP : maDf < 0 ? cLP : cNTZ
+
+f_colorN(maDf, maDL, cUP, cUPb, cLP, cLPb, cNTZ) =>
+    colorN = color.rgb(38, 255, 72, 75)
+    colorN := maDf > 0 and maDf > maDL and maDf > maDf[1] ? cUPb : maDf > 0 and maDf > maDL and maDf <= maDf[1] ? cUP : maDf > 0 and maDf <= maDL ? cNTZ : maDf <= 0 and maDf < -maDL and maDf > maDf[1] ? cLPb : maDf <= 0 and maDf < -maDL and maDf <= maDf[1] ? cLP : maDf > -maDL ? cNTZ : na
+    colorN
+
+c_ntz = noTZone ? f_colorN(maDf, maDL, cUP, cUPb, cLP, cLPb, cNTZ) : colorS
+trspa = ((100 - maDL) - maAcc * 2)
+c_Acc = maAcc > 0.3 * maAcc and maDf > 0 ? color.rgb(10, 246, 255, trspa) : maAcc > 0.3 * maAcc  and maDf < 0 ? color.rgb(239, 2, 77, trspa) : color.rgb(160, 160, 160, trspa)
+
+//hUp = hline(hLineHeight, title='NTZ Top', color=color.rgb(75, 219, 94, 40), linewidth=1, linestyle=hline.style_dashed)
+//hDn = hline(-hLineHeight, title='NTZ Bottom', color=color.rgb(244, 34, 34, 40), linewidth=1, linestyle=hline.style_dashed)
+//ntzFillC = input.color(color.new(#777777, 70), "NTZ fill color")
+//fill(hUp,hDn,color=ntzFillC)
+//hline(0, linestyle=hline.style_solid, color=color.rgb(255, 255, 255, 70))
+// -------------> plot(maDf, 'Diff MA', c_ntz)
+//plot(maDf, 'Diff MA fill', c_ntz, style=plot.style_area)
+//plot(maAcc, 'MA Accel', color = c_Acc, style=plot.style_circles, linewidth=4)
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=    FINAL PLOTS    =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
+cIMACDColor = md < iMACDGreen ? color.green : color.new(color.gray, 70) 
+cSQColor = valSQ < iSQGreen ? color.green : color.new(color.gray, 70) 
+cTTFColor = ttf < lowerLevel ? color.green : color.new(color.gray, 70) 
+cWColor = e1 > DEAD_ZONE ? color.green : color.new(color.gray, 70) 
+cESColor = maDf < maDL * -1 ? color.green : color.new(color.gray, 70) 
+
+iHighScore = 0
+if cIMACDColor == color.green 
+    iHighScore := iHighScore + 1
+if cSQColor == color.green 
+    iHighScore := iHighScore + 1
+if cTTFColor == color.green 
+    iHighScore := iHighScore + 1
+if cWColor == color.green 
+    iHighScore := iHighScore + 1
+if cESColor == color.green 
+    iHighScore := iHighScore + 1
+
+Fourof5Color = (iHighScore >= 4) ? color.lime : color.new(color.gray, 100)
+
+bGreenCandle = close > open and close[1] <= open[1]
+if (not bGreenCandle and iWaitGreenBar)
+    Fourof5Color := color.new(color.gray, 100)
+
+plot(141.5, title = "4 Meters Align", style=plot.style_circles, color=Fourof5Color, linewidth=3)
+
+plot(111.5, title="Impulse MACD", style=plot.style_circles, color=cIMACDColor, linewidth=2)
+plot(117.5, title="Squeeze", style=plot.style_circles, color=cSQColor, linewidth=2)
+plot(123.5, title="TTF", style=plot.style_circles, color=cTTFColor, linewidth=2)
+plot(129.5, title="WAE", style=plot.style_circles, color=cWColor, linewidth=2)
+plot(135.5, title="Slope", style=plot.style_circles, color=cESColor, linewidth=2)
+
+
+// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=    ALERTS    =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
+alertcondition(iHighScore >= 4, title='4/5 Conditions Met', message='4/5 Conditions Met')
+alertcondition(cIMACDColor == color.green, title='Impulse MACD GREEN', message='Impulse MACD GREEN')
+alertcondition(cSQColor == color.green, title='Squeeze GREEN', message='SqueezeGREEN')
+alertcondition(cTTFColor == color.green, title='TTF GREEN', message='TTF GREEN')
+alertcondition(cWColor == color.green, title='WAE GREEN', message='WAE GREEN')
+alertcondition(cESColor == color.green, title='Slope GREEN', message='Slope GREEN')
+
