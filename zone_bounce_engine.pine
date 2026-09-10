@@ -25,7 +25,7 @@ indicator("Zone Bounce Engine v3", overlay = true,
 // ─────────────────────────── INPUTS ───────────────────────────
 gZ = "Zones"
 zonesStr = input.text_area(
-     defval = "top,7747.88,bottom,7746.17,top,7765.05,bottom,7763.34,top,7786.07,bottom,7781.99,top,7820.84,bottom,7816.76,top,7831.17,bottom,7829.46",
+     defval = "top,7747.88,bottom,7746.17,top,7765.05,bottom",
      title  = "Rectangles",
      group  = gZ,
      tooltip = "Format: top,<price>,bottom,<price>,...\nSpaces, tabs and line breaks are ignored. Order inside a pair doesn't matter — the higher number is always taken as the top.")
