@@ -1,95 +1,95 @@
 //@version=6
 // ═══════════════════════════════════════════════════════════════════════════
-//  Zone Bounce Engine  v3  — approach filter + confirmation
+//  Zone & Line Bounce Engine  v5
 //
-//  Paste rectangles as price pairs. Every interaction is classified as:
-//    1  WICK   wick pierced an edge, no candle body ever inside
-//    2  TOUCH  body dipped in, closed back out the same side
-//    3  BACK   traversed to the far edge, rejected there, exited same side
+//  Everything price can bounce off is a "Band" — a top and a bottom. Pasted
+//  rectangles are real bands; the EMA, VWAP and session levels are bands with
+//  top == bottom, widened only by the tolerance setting. One state machine
+//  handles all of them. `useFar` is off for the lines because a zero-width
+//  band has no far side, so those only ever produce wick or touch bounces.
 //
-//  A signal now has to clear three gates, in this order:
+//  Gates, in order:
+//    READY     session levels stay dead until their session has closed
+//    APPROACH  the N candles before first contact must travel toward the band
+//    BOUNCE    price closes back out the side it came from
+//    CONFIRM   the next N candles close further in the bounce direction
 //
-//    APPROACH  the N candles before first contact must be moving toward the
-//              zone (default 2). Checked once, when the interaction opens.
-//    BOUNCE    price closes back out the side it came from.
-//    CONFIRM   the next N candles (default 1) must close further in the
-//              bounce direction and stay clear of the zone.
-//
-//  Direction comes from where price approached FROM:
-//    from above -> bounced back up   = bullish  (zone held as support)
-//    from below -> pushed back down  = bearish  (zone held as resistance)
+//  Session times are written in the timezone you pick below. Defaults are
+//  US Central. CHANGE THE SESSION STRINGS if you change the timezone.
 // ═══════════════════════════════════════════════════════════════════════════
-indicator("Zone Bounce Engine v3", overlay = true,
-     max_bars_back = 100, max_boxes_count = 500, max_labels_count = 500)
+indicator("Zone & Line Bounce Engine v5", overlay = true,
+     max_bars_back = 300, max_boxes_count = 500, max_labels_count = 500,
+     max_lines_count = 50)
 
-// ─────────────────────────── INPUTS ───────────────────────────
-gZ = "Zones"
+// ═══════════════════════════ INPUTS ═══════════════════════════
+gT = "Timezone & sessions"
+tz = input.string("America/Chicago", "Timezone", group = gT, options = [
+     "America/Chicago", "America/New_York", "America/Denver", "America/Los_Angeles",
+     "America/Sao_Paulo", "Europe/London", "Europe/Berlin", "Europe/Moscow",
+     "Asia/Dubai", "Asia/Kolkata", "Asia/Shanghai", "Asia/Tokyo",
+     "Australia/Sydney", "UTC"],
+     tooltip = "All session strings below are interpreted in this timezone. Defaults are written for America/Chicago (CST/CDT) — if you switch timezone, rewrite them to match.")
+nySess   = input.session("0830-1500", "NY session",       group = gT, tooltip = "Anchors the VWAP at its first bar. CST default = 09:30–16:00 ET.")
+orSess   = input.session("0830-0930", "1H opening range", group = gT, tooltip = "First hour of the NY session. CST default = 09:30–10:30 ET.")
+asiaSess = input.session("1800-0300", "Asia session",     group = gT, tooltip = "CST default = 19:00–04:00 ET.")
+lonSess  = input.session("0200-1030", "London session",   group = gT, tooltip = "CST default = 03:00–11:30 ET.")
+
+gL = "Lines"
+shEma  = input.bool(true, "EMA 200",          group = gL, inline = "ema")
+cEma   = input.color(#E8E4D9, "",             group = gL, inline = "ema")
+emaLen = input.int(200, "len", minval = 1,    group = gL, inline = "ema")
+emaTr  = input.int(20, "Line transparency %", minval = 0, maxval = 100, group = gL,
+     tooltip = "Applies to the EMA line only. Its bounce markers stay fully opaque.")
+emaGap = input.int(2, "EMA dot spacing (bars)", minval = 1, maxval = 10, group = gL,
+     tooltip = "1 = a dot on every bar. Raise it for a sparser dotted line.")
+shVwp  = input.bool(true, "VWAP (NY anchor)",  group = gL, inline = "vwp")
+cVwp   = input.color(#2E6FD9, "",              group = gL, inline = "vwp")
+shOr   = input.bool(true, "1H opening range",  group = gL, inline = "or")
+cOr    = input.color(#FFFFFF, "",              group = gL, inline = "or")
+shAs   = input.bool(true, "Asia high / low",   group = gL, inline = "as")
+cAs    = input.color(#7EC8E3, "",              group = gL, inline = "as")
+shLn   = input.bool(true, "London high / low", group = gL, inline = "ln")
+cLn    = input.color(#F5A9C4, "",              group = gL, inline = "ln")
+extRt  = input.int(3, "Extend levels right (bars)", minval = 0, group = gL)
+
+gZ = "Zones (pasted rectangles)"
+shZn = input.bool(true, "Enable zones", group = gZ)
 zonesStr = input.text_area(
-     defval = "top,7747.88,bottom,7746.17,top,7765.05,bottom",
-     title  = "Rectangles",
-     group  = gZ,
-     tooltip = "Format: top,<price>,bottom,<price>,...\nSpaces, tabs and line breaks are ignored. Order inside a pair doesn't matter — the higher number is always taken as the top.")
-zoneCol = input.color(color.teal, "Zone colour", group = gZ)
-showTbl = input.bool(true, "Show parse counter", group = gZ)
+     defval = "top,7747.88,bottom,7746.17,top,7765.05,bottom,7763.34,top,7786.07,bottom,7781.99,top,7820.84,bottom,7816.76,top,7831.17,bottom,7829.46",
+     title  = "Rectangles", group = gZ,
+     tooltip = "Format: top,<price>,bottom,<price>,...\nSpaces, tabs and line breaks are ignored.")
+cZn = input.color(color.teal, "Zone colour", group = gZ)
 
 gA       = "Approach"
 prevN    = input.int(2, "Approach candles", minval = 0, maxval = 10, group = gA,
-     tooltip = "Candles before first contact that must be travelling toward the zone. 0 disables the filter.")
-apprMono = input.bool(true, "Every approach candle must move closer", group = gA,
-     tooltip = "On: no candle in the run may back away from the zone. Off: only the net move from the oldest approach candle to first contact has to close the distance.")
+     tooltip = "Candles before first contact that must be travelling toward the band. 0 disables.")
+apprMono = input.bool(true, "Every approach candle must move closer", group = gA)
 
-gB     = "Bounce rules"
-tol    = input.float(0.0, "Edge tolerance (price)", minval = 0, group = gB)
-farPct = input.float(80, "Far-side reach %", minval = 1, maxval = 100, group = gB,
-     tooltip = "How deep price must travel into the zone to count as a back-of-rectangle bounce.") / 100
-maxSeq = input.int(10, "Max bars inside zone", minval = 1, group = gB,
-     tooltip = "Linger longer than this before resolving and it's consolidation, not a bounce.")
-cooldn = input.int(0, "Cooldown bars per zone", minval = 0, group = gB)
+gB       = "Bounce rules"
+onlyDone = input.bool(true, "Session levels only signal once their session has closed", group = gB,
+     tooltip = "A session high is meaningless while it is still being made — every new high touches it by definition. Leave this on unless you deliberately want live-forming levels.")
+tol      = input.float(0.0, "Edge tolerance (price)", minval = 0, group = gB,
+     tooltip = "Also sets the effective thickness of the single-price lines. 0 = exact touch.")
+farPct   = input.float(80, "Far-side reach % (zones only)", minval = 1, maxval = 100, group = gB) / 100
+maxSeq   = input.int(10, "Max bars inside band", minval = 1, group = gB)
+cooldn   = input.int(0, "Cooldown bars per band", minval = 0, group = gB)
 
-gC     = "Confirmation"
-waitN  = input.int(1, "Wait candles", minval = 1, maxval = 5, group = gC,
-     tooltip = "Candles to wait after the bounce candle before the signal may fire.")
+gC       = "Confirmation"
+waitN    = input.int(1, "Wait candles", minval = 1, maxval = 5, group = gC)
 needProg = input.bool(true, "Confirm close must beat the bounce candle's close", group = gC)
-needBody = input.bool(false, "Confirm candle must close in the bounce direction", group = gC,
-     tooltip = "Bullish: close > open. Bearish: close < open. Filters doji confirmations.")
+needBody = input.bool(false, "Confirm candle must close in the bounce direction", group = gC)
 markBack = input.bool(true, "Draw marker on the bounce candle", group = gC)
 
-gS    = "Signals"
-useT1 = input.bool(true, "1 · Wick rejection (no body inside)", group = gS)
-useT2 = input.bool(true, "2 · Touch & bounce",                  group = gS)
-useT3 = input.bool(true, "3 · Back-of-rectangle bounce",        group = gS)
+gS     = "Signals"
+useT1  = input.bool(true, "1 · Wick rejection (no body inside)", group = gS)
+useT2  = input.bool(true, "2 · Touch & bounce",                  group = gS)
+useT3  = input.bool(true, "3 · Back-of-zone bounce (zones only)", group = gS)
 showLb = input.bool(true, "Labels", group = gS)
 
-// ─────────────────────────── PARSER ───────────────────────────
-parseZones(string src) =>
-    tops  = array.new<float>()
-    bots  = array.new<float>()
-    clean = str.replace_all(str.replace_all(str.replace_all(src, " ", ""), "\n", ""), "\t", "")
-    toks  = str.split(clean, ",")
-    string key = "top"
-    float  pT  = na
-    float  pB  = na
-    for tk in toks
-        if str.length(tk) > 0
-            n = str.tonumber(tk)
-            if na(n)
-                key := str.lower(tk)
-            else
-                if str.startswith(key, "b")
-                    pB := n
-                else
-                    pT := n
-                if not na(pT) and not na(pB)
-                    array.push(tops, math.max(pT, pB))
-                    array.push(bots, math.min(pT, pB))
-                    pT := na
-                    pB := na
-    [tops, bots]
-
-// ────────────────────── APPROACH FILTER ──────────────────────
-// Called on the bar that first contacts the zone. Offset 0 is that contact
-// bar; offsets 1..prevN are the approach run. Bullish (dir = 1) means price
-// is dropping toward the zone, so we track lows; bearish tracks highs.
+// ════════════════════════ APPROACH FILTER ════════════════════════
+// Called on the bar that first contacts a band. Offset 0 is that contact bar;
+// offsets 1..prevN are the run-up. dir = 1 means price is falling toward the
+// band from above, so we track lows; dir = -1 tracks highs.
 approaching(int dir) =>
     bool ok = true
     if prevN > 0
@@ -112,141 +112,348 @@ approaching(int dir) =>
                 ok := false
     ok
 
-// ──────────────────────── ZONE OBJECT ────────────────────────
-type Zone
-    float top
-    float bot
-    box   bx
-    int   side    = 0        // +1 price above zone, -1 below, 0 unknown
-    bool  active  = false    // mid-interaction
-    int   origin  = 0        // side price approached from
-    bool  appr    = false    // approach filter passed at first contact
-    bool  bodyIn  = false    // any body overlapped the zone this interaction
-    bool  farHit  = false    // reached the far edge this interaction
-    int   start   = 0        // bar the interaction began
-    int   lastSig = -100000  // bar of last fired signal
-    int   pKind   = 0        // pending signal type, 0 = nothing pending
-    int   pDir    = 0        // pending direction
-    int   pBar    = 0        // bar the bounce candle closed
-    float pRef    = na       // bounce candle's close, the bar to beat
+// ═════════════════════════ BAND OBJECT ═════════════════════════
+type Band
+    string name
+    string abbr
+    color  col
+    bool   useFar  = false
+    box    bx      = na
+    float  fTop    = na      // fixed top/bottom, used by pasted zones only
+    float  fBot    = na
+    int    side    = 0       // +1 price above band, -1 below, 0 unknown
+    bool   active  = false
+    int    origin  = 0
+    bool   appr    = false
+    bool   bodyIn  = false
+    bool   farHit  = false
+    int    start   = 0
+    int    lastSig = -100000
+    int    pKind   = 0       // pending type, 0 = nothing armed
+    int    pDir    = 0
+    int    pBar    = 0
+    float  pRef    = na
+    int    fired   = 0       // this bar's confirmed signal, 0 = none
+    int    fdir    = 0
 
-var array<Zone> zones = array.new<Zone>()
+// One machine for zones and lines. Pass t == b for a single-price level.
+// Passing na parks the band: state clears and nothing can fire.
+method step(Band this, float t, float b) =>
+    this.fired := 0
+    this.fdir  := 0
+    if na(t) or na(b)
+        this.side   := 0
+        this.active := false
+        this.pKind  := 0
+    else
+        zt     = math.max(t, b)
+        zb     = math.min(t, b)
+        depth  = math.max(zt - zb, syminfo.mintick)
+        hitZ   = low <= zt + tol and high >= zb - tol
+        cAbove = close > zt + tol
+        cBelow = close < zb - tol
+
+        // ── 1. resolve anything pending, before new interactions ──
+        if this.pKind != 0
+            stillOut = this.pDir == 1 ? cAbove : cBelow
+            if not stillOut
+                this.pKind := 0                 // fell back in, void
+            else if bar_index - this.pBar >= waitN
+                prog = not needProg or (this.pDir == 1 ? close > this.pRef : close < this.pRef)
+                body = not needBody or (this.pDir == 1 ? close > open      : close < open)
+                if prog and body and bar_index - this.lastSig >= cooldn
+                    this.fired   := this.pKind
+                    this.fdir    := this.pDir
+                    this.lastSig := bar_index
+                this.pKind := 0
+
+        // ── 2. track the interaction ──
+        if not hitZ
+            this.side   := close > zt ? 1 : -1
+            this.active := false
+            this.bodyIn := false
+            this.farHit := false
+        else
+            if not this.active
+                this.active := true
+                this.origin := this.side != 0 ? this.side : (close > zt ? 1 : -1)
+                this.appr   := approaching(this.origin)
+                this.bodyIn := false
+                this.farHit := false
+                this.start  := bar_index
+            bh = math.max(open, close)
+            bl = math.min(open, close)
+            if bl <= zt and bh >= zb
+                this.bodyIn := true
+            if this.useFar
+                if this.origin == 1 and low <= zb + depth * (1 - farPct) + tol
+                    this.farHit := true
+                if this.origin == -1 and high >= zt - depth * (1 - farPct) - tol
+                    this.farHit := true
+
+            bounced = (this.origin ==  1 and cAbove) or (this.origin == -1 and cBelow)
+            broke   = (this.origin ==  1 and cBelow) or (this.origin == -1 and cAbove)
+
+            // ── 3. arm, don't fire ──
+            if bounced or broke
+                if bounced and this.appr and bar_index - this.start <= maxSeq
+                    kind = this.farHit ? 3 : this.bodyIn ? 2 : 1
+                    on   = kind == 1 ? useT1 : kind == 2 ? useT2 : useT3
+                    if on
+                        this.pKind := kind
+                        this.pDir  := this.origin
+                        this.pBar  := bar_index
+                        this.pRef  := close
+                this.active := false
+                this.side   := cAbove ? 1 : -1
+    this.fired
+
+method bull(Band this) => this.fired != 0 and this.fdir ==  1
+method bear(Band this) => this.fired != 0 and this.fdir == -1
+method hit (Band this) => this.fired != 0
+
+method kindTxt(Band this) =>
+    this.fired == 1 ? "wick" : this.fired == 2 ? "touch" : "back"
+
+method desc(Band this) =>
+    string out = ""
+    if this.fired != 0
+        out := this.name + " " + this.kindTxt() + " " + (this.fdir == 1 ? "up" : "down")
+    out
+
+method tagTxt(Band this) =>
+    string out = ""
+    if this.fired != 0
+        out := this.abbr + (this.fdir == 1 ? "▲" : "▼")
+    out
+
+joinTxt(string acc, string s, string sep) =>
+    string out = acc
+    if str.length(s) > 0
+        out := str.length(acc) == 0 ? s : acc + sep + s
+    out
+
+// ═══════════════════════ LEVEL SOURCES ═══════════════════════
+inSess(string s) => not na(time(timeframe.period, s, tz))
+
+nyOn   = inSess(nySess)
+orOn   = inSess(orSess)
+asiaOn = inSess(asiaSess)
+lonOn  = inSess(lonSess)
+
+nyStart   = nyOn   and not nyOn[1]
+orStart   = orOn   and not orOn[1]
+asiaStart = asiaOn and not asiaOn[1]
+lonStart  = lonOn  and not lonOn[1]
+
+ema200 = ta.ema(close, emaLen)
+vwp    = ta.vwap(hlc3, nyStart)
+
+// Session extremes. Each holds after its session closes, until the next opens.
+// `started` is passed in rather than derived from on[1] inside the function,
+// so no parameter history is needed.
+sessHL(bool on, bool started, float prevH, float prevL) =>
+    float h = prevH
+    float l = prevL
+    if started
+        h := high
+        l := low
+    else if on
+        h := math.max(prevH, high)
+        l := math.min(prevL, low)
+    [h, l]
+
+var float orH = na
+var float orL = na
+var int   orX = na
+var float asH = na
+var float asL = na
+var int   asX = na
+var float lnH = na
+var float lnL = na
+var int   lnX = na
+
+[orH2, orL2] = sessHL(orOn,   orStart,   orH, orL)
+[asH2, asL2] = sessHL(asiaOn, asiaStart, asH, asL)
+[lnH2, lnL2] = sessHL(lonOn,  lonStart,  lnH, lnL)
+orH := orH2
+orL := orL2
+asH := asH2
+asL := asL2
+lnH := lnH2
+lnL := lnL2
+
+if orStart
+    orX := bar_index
+if asiaStart
+    asX := bar_index
+if lonStart
+    lnX := bar_index
+
+// ── READY GATE ──
+// A session level is only tradeable once the session that made it is over.
+// While the session runs, the high is still being printed, so every new high
+// "touches" it by construction and the machine would fire constantly.
+orReady = not na(orH) and (not onlyDone or not orOn)
+asReady = not na(asH) and (not onlyDone or not asiaOn)
+lnReady = not na(lnH) and (not onlyDone or not lonOn)
+
+// ══════════════════════════ DRAWING ══════════════════════════
+// plot() has no dotted style, so the EMA is drawn as spaced circles.
+emaCol   = color.new(cEma, emaTr)
+emaDots  = bar_index % emaGap == 0 ? ema200 : na
+plot(shEma ? emaDots : na, "EMA 200", color = emaCol, linewidth = 3, style = plot.style_circles)
+plot(shVwp ? vwp : na, "VWAP (NY)", color = cVwp, linewidth = 3)
+
+var line lnOrH = line.new(0, 0, 0, 0, width = 1, style = line.style_dotted)
+var line lnOrL = line.new(0, 0, 0, 0, width = 1, style = line.style_dotted)
+var line lnAsH = line.new(0, 0, 0, 0, width = 1, style = line.style_dashed)
+var line lnAsL = line.new(0, 0, 0, 0, width = 1, style = line.style_dashed)
+var line lnLnH = line.new(0, 0, 0, 0, width = 1, style = line.style_dashed)
+var line lnLnL = line.new(0, 0, 0, 0, width = 1, style = line.style_dashed)
+
+drawLvl(line ln, float lvl, int x1, color col, bool show) =>
+    if na(lvl) or na(x1) or not show
+        line.set_color(ln, color.new(color.black, 100))
+    else
+        line.set_color(ln, col)
+        line.set_xy1(ln, x1, lvl)
+        line.set_xy2(ln, bar_index + extRt, lvl)
+
+drawLvl(lnOrH, orH, orX, cOr, shOr)
+drawLvl(lnOrL, orL, orX, cOr, shOr)
+drawLvl(lnAsH, asH, asX, cAs, shAs)
+drawLvl(lnAsL, asL, asX, cAs, shAs)
+drawLvl(lnLnH, lnH, lnX, cLn, shLn)
+drawLvl(lnLnL, lnL, lnX, cLn, shLn)
+
+// ════════════════════════ BAND REGISTRY ════════════════════════
+var Band bEma = Band.new(name = "EMA 200",     abbr = "EMA", col = cEma)
+var Band bVwp = Band.new(name = "VWAP",        abbr = "VW",  col = cVwp)
+var Band bOrH = Band.new(name = "OR High",     abbr = "ORH", col = cOr)
+var Band bOrL = Band.new(name = "OR Low",      abbr = "ORL", col = cOr)
+var Band bAsH = Band.new(name = "Asia High",   abbr = "ASH", col = cAs)
+var Band bAsL = Band.new(name = "Asia Low",    abbr = "ASL", col = cAs)
+var Band bLnH = Band.new(name = "London High", abbr = "LNH", col = cLn)
+var Band bLnL = Band.new(name = "London Low",  abbr = "LNL", col = cLn)
+
+var array<Band> zoneBands = array.new<Band>()
+var array<Band> allBands  = array.new<Band>()
+
+parseZones(string src) =>
+    tops  = array.new<float>()
+    bots  = array.new<float>()
+    clean = str.replace_all(str.replace_all(str.replace_all(src, " ", ""), "\n", ""), "\t", "")
+    string key = "top"
+    float  pT  = na
+    float  pB  = na
+    for tk in str.split(clean, ",")
+        if str.length(tk) > 0
+            n = str.tonumber(tk)
+            if na(n)
+                key := str.lower(tk)
+            else
+                if str.startswith(key, "b")
+                    pB := n
+                else
+                    pT := n
+                if not na(pT) and not na(pB)
+                    array.push(tops, math.max(pT, pB))
+                    array.push(bots, math.min(pT, pB))
+                    pT := na
+                    pB := na
+    [tops, bots]
 
 if barstate.isfirst
-    [tops, bots] = parseZones(zonesStr)
-    if array.size(tops) > 0
-        for i = 0 to array.size(tops) - 1
-            zt = array.get(tops, i)
-            zb = array.get(bots, i)
-            bx = box.new(time, zt, time + 1, zb, xloc = xloc.bar_time,
-                 extend = extend.both, bgcolor = color.new(zoneCol, 88),
-                 border_color = color.new(zoneCol, 35), border_width = 1)
-            array.push(zones, Zone.new(top = zt, bot = zb, bx = bx))
+    array.push(allBands, bEma)
+    array.push(allBands, bVwp)
+    array.push(allBands, bOrH)
+    array.push(allBands, bOrL)
+    array.push(allBands, bAsH)
+    array.push(allBands, bAsL)
+    array.push(allBands, bLnH)
+    array.push(allBands, bLnL)
+    if shZn
+        [tops, bots] = parseZones(zonesStr)
+        if array.size(tops) > 0
+            for i = 0 to array.size(tops) - 1
+                zt = array.get(tops, i)
+                zb = array.get(bots, i)
+                bx = box.new(time, zt, time + 1, zb, xloc = xloc.bar_time,
+                     extend = extend.both, bgcolor = color.new(cZn, 88),
+                     border_color = color.new(cZn, 35), border_width = 1)
+                bd = Band.new(name = "Zone " + str.tostring(zb, format.mintick),
+                     abbr = "Z", col = cZn, useFar = true, bx = bx, fTop = zt, fBot = zb)
+                array.push(zoneBands, bd)
+                array.push(allBands, bd)
 
-// ──────────────── ENUMERATE, CONFIRM, CLASSIFY ────────────────
-bodyHi = math.max(open, close)
-bodyLo = math.min(open, close)
+// ════════════════════════ RUN THE MACHINE ════════════════════════
+emaSrc = shEma ? ema200 : na
+vwpSrc = shVwp ? vwp : na
+orHSrc = shOr and orReady ? orH : na
+orLSrc = shOr and orReady ? orL : na
+asHSrc = shAs and asReady ? asH : na
+asLSrc = shAs and asReady ? asL : na
+lnHSrc = shLn and lnReady ? lnH : na
+lnLSrc = shLn and lnReady ? lnL : na
 
-bull1 = false
-bull2 = false
-bull3 = false
-bear1 = false
-bear2 = false
-bear3 = false
+bEma.step(emaSrc, emaSrc)
+bVwp.step(vwpSrc, vwpSrc)
+bOrH.step(orHSrc, orHSrc)
+bOrL.step(orLSrc, orLSrc)
+bAsH.step(asHSrc, asHSrc)
+bAsL.step(asLSrc, asLSrc)
+bLnH.step(lnHSrc, lnHSrc)
+bLnL.step(lnLSrc, lnLSrc)
+
+for bd in zoneBands
+    bd.step(bd.fTop, bd.fBot)
+
+// ════════════════════════ AGGREGATE ════════════════════════
+zBull = false
+zBear = false
+for bd in zoneBands
+    zBull := zBull or bd.bull()
+    zBear := zBear or bd.bear()
+
+emaBull = bEma.bull()
+emaBear = bEma.bear()
+vwpBull = bVwp.bull()
+vwpBear = bVwp.bear()
+orBull  = bOrH.bull() or bOrL.bull()
+orBear  = bOrH.bear() or bOrL.bear()
+asBull  = bAsH.bull() or bAsL.bull()
+asBear  = bAsH.bear() or bAsL.bear()
+lnBull  = bLnH.bull() or bLnL.bull()
+lnBear  = bLnH.bear() or bLnL.bear()
+
 string note = ""
 string tag  = ""
+for bd in allBands
+    note := joinTxt(note, bd.desc(),   "  |  ")
+    tag  := joinTxt(tag,  bd.tagTxt(), " ")
 
-for z in zones
-    zt      = z.top
-    zb      = z.bot
-    depth   = math.max(zt - zb, syminfo.mintick)
-    hitZone = low <= zt + tol and high >= zb - tol
-    cAbove  = close > zt + tol
-    cBelow  = close < zb - tol
+anyBull = emaBull or vwpBull or orBull or asBull or lnBull or zBull
+anyBear = emaBear or vwpBear or orBear or asBear or lnBear or zBear
 
-    // ── STEP 1: resolve any pending signal first ──────────────
-    // Runs before new-interaction logic so bar N+1 always judges bar N's
-    // bounce before it can open a fresh interaction on the same zone.
-    if z.pKind != 0
-        stillOut = z.pDir == 1 ? cAbove : cBelow
-        if not stillOut
-            z.pKind := 0                    // fell back into the zone, void
-        else if bar_index - z.pBar >= waitN
-            prog = not needProg or (z.pDir == 1 ? close > z.pRef : close < z.pRef)
-            body = not needBody or (z.pDir == 1 ? close > open   : close < open)
-            fresh = bar_index - z.lastSig >= cooldn
-            if prog and body and fresh
-                k = z.pKind
-                if z.pDir == 1
-                    bull1 := bull1 or k == 1
-                    bull2 := bull2 or k == 2
-                    bull3 := bull3 or k == 3
-                else
-                    bear1 := bear1 or k == 1
-                    bear2 := bear2 or k == 2
-                    bear3 := bear3 or k == 3
-                kn = k == 1 ? "wick" : k == 2 ? "touch" : "back"
-                kc = k == 1 ? "W"    : k == 2 ? "T"     : "B"
-                ar = z.pDir == 1 ? "up" : "down"
-                tag  := tag + kc
-                note := note + (str.length(note) > 0 ? "  |  " : "") + kn + " " + ar +
-                     " @ " + str.tostring(zb, format.mintick) + "-" + str.tostring(zt, format.mintick)
-                z.lastSig := bar_index
-            z.pKind := 0                    // resolved either way
-
-    // ── STEP 2: track the interaction ─────────────────────────
-    if not hitZone
-        z.side   := close > zt ? 1 : -1
-        z.active := false
-        z.bodyIn := false
-        z.farHit := false
-    else
-        if not z.active
-            z.active := true
-            z.origin := z.side != 0 ? z.side : (close > zt ? 1 : -1)
-            z.appr   := approaching(z.origin)   // judged once, at first contact
-            z.bodyIn := false
-            z.farHit := false
-            z.start  := bar_index
-
-        if bodyLo <= zt and bodyHi >= zb
-            z.bodyIn := true
-        if z.origin == 1 and low <= zb + depth * (1 - farPct) + tol
-            z.farHit := true
-        if z.origin == -1 and high >= zt - depth * (1 - farPct) - tol
-            z.farHit := true
-
-        bounced = (z.origin ==  1 and cAbove) or (z.origin == -1 and cBelow)
-        broke   = (z.origin ==  1 and cBelow) or (z.origin == -1 and cAbove)
-
-        // ── STEP 3: arm, don't fire ───────────────────────────
-        if bounced or broke
-            if bounced and z.appr and bar_index - z.start <= maxSeq
-                kind = z.farHit ? 3 : z.bodyIn ? 2 : 1
-                on   = kind == 1 ? useT1 : kind == 2 ? useT2 : useT3
-                if on
-                    z.pKind := kind
-                    z.pDir  := z.origin
-                    z.pBar  := bar_index
-                    z.pRef  := close
-            z.active := false
-            z.side   := cAbove ? 1 : -1
-
-anyBull = bull1 or bull2 or bull3
-anyBear = bear1 or bear2 or bear3
-
-// ─────────────────────────── OUTPUT ───────────────────────────
-// Markers sit back on the bounce candle; the alert fires here, on the
-// confirmation bar, so nothing is signalled before it is known.
+// ════════════════════════ MARKERS ════════════════════════
+// One colour per line family, shape carries direction. Markers sit back on
+// the bounce candle; the alert still fires on the confirmation bar.
 mkOff = markBack ? -waitN : 0
 lbOff = markBack ?  waitN : 0
 
-plotshape(bull1, "1 wick up",    shape.triangleup,   location.belowbar, color.lime,    size = size.tiny, offset = mkOff)
-plotshape(bull2, "2 touch up",   shape.circle,       location.belowbar, color.green,   size = size.tiny, offset = mkOff)
-plotshape(bull3, "3 back up",    shape.diamond,      location.belowbar, color.aqua,    size = size.tiny, offset = mkOff)
-plotshape(bear1, "1 wick down",  shape.triangledown, location.abovebar, color.orange,  size = size.tiny, offset = mkOff)
-plotshape(bear2, "2 touch down", shape.circle,       location.abovebar, color.red,     size = size.tiny, offset = mkOff)
-plotshape(bear3, "3 back down",  shape.diamond,      location.abovebar, color.fuchsia, size = size.tiny, offset = mkOff)
+plotshape(emaBull, "EMA bounce up",      shape.triangleup,   location.belowbar, cEma, size = size.tiny, offset = mkOff)
+plotshape(emaBear, "EMA bounce down",    shape.triangledown, location.abovebar, cEma, size = size.tiny, offset = mkOff)
+plotshape(vwpBull, "VWAP bounce up",     shape.triangleup,   location.belowbar, cVwp, size = size.tiny, offset = mkOff)
+plotshape(vwpBear, "VWAP bounce down",   shape.triangledown, location.abovebar, cVwp, size = size.tiny, offset = mkOff)
+plotshape(orBull,  "OR bounce up",       shape.triangleup,   location.belowbar, cOr,  size = size.tiny, offset = mkOff)
+plotshape(orBear,  "OR bounce down",     shape.triangledown, location.abovebar, cOr,  size = size.tiny, offset = mkOff)
+plotshape(asBull,  "Asia bounce up",     shape.triangleup,   location.belowbar, cAs,  size = size.tiny, offset = mkOff)
+plotshape(asBear,  "Asia bounce down",   shape.triangledown, location.abovebar, cAs,  size = size.tiny, offset = mkOff)
+plotshape(lnBull,  "London bounce up",   shape.triangleup,   location.belowbar, cLn,  size = size.tiny, offset = mkOff)
+plotshape(lnBear,  "London bounce down", shape.triangledown, location.abovebar, cLn,  size = size.tiny, offset = mkOff)
+plotshape(zBull,   "Zone bounce up",     shape.diamond,      location.belowbar, cZn,  size = size.tiny, offset = mkOff)
+plotshape(zBear,   "Zone bounce down",   shape.diamond,      location.abovebar, cZn,  size = size.tiny, offset = mkOff)
 
 if showLb and (anyBull or anyBear)
     label.new(bar_index - lbOff, anyBull ? low[lbOff] : high[lbOff], tag,
@@ -254,13 +461,31 @@ if showLb and (anyBull or anyBear)
          color     = color.new(anyBull ? color.green : color.red, 25),
          textcolor = color.white, size = size.tiny, tooltip = note)
 
-if anyBull or anyBear
-    alert(syminfo.ticker + " " + timeframe.period + "  confirmed  " + note, alert.freq_once_per_bar)
+// ════════════════════════ ALERTS ════════════════════════
+// One condition per line, either direction, any bounce type. Pick the one you
+// want when creating the alert. The dynamic alert() carries the full detail
+// but only fires under "Any alert() function call", which covers every band.
+sEma = bEma.hit()
+sVwp = bVwp.hit()
+sOrH = bOrH.hit()
+sOrL = bOrL.hit()
+sAsH = bAsH.hit()
+sAsL = bAsL.hit()
+sLnH = bLnH.hit()
+sLnL = bLnL.hit()
+sZn  = zBull or zBear
+sAny = anyBull or anyBear
 
-alertcondition(anyBull, "Bullish zone bounce (confirmed)", "Confirmed bullish bounce off a zone")
-alertcondition(anyBear, "Bearish zone bounce (confirmed)", "Confirmed bearish rejection off a zone")
+alertcondition(sEma, "EMA 200 bounce",     "EMA 200 bounce")
+alertcondition(sVwp, "VWAP bounce",        "NY VWAP bounce")
+alertcondition(sOrH, "1H OR High bounce",  "1H opening range high bounce")
+alertcondition(sOrL, "1H OR Low bounce",   "1H opening range low bounce")
+alertcondition(sAsH, "Asia High bounce",   "Asia session high bounce")
+alertcondition(sAsL, "Asia Low bounce",    "Asia session low bounce")
+alertcondition(sLnH, "London High bounce", "London session high bounce")
+alertcondition(sLnL, "London Low bounce",  "London session low bounce")
+alertcondition(sZn,  "Zone bounce",        "Pasted zone bounce")
+alertcondition(sAny, "Any line or zone bounce", "Confirmed bounce")
 
-var table tbl = table.new(position.top_right, 1, 1)
-if showTbl and barstate.islast
-    table.cell(tbl, 0, 0, str.tostring(array.size(zones)) + " zones",
-         text_color = color.gray, text_size = size.tiny)
+if sAny
+    alert(syminfo.ticker + " " + timeframe.period + "  " + note, alert.freq_once_per_bar)
