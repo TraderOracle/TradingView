@@ -1,23 +1,35 @@
 //@version=6
 // ═══════════════════════════════════════════════════════════════════════════
-//  Zone & Line Bounce Engine  v6
+//  Zone & Line Bounce Engine  v7
 //
 //  Everything price can bounce off is a "Band" — a top and a bottom. Pasted
 //  rectangles are real bands; the EMA, VWAP and session levels are bands with
 //  top == bottom, widened only by the tolerance setting. One state machine
-//  handles all of them. `useFar` is off for the lines because a zero-width
-//  band has no far side, so those only ever produce wick or touch bounces.
+//  handles all of them.
+//
+//  FOUR SIGNAL TYPES
+//    1  WICK   wick pierced an edge, no candle body ever inside
+//    2  TOUCH  body dipped in, closed back out the same side
+//    3  BACK   traversed to the far edge, rejected there, exited same side
+//    4  SWEEP  closed clean through, lingered ≤ X candles, closed back through
+//
+//  Types 1–3 are rejections: price never made it past the band. Type 4 is a
+//  failed break: price DID make it past, then gave it all back. `useFar` is
+//  off for the lines because a zero-width band has no far side, so lines can
+//  only produce types 1, 2 and 4.
 //
 //  Gates, in order:
 //    READY     session levels stay dead until their session has closed
 //    APPROACH  the N candles before first contact must travel toward the band
-//    BOUNCE    price closes back out the side it came from
-//    CONFIRM   the next N candles close further in the bounce direction
+//    BOUNCE    price closes back out the side it came from  (types 1–3)
+//      or
+//    RECLAIM   price closes back through within X candles   (type 4)
+//    CONFIRM   the next N candles close further in the signal direction
 //
 //  Session times are written in the timezone you pick below. Defaults are
 //  US Central. CHANGE THE SESSION STRINGS if you change the timezone.
 // ═══════════════════════════════════════════════════════════════════════════
-indicator("Zone & Line Bounce Engine v6", overlay = true,
+indicator("Zone & Line Bounce Engine v7", overlay = true,
      max_bars_back = 300, max_boxes_count = 500, max_labels_count = 500,
      max_lines_count = 50)
 
@@ -54,8 +66,7 @@ extRt  = input.int(3, "Extend levels right (bars)", minval = 0, group = gL)
 
 // ── Line titles ──
 // Pine can only use the chart's system font or a monospace font — Arial is not
-// selectable — and text size is an enum, not a point value. "Small" is the
-// nearest equivalent to 9pt on a standard chart.
+// selectable — and text size is an enum, not a point value.
 gN      = "Line titles"
 lblOn   = input.bool(true, "Show titles at right of each line", group = gN)
 lblPx   = input.bool(false, "Append the price", group = gN)
@@ -88,16 +99,21 @@ farPct   = input.float(80, "Far-side reach % (zones only)", minval = 1, maxval =
 maxSeq   = input.int(10, "Max bars inside band", minval = 1, group = gB)
 cooldn   = input.int(0, "Cooldown bars per band", minval = 0, group = gB)
 
+gW       = "Sweep"
+sweepMax = input.int(2, "Max candles beyond the band", minval = 1, maxval = 20, group = gW,
+     tooltip = "How long price may hold past the band before the reclaim stops counting as a sweep. The breaking candle is the first one, so 2 allows a reclaim on the next candle or the one after. Longer than this and it was a genuine break.")
+
 gC       = "Confirmation"
 waitN    = input.int(1, "Wait candles", minval = 1, maxval = 5, group = gC)
-needProg = input.bool(true, "Confirm close must beat the bounce candle's close", group = gC)
-needBody = input.bool(false, "Confirm candle must close in the bounce direction", group = gC)
-markBack = input.bool(true, "Draw marker on the bounce candle", group = gC)
+needProg = input.bool(true, "Confirm close must beat the signal candle's close", group = gC)
+needBody = input.bool(false, "Confirm candle must close in the signal direction", group = gC)
+markBack = input.bool(true, "Draw marker on the signal candle", group = gC)
 
 gS     = "Signals"
 useT1  = input.bool(true, "1 · Wick rejection (no body inside)", group = gS)
 useT2  = input.bool(true, "2 · Touch & bounce",                  group = gS)
 useT3  = input.bool(true, "3 · Back-of-zone bounce (zones only)", group = gS)
+useT4  = input.bool(false, "4 · Sweep (failed break, reclaimed)",  group = gS)
 showLb = input.bool(true, "Signal labels", group = gS)
 
 lblSz = lblSzIn == "Tiny" ? size.tiny : lblSzIn == "Small" ? size.small : lblSzIn == "Normal" ? size.normal : size.large
@@ -105,9 +121,6 @@ lblFn = lblFnIn == "Monospace" ? font.family_monospace : font.family_default
 lblWt = lblWtIn == "Bold" ? text.format_bold : lblWtIn == "Italic" ? text.format_italic : text.format_none
 
 // ════════════════════════ APPROACH FILTER ════════════════════════
-// Called on the bar that first contacts a band. Offset 0 is that contact bar;
-// offsets 1..prevN are the run-up. dir = 1 means price is falling toward the
-// band from above, so we track lows; dir = -1 tracks highs.
 approaching(int dir) =>
     bool ok = true
     if prevN > 0
@@ -147,6 +160,10 @@ type Band
     bool   farHit  = false
     int    start   = 0
     int    lastSig = -100000
+    bool   swOn    = false   // a break is being watched for a reclaim
+    int    swBar   = 0       // bar the break closed
+    int    swDir   = 0       // side price broke FROM = the reclaim direction
+    bool   swAppr  = false   // approach flag carried from the broken interaction
     int    pKind   = 0       // pending type, 0 = nothing armed
     int    pDir    = 0
     int    pBar    = 0
@@ -163,6 +180,7 @@ method step(Band this, float t, float b) =>
         this.side   := 0
         this.active := false
         this.pKind  := 0
+        this.swOn   := false
     else
         zt     = math.max(t, b)
         zb     = math.min(t, b)
@@ -171,11 +189,11 @@ method step(Band this, float t, float b) =>
         cAbove = close > zt + tol
         cBelow = close < zb - tol
 
-        // ── 1. resolve anything pending, before new interactions ──
+        // ── 1. resolve anything pending, before anything else ──
         if this.pKind != 0
             stillOut = this.pDir == 1 ? cAbove : cBelow
             if not stillOut
-                this.pKind := 0                 // fell back in, void
+                this.pKind := 0                 // fell back through, void
             else if bar_index - this.pBar >= waitN
                 prog = not needProg or (this.pDir == 1 ? close > this.pRef : close < this.pRef)
                 body = not needBody or (this.pDir == 1 ? close > open      : close < open)
@@ -185,7 +203,23 @@ method step(Band this, float t, float b) =>
                     this.lastSig := bar_index
                 this.pKind := 0
 
-        // ── 2. track the interaction ──
+        // ── 2. sweep watch: was a break given back in time? ──
+        // Runs independently of the interaction machine, because after a break
+        // price is on the far side and any new contact reads as a fresh
+        // approach from that side — the reclaim would otherwise be invisible.
+        if this.swOn
+            reclaimed = this.swDir == 1 ? cAbove : cBelow
+            if reclaimed
+                if bar_index - this.swBar <= sweepMax and this.swAppr and useT4 and this.pKind == 0
+                    this.pKind := 4
+                    this.pDir  := this.swDir
+                    this.pBar  := bar_index
+                    this.pRef  := close
+                this.swOn := false
+            else if bar_index - this.swBar > sweepMax
+                this.swOn := false              // held too long, it was a real break
+
+        // ── 3. track the interaction ──
         if not hitZ
             this.side   := close > zt ? 1 : -1
             this.active := false
@@ -212,9 +246,9 @@ method step(Band this, float t, float b) =>
             bounced = (this.origin ==  1 and cAbove) or (this.origin == -1 and cBelow)
             broke   = (this.origin ==  1 and cBelow) or (this.origin == -1 and cAbove)
 
-            // ── 3. arm, don't fire ──
+            // ── 4. arm, don't fire ──
             if bounced or broke
-                if bounced and this.appr and bar_index - this.start <= maxSeq
+                if bounced and this.appr and bar_index - this.start <= maxSeq and this.pKind == 0
                     kind = this.farHit ? 3 : this.bodyIn ? 2 : 1
                     on   = kind == 1 ? useT1 : kind == 2 ? useT2 : useT3
                     if on
@@ -222,16 +256,26 @@ method step(Band this, float t, float b) =>
                         this.pDir  := this.origin
                         this.pBar  := bar_index
                         this.pRef  := close
+                // A break starts the sweep clock. The pKind guard stops a
+                // reclaim that just armed a sweep from immediately arming the
+                // opposite one and ping-ponging.
+                if broke and this.pKind == 0
+                    this.swOn   := true
+                    this.swBar  := bar_index
+                    this.swDir  := this.origin
+                    this.swAppr := this.appr
                 this.active := false
                 this.side   := cAbove ? 1 : -1
     this.fired
 
-method bull(Band this) => this.fired != 0 and this.fdir ==  1
-method bear(Band this) => this.fired != 0 and this.fdir == -1
-method hit (Band this) => this.fired != 0
+// dir: +1 bullish, -1 bearish. sweep: true = type 4 only, false = types 1–3.
+method sig(Band this, int dir, bool sweep) =>
+    this.fired != 0 and this.fdir == dir and (sweep ? this.fired == 4 : this.fired != 4)
+
+method hit(Band this) => this.fired != 0
 
 method kindTxt(Band this) =>
-    this.fired == 1 ? "wick" : this.fired == 2 ? "touch" : "back"
+    this.fired == 1 ? "wick" : this.fired == 2 ? "touch" : this.fired == 3 ? "back" : "sweep"
 
 method desc(Band this) =>
     string out = ""
@@ -242,7 +286,7 @@ method desc(Band this) =>
 method tagTxt(Band this) =>
     string out = ""
     if this.fired != 0
-        out := this.abbr + (this.fdir == 1 ? "▲" : "▼")
+        out := (this.fired == 4 ? "~" : "") + this.abbr + (this.fdir == 1 ? "▲" : "▼")
     out
 
 joinTxt(string acc, string s, string sep) =>
@@ -267,9 +311,6 @@ lonStart  = lonOn  and not lonOn[1]
 ema200 = ta.ema(close, emaLen)
 vwp    = ta.vwap(hlc3, nyStart)
 
-// Session extremes. Each holds after its session closes, until the next opens.
-// `started` is passed in rather than derived from on[1] inside the function,
-// so no parameter history is needed.
 sessHL(bool on, bool started, float prevH, float prevL) =>
     float h = prevH
     float l = prevL
@@ -309,9 +350,6 @@ if lonStart
     lnX := bar_index
 
 // ── READY GATE ──
-// A session level is only tradeable once the session that made it is over.
-// While the session runs, the high is still being printed, so every new high
-// "touches" it by construction and the machine would fire constantly.
 orReady = not na(orH) and (not onlyDone or not orOn)
 asReady = not na(asH) and (not onlyDone or not asiaOn)
 lnReady = not na(lnH) and (not onlyDone or not lonOn)
@@ -320,7 +358,7 @@ lnReady = not na(lnH) and (not onlyDone or not lonOn)
 // plot() has no dotted style, so the EMA is drawn as spaced circles.
 emaCol  = color.new(cEma, emaTr)
 emaDots = bar_index % emaGap == 0 ? ema200 : na
-plot(shEma ? emaDots : na, "EMA 200", color = emaCol, linewidth = 3, style = plot.style_circles)
+plot(shEma ? emaDots : na, "EMA 200", color = emaCol, linewidth = 2, style = plot.style_circles)
 plot(shVwp ? vwp : na, "VWAP (NY)", color = cVwp, linewidth = 3)
 
 var line lnOrH = line.new(0, 0, 0, 0, width = 1, style = line.style_dotted)
@@ -346,14 +384,10 @@ drawLvl(lnLnH, lnH, lnX, cLn, shLn)
 drawLvl(lnLnL, lnL, lnX, cLn, shLn)
 
 // ═══════════════════════ LINE TITLES ═══════════════════════
-// style_label_left puts the anchor on the text's LEFT edge, so the text sits
-// to the right of the point and is vertically centred on it. A fully
-// transparent background leaves only the text visible.
-//
-// These are rebuilt on every last bar rather than created once at bar 0.
-// Pine keeps only the newest max_labels_count labels — anything older is
-// garbage-collected — so titles created on the first bar would be the first
-// things deleted once signal labels accumulate.
+// style_label_left anchors the text's LEFT edge at the point, so text sits to
+// the right of it, vertically centred. Transparent background = text only.
+// Rebuilt each last bar because Pine garbage-collects the OLDEST labels once
+// max_labels_count is reached — titles made at bar 0 would vanish first.
 titleLbl(label old, string txt, float lvl, bool show, color col) =>
     if not na(old)
         label.delete(old)
@@ -472,22 +506,40 @@ for bd in zoneBands
     bd.step(bd.fTop, bd.fBot)
 
 // ════════════════════════ AGGREGATE ════════════════════════
-zBull = false
-zBear = false
+zBncB = false
+zBncS = false
+zSwpB = false
+zSwpS = false
 for bd in zoneBands
-    zBull := zBull or bd.bull()
-    zBear := zBear or bd.bear()
+    zBncB := zBncB or bd.sig( 1, false)
+    zBncS := zBncS or bd.sig(-1, false)
+    zSwpB := zSwpB or bd.sig( 1, true)
+    zSwpS := zSwpS or bd.sig(-1, true)
 
-emaBull = bEma.bull()
-emaBear = bEma.bear()
-vwpBull = bVwp.bull()
-vwpBear = bVwp.bear()
-orBull  = bOrH.bull() or bOrL.bull()
-orBear  = bOrH.bear() or bOrL.bear()
-asBull  = bAsH.bull() or bAsL.bull()
-asBear  = bAsH.bear() or bAsL.bear()
-lnBull  = bLnH.bull() or bLnL.bull()
-lnBear  = bLnH.bear() or bLnL.bear()
+emaBncB = bEma.sig( 1, false)
+emaBncS = bEma.sig(-1, false)
+emaSwpB = bEma.sig( 1, true)
+emaSwpS = bEma.sig(-1, true)
+
+vwpBncB = bVwp.sig( 1, false)
+vwpBncS = bVwp.sig(-1, false)
+vwpSwpB = bVwp.sig( 1, true)
+vwpSwpS = bVwp.sig(-1, true)
+
+orBncB = bOrH.sig( 1, false) or bOrL.sig( 1, false)
+orBncS = bOrH.sig(-1, false) or bOrL.sig(-1, false)
+orSwpB = bOrH.sig( 1, true)  or bOrL.sig( 1, true)
+orSwpS = bOrH.sig(-1, true)  or bOrL.sig(-1, true)
+
+asBncB = bAsH.sig( 1, false) or bAsL.sig( 1, false)
+asBncS = bAsH.sig(-1, false) or bAsL.sig(-1, false)
+asSwpB = bAsH.sig( 1, true)  or bAsL.sig( 1, true)
+asSwpS = bAsH.sig(-1, true)  or bAsL.sig(-1, true)
+
+lnBncB = bLnH.sig( 1, false) or bLnL.sig( 1, false)
+lnBncS = bLnH.sig(-1, false) or bLnL.sig(-1, false)
+lnSwpB = bLnH.sig( 1, true)  or bLnL.sig( 1, true)
+lnSwpS = bLnH.sig(-1, true)  or bLnL.sig(-1, true)
 
 string note = ""
 string tag  = ""
@@ -495,27 +547,50 @@ for bd in allBands
     note := joinTxt(note, bd.desc(),   "  |  ")
     tag  := joinTxt(tag,  bd.tagTxt(), " ")
 
-anyBull = emaBull or vwpBull or orBull or asBull or lnBull or zBull
-anyBear = emaBear or vwpBear or orBear or asBear or lnBear or zBear
+anyBull = emaBncB or vwpBncB or orBncB or asBncB or lnBncB or zBncB or
+     emaSwpB or vwpSwpB or orSwpB or asSwpB or lnSwpB or zSwpB
+anyBear = emaBncS or vwpBncS or orBncS or asBncS or lnBncS or zBncS or
+     emaSwpS or vwpSwpS or orSwpS or asSwpS or lnSwpS or zSwpS
 
 // ════════════════════════ MARKERS ════════════════════════
-// One colour per line family, shape carries direction. Markers sit back on
-// the bounce candle; the alert still fires on the confirmation bar.
+// Colour = which line family. Shape = signal class:
+//   triangle  rejection off a line   (types 1, 2)
+//   diamond   rejection off a zone   (types 1, 2, 3)
+//   X         sweep, line or zone    (type 4)
+// Placement above/below the bar carries direction. Markers sit back on the
+// signal candle; the alert still fires on the confirmation bar.
 mkOff = markBack ? -waitN : 0
 lbOff = markBack ?  waitN : 0
 
-plotshape(emaBull, "EMA bounce up",      shape.triangleup,   location.belowbar, cEma, size = size.tiny, offset = mkOff)
-plotshape(emaBear, "EMA bounce down",    shape.triangledown, location.abovebar, cEma, size = size.tiny, offset = mkOff)
-plotshape(vwpBull, "VWAP bounce up",     shape.triangleup,   location.belowbar, cVwp, size = size.tiny, offset = mkOff)
-plotshape(vwpBear, "VWAP bounce down",   shape.triangledown, location.abovebar, cVwp, size = size.tiny, offset = mkOff)
-plotshape(orBull,  "OR bounce up",       shape.triangleup,   location.belowbar, cOr,  size = size.tiny, offset = mkOff)
-plotshape(orBear,  "OR bounce down",     shape.triangledown, location.abovebar, cOr,  size = size.tiny, offset = mkOff)
-plotshape(asBull,  "Asia bounce up",     shape.triangleup,   location.belowbar, cAs,  size = size.tiny, offset = mkOff)
-plotshape(asBear,  "Asia bounce down",   shape.triangledown, location.abovebar, cAs,  size = size.tiny, offset = mkOff)
-plotshape(lnBull,  "London bounce up",   shape.triangleup,   location.belowbar, cLn,  size = size.tiny, offset = mkOff)
-plotshape(lnBear,  "London bounce down", shape.triangledown, location.abovebar, cLn,  size = size.tiny, offset = mkOff)
-plotshape(zBull,   "Zone bounce up",     shape.diamond,      location.belowbar, cZn,  size = size.tiny, offset = mkOff)
-plotshape(zBear,   "Zone bounce down",   shape.diamond,      location.abovebar, cZn,  size = size.tiny, offset = mkOff)
+plotshape(emaBncB, "EMA bounce up",      shape.triangleup,   location.belowbar, cEma, size = size.tiny, offset = mkOff)
+plotshape(emaBncS, "EMA bounce down",    shape.triangledown, location.abovebar, cEma, size = size.tiny, offset = mkOff)
+plotshape(emaSwpB, "EMA sweep up",       shape.xcross,       location.belowbar, cEma, size = size.tiny, offset = mkOff)
+plotshape(emaSwpS, "EMA sweep down",     shape.xcross,       location.abovebar, cEma, size = size.tiny, offset = mkOff)
+
+plotshape(vwpBncB, "VWAP bounce up",     shape.triangleup,   location.belowbar, cVwp, size = size.tiny, offset = mkOff)
+plotshape(vwpBncS, "VWAP bounce down",   shape.triangledown, location.abovebar, cVwp, size = size.tiny, offset = mkOff)
+plotshape(vwpSwpB, "VWAP sweep up",      shape.xcross,       location.belowbar, cVwp, size = size.tiny, offset = mkOff)
+plotshape(vwpSwpS, "VWAP sweep down",    shape.xcross,       location.abovebar, cVwp, size = size.tiny, offset = mkOff)
+
+plotshape(orBncB,  "OR bounce up",       shape.triangleup,   location.belowbar, cOr,  size = size.tiny, offset = mkOff)
+plotshape(orBncS,  "OR bounce down",     shape.triangledown, location.abovebar, cOr,  size = size.tiny, offset = mkOff)
+plotshape(orSwpB,  "OR sweep up",        shape.xcross,       location.belowbar, cOr,  size = size.tiny, offset = mkOff)
+plotshape(orSwpS,  "OR sweep down",      shape.xcross,       location.abovebar, cOr,  size = size.tiny, offset = mkOff)
+
+plotshape(asBncB,  "Asia bounce up",     shape.triangleup,   location.belowbar, cAs,  size = size.tiny, offset = mkOff)
+plotshape(asBncS,  "Asia bounce down",   shape.triangledown, location.abovebar, cAs,  size = size.tiny, offset = mkOff)
+plotshape(asSwpB,  "Asia sweep up",      shape.xcross,       location.belowbar, cAs,  size = size.tiny, offset = mkOff)
+plotshape(asSwpS,  "Asia sweep down",    shape.xcross,       location.abovebar, cAs,  size = size.tiny, offset = mkOff)
+
+plotshape(lnBncB,  "London bounce up",   shape.triangleup,   location.belowbar, cLn,  size = size.tiny, offset = mkOff)
+plotshape(lnBncS,  "London bounce down", shape.triangledown, location.abovebar, cLn,  size = size.tiny, offset = mkOff)
+plotshape(lnSwpB,  "London sweep up",    shape.xcross,       location.belowbar, cLn,  size = size.tiny, offset = mkOff)
+plotshape(lnSwpS,  "London sweep down",  shape.xcross,       location.abovebar, cLn,  size = size.tiny, offset = mkOff)
+
+plotshape(zBncB,   "Zone bounce up",     shape.diamond,      location.belowbar, cZn,  size = size.tiny, offset = mkOff)
+plotshape(zBncS,   "Zone bounce down",   shape.diamond,      location.abovebar, cZn,  size = size.tiny, offset = mkOff)
+plotshape(zSwpB,   "Zone sweep up",      shape.xcross,       location.belowbar, cZn,  size = size.tiny, offset = mkOff)
+plotshape(zSwpS,   "Zone sweep down",    shape.xcross,       location.abovebar, cZn,  size = size.tiny, offset = mkOff)
 
 if showLb and (anyBull or anyBear)
     label.new(bar_index - lbOff, anyBull ? low[lbOff] : high[lbOff], tag,
@@ -524,9 +599,9 @@ if showLb and (anyBull or anyBear)
          textcolor = color.white, size = size.tiny, tooltip = note)
 
 // ════════════════════════ ALERTS ════════════════════════
-// One condition per line, either direction, any bounce type. Pick the one you
-// want when creating the alert. The dynamic alert() carries the full detail
-// but only fires under "Any alert() function call", which covers every band.
+// One condition per line, either direction, any signal type. The dynamic
+// alert() carries full detail but only fires under "Any alert() function
+// call", which covers every band.
 sEma = bEma.hit()
 sVwp = bVwp.hit()
 sOrH = bOrH.hit()
@@ -535,7 +610,9 @@ sAsH = bAsH.hit()
 sAsL = bAsL.hit()
 sLnH = bLnH.hit()
 sLnL = bLnL.hit()
-sZn  = zBull or zBear
+sZn  = zBncB or zBncS or zSwpB or zSwpS
+sSwp = emaSwpB or emaSwpS or vwpSwpB or vwpSwpS or orSwpB or orSwpS or
+     asSwpB or asSwpS or lnSwpB or lnSwpS or zSwpB or zSwpS
 sAny = anyBull or anyBear
 
 alertcondition(sEma, "EMA 200 bounce",     "EMA 200 bounce")
@@ -547,7 +624,8 @@ alertcondition(sAsL, "Asia Low bounce",    "Asia session low bounce")
 alertcondition(sLnH, "London High bounce", "London session high bounce")
 alertcondition(sLnL, "London Low bounce",  "London session low bounce")
 alertcondition(sZn,  "Zone bounce",        "Pasted zone bounce")
-alertcondition(sAny, "Any line or zone bounce", "Confirmed bounce")
+alertcondition(sSwp, "Any sweep",          "Sweep reclaimed on any level")
+alertcondition(sAny, "Any line or zone signal", "Confirmed bounce or sweep")
 
 if sAny
     alert(syminfo.ticker + " " + timeframe.period + "  " + note, alert.freq_once_per_bar)
