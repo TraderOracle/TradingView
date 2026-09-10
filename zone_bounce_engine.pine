@@ -1,6 +1,6 @@
 //@version=6
 // ═══════════════════════════════════════════════════════════════════════════
-//  Zone & Line Bounce Engine  v5
+//  Zone & Line Bounce Engine  v6
 //
 //  Everything price can bounce off is a "Band" — a top and a bottom. Pasted
 //  rectangles are real bands; the EMA, VWAP and session levels are bands with
@@ -17,7 +17,7 @@
 //  Session times are written in the timezone you pick below. Defaults are
 //  US Central. CHANGE THE SESSION STRINGS if you change the timezone.
 // ═══════════════════════════════════════════════════════════════════════════
-indicator("Zone & Line Bounce Engine v5", overlay = true,
+indicator("Zone & Line Bounce Engine v6", overlay = true,
      max_bars_back = 300, max_boxes_count = 500, max_labels_count = 500,
      max_lines_count = 50)
 
@@ -39,7 +39,7 @@ shEma  = input.bool(true, "EMA 200",          group = gL, inline = "ema")
 cEma   = input.color(#E8E4D9, "",             group = gL, inline = "ema")
 emaLen = input.int(200, "len", minval = 1,    group = gL, inline = "ema")
 emaTr  = input.int(20, "Line transparency %", minval = 0, maxval = 100, group = gL,
-     tooltip = "Applies to the EMA line only. Its bounce markers stay fully opaque.")
+     tooltip = "Applies to the EMA line only. Its bounce markers and title stay fully opaque.")
 emaGap = input.int(2, "EMA dot spacing (bars)", minval = 1, maxval = 10, group = gL,
      tooltip = "1 = a dot on every bar. Raise it for a sparser dotted line.")
 shVwp  = input.bool(true, "VWAP (NY anchor)",  group = gL, inline = "vwp")
@@ -51,6 +51,20 @@ cAs    = input.color(#7EC8E3, "",              group = gL, inline = "as")
 shLn   = input.bool(true, "London high / low", group = gL, inline = "ln")
 cLn    = input.color(#F5A9C4, "",              group = gL, inline = "ln")
 extRt  = input.int(3, "Extend levels right (bars)", minval = 0, group = gL)
+
+// ── Line titles ──
+// Pine can only use the chart's system font or a monospace font — Arial is not
+// selectable — and text size is an enum, not a point value. "Small" is the
+// nearest equivalent to 9pt on a standard chart.
+gN      = "Line titles"
+lblOn   = input.bool(true, "Show titles at right of each line", group = gN)
+lblPx   = input.bool(false, "Append the price", group = gN)
+lblSzIn = input.string("Small", "Text size", options = ["Tiny", "Small", "Normal", "Large"], group = gN,
+     tooltip = "Pine has no numeric font sizes. Small ≈ 9pt on a default chart.")
+lblFnIn = input.string("Default", "Font", options = ["Default", "Monospace"], group = gN,
+     tooltip = "Only these two families exist in Pine. Default is the chart's own sans-serif.")
+lblWtIn = input.string("Regular", "Weight", options = ["Regular", "Bold", "Italic"], group = gN)
+lblOff  = input.int(4, "Title offset right (bars)", minval = 0, group = gN)
 
 gZ = "Zones (pasted rectangles)"
 shZn = input.bool(true, "Enable zones", group = gZ)
@@ -67,7 +81,7 @@ apprMono = input.bool(true, "Every approach candle must move closer", group = gA
 
 gB       = "Bounce rules"
 onlyDone = input.bool(true, "Session levels only signal once their session has closed", group = gB,
-     tooltip = "A session high is meaningless while it is still being made — every new high touches it by definition. Leave this on unless you deliberately want live-forming levels.")
+     tooltip = "A session high is meaningless while it is still being made — every new high touches it by definition.")
 tol      = input.float(0.0, "Edge tolerance (price)", minval = 0, group = gB,
      tooltip = "Also sets the effective thickness of the single-price lines. 0 = exact touch.")
 farPct   = input.float(80, "Far-side reach % (zones only)", minval = 1, maxval = 100, group = gB) / 100
@@ -84,7 +98,11 @@ gS     = "Signals"
 useT1  = input.bool(true, "1 · Wick rejection (no body inside)", group = gS)
 useT2  = input.bool(true, "2 · Touch & bounce",                  group = gS)
 useT3  = input.bool(true, "3 · Back-of-zone bounce (zones only)", group = gS)
-showLb = input.bool(true, "Labels", group = gS)
+showLb = input.bool(true, "Signal labels", group = gS)
+
+lblSz = lblSzIn == "Tiny" ? size.tiny : lblSzIn == "Small" ? size.small : lblSzIn == "Normal" ? size.normal : size.large
+lblFn = lblFnIn == "Monospace" ? font.family_monospace : font.family_default
+lblWt = lblWtIn == "Bold" ? text.format_bold : lblWtIn == "Italic" ? text.format_italic : text.format_none
 
 // ════════════════════════ APPROACH FILTER ════════════════════════
 // Called on the bar that first contacts a band. Offset 0 is that contact bar;
@@ -300,8 +318,8 @@ lnReady = not na(lnH) and (not onlyDone or not lonOn)
 
 // ══════════════════════════ DRAWING ══════════════════════════
 // plot() has no dotted style, so the EMA is drawn as spaced circles.
-emaCol   = color.new(cEma, emaTr)
-emaDots  = bar_index % emaGap == 0 ? ema200 : na
+emaCol  = color.new(cEma, emaTr)
+emaDots = bar_index % emaGap == 0 ? ema200 : na
 plot(shEma ? emaDots : na, "EMA 200", color = emaCol, linewidth = 3, style = plot.style_circles)
 plot(shVwp ? vwp : na, "VWAP (NY)", color = cVwp, linewidth = 3)
 
@@ -326,6 +344,50 @@ drawLvl(lnAsH, asH, asX, cAs, shAs)
 drawLvl(lnAsL, asL, asX, cAs, shAs)
 drawLvl(lnLnH, lnH, lnX, cLn, shLn)
 drawLvl(lnLnL, lnL, lnX, cLn, shLn)
+
+// ═══════════════════════ LINE TITLES ═══════════════════════
+// style_label_left puts the anchor on the text's LEFT edge, so the text sits
+// to the right of the point and is vertically centred on it. A fully
+// transparent background leaves only the text visible.
+//
+// These are rebuilt on every last bar rather than created once at bar 0.
+// Pine keeps only the newest max_labels_count labels — anything older is
+// garbage-collected — so titles created on the first bar would be the first
+// things deleted once signal labels accumulate.
+titleLbl(label old, string txt, float lvl, bool show, color col) =>
+    if not na(old)
+        label.delete(old)
+    label out = na
+    if lblOn and show and not na(lvl)
+        full = txt + (lblPx ? "  " + str.tostring(lvl, format.mintick) : "")
+        out := label.new(bar_index + lblOff, lvl, full,
+             style            = label.style_label_left,
+             color            = color.new(color.black, 100),
+             textcolor        = col,
+             size             = lblSz,
+             text_font_family = lblFn,
+             text_formatting  = lblWt,
+             textalign        = text.align_left)
+    out
+
+var label tEma = na
+var label tVwp = na
+var label tOrH = na
+var label tOrL = na
+var label tAsH = na
+var label tAsL = na
+var label tLnH = na
+var label tLnL = na
+
+if barstate.islast
+    tEma := titleLbl(tEma, "EMA " + str.tostring(emaLen), ema200, shEma, cEma)
+    tVwp := titleLbl(tVwp, "VWAP",        vwp, shVwp, cVwp)
+    tOrH := titleLbl(tOrH, "OR High",     orH, shOr,  cOr)
+    tOrL := titleLbl(tOrL, "OR Low",      orL, shOr,  cOr)
+    tAsH := titleLbl(tAsH, "Asia High",   asH, shAs,  cAs)
+    tAsL := titleLbl(tAsL, "Asia Low",    asL, shAs,  cAs)
+    tLnH := titleLbl(tLnH, "London High", lnH, shLn,  cLn)
+    tLnL := titleLbl(tLnL, "London Low",  lnL, shLn,  cLn)
 
 // ════════════════════════ BAND REGISTRY ════════════════════════
 var Band bEma = Band.new(name = "EMA 200",     abbr = "EMA", col = cEma)
