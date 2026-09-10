@@ -1,0 +1,202 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════════
+//  Zone Bounce Engine
+//
+//  Paste a list of rectangles as price pairs. The script draws them as
+//  full-width zones, then runs a per-zone state machine that classifies
+//  every interaction as one of:
+//
+//    1  WICK      wick pierced an edge, no candle body ever inside
+//    2  TOUCH     body dipped in, bounced back out the same side
+//    3  BACK      traversed to the far edge, rejected there, exited same side
+//
+//  Direction is set by where price came FROM:
+//    approached from above -> bounced back up   = bullish (zone = support)
+//    approached from below -> rejected back down = bearish (zone = resistance)
+//
+//  Reminder: Pine still can't see chart-drawn rectangles. These are the ones
+//  you paste in, which the script owns and can therefore enumerate.
+// ═══════════════════════════════════════════════════════════════════════════
+indicator("Zone Bounce Engine", overlay = true,
+     max_boxes_count = 500, max_labels_count = 500)
+
+// ─────────────────────────── INPUTS ───────────────────────────
+gZ = "Zones"
+zonesStr = input.text_area(
+     defval = "top,7747.88,bottom,7746.17,top,7765.05,bottom,7763.34,top,7786.07,bottom,7781.99,top,7820.84,bottom,7816.76,top,7831.17,bottom,7829.46",
+     title  = "Rectangles",
+     group  = gZ,
+     tooltip = "Format: top,<price>,bottom,<price>,top,<price>,bottom,<price>,...\nSpaces, tabs and line breaks are ignored. Order inside a pair doesn't matter — the higher number is always taken as the top.")
+zoneCol = input.color(color.teal, "Zone colour", group = gZ)
+showTbl = input.bool(true, "Show parse counter", group = gZ,
+     tooltip = "Confirms how many zones were read out of your paste.")
+
+gB     = "Bounce rules"
+tol    = input.float(0.0, "Edge tolerance (price)", minval = 0, group = gB,
+     tooltip = "Widens each edge by this much. 0 = exact touch required.")
+farPct = input.float(80, "Far-side reach %", minval = 1, maxval = 100, group = gB,
+     tooltip = "How deep price must travel into the zone to count as a back-of-rectangle bounce. 100 = must tag the far edge exactly.") / 100
+maxSeq = input.int(10, "Max bars inside zone", minval = 1, group = gB,
+     tooltip = "If price lingers longer than this before resolving, it's consolidation, not a bounce — no signal.")
+cooldn = input.int(0, "Cooldown bars per zone", minval = 0, group = gB,
+     tooltip = "Suppress repeat signals from the same zone for N bars.")
+
+gS    = "Signals"
+useT1 = input.bool(true, "1 · Wick rejection (no body inside)", group = gS)
+useT2 = input.bool(true, "2 · Touch & bounce",                  group = gS)
+useT3 = input.bool(true, "3 · Back-of-rectangle bounce",        group = gS)
+showLb = input.bool(true, "Labels", group = gS)
+
+// ─────────────────────────── PARSER ───────────────────────────
+// Walks the token stream. Non-numeric tokens set the current key; numeric
+// tokens fill that slot. When both slots are full, a zone is emitted.
+parseZones(string src) =>
+    tops  = array.new<float>()
+    bots  = array.new<float>()
+    clean = str.replace_all(str.replace_all(str.replace_all(src, " ", ""), "\n", ""), "\t", "")
+    toks  = str.split(clean, ",")
+    string key = "top"
+    float  pT  = na
+    float  pB  = na
+    for tk in toks
+        if str.length(tk) > 0
+            n = str.tonumber(tk)
+            if na(n)
+                key := str.lower(tk)
+            else
+                if str.startswith(key, "b")      // bottom / bot / b
+                    pB := n
+                else                             // top / t / anything else
+                    pT := n
+                if not na(pT) and not na(pB)
+                    array.push(tops, math.max(pT, pB))
+                    array.push(bots, math.min(pT, pB))
+                    pT := na
+                    pB := na
+    [tops, bots]
+
+// ──────────────────────── ZONE OBJECT ────────────────────────
+type Zone
+    float top
+    float bot
+    box   bx
+    int   side    = 0        // +1 price is above the zone, -1 below, 0 unknown
+    bool  active  = false    // currently mid-interaction
+    int   origin  = 0        // which side price came from for this interaction
+    bool  bodyIn  = false    // any body overlapped the zone this interaction
+    bool  farHit  = false    // reached the far edge this interaction
+    int   start   = 0        // bar the interaction began
+    int   lastSig = -100000  // bar of the last fired signal
+
+var array<Zone> zones = array.new<Zone>()
+
+if barstate.isfirst
+    [tops, bots] = parseZones(zonesStr)
+    if array.size(tops) > 0
+        for i = 0 to array.size(tops) - 1
+            zt = array.get(tops, i)
+            zb = array.get(bots, i)
+            bx = box.new(time, zt, time + 1, zb, xloc = xloc.bar_time,
+                 extend = extend.both, bgcolor = color.new(zoneCol, 88),
+                 border_color = color.new(zoneCol, 35), border_width = 1)
+            array.push(zones, Zone.new(top = zt, bot = zb, bx = bx))
+
+// ──────────────────── ENUMERATE + CLASSIFY ────────────────────
+bodyHi = math.max(open, close)
+bodyLo = math.min(open, close)
+
+bull1 = false
+bull2 = false
+bull3 = false
+bear1 = false
+bear2 = false
+bear3 = false
+string note = ""
+string tag  = ""
+
+for z in zones
+    zt    = z.top
+    zb    = z.bot
+    depth = math.max(zt - zb, syminfo.mintick)
+    hitZone = low <= zt + tol and high >= zb - tol
+    cAbove  = close > zt + tol
+    cBelow  = close < zb - tol
+
+    if not hitZone
+        // Bar is entirely clear of the zone — just remember which side we're on.
+        z.side   := close > zt ? 1 : -1
+        z.active := false
+        z.bodyIn := false
+        z.farHit := false
+    else
+        // Open a new interaction if this is the first bar touching.
+        if not z.active
+            z.active := true
+            z.origin := z.side != 0 ? z.side : (close > zt ? 1 : -1)
+            z.bodyIn := false
+            z.farHit := false
+            z.start  := bar_index
+
+        // Accumulate evidence across the interaction.
+        if bodyLo <= zt and bodyHi >= zb
+            z.bodyIn := true
+        if z.origin == 1 and low <= zb + depth * (1 - farPct) + tol
+            z.farHit := true
+        if z.origin == -1 and high >= zt - depth * (1 - farPct) - tol
+            z.farHit := true
+
+        bounced = (z.origin ==  1 and cAbove) or (z.origin == -1 and cBelow)
+        broke   = (z.origin ==  1 and cBelow) or (z.origin == -1 and cAbove)
+
+        if bounced or broke
+            fresh = bar_index - z.lastSig >= cooldn
+            if bounced and bar_index - z.start <= maxSeq and fresh
+                kind = z.farHit ? 3 : z.bodyIn ? 2 : 1
+                on   = kind == 1 ? useT1 : kind == 2 ? useT2 : useT3
+                if on
+                    if z.origin == 1
+                        bull1 := bull1 or kind == 1
+                        bull2 := bull2 or kind == 2
+                        bull3 := bull3 or kind == 3
+                    else
+                        bear1 := bear1 or kind == 1
+                        bear2 := bear2 or kind == 2
+                        bear3 := bear3 or kind == 3
+                    kn = kind == 1 ? "wick" : kind == 2 ? "touch" : "back"
+                    kc = kind == 1 ? "W"    : kind == 2 ? "T"     : "B"
+                    ar = z.origin == 1 ? "up" : "down"
+                    tag  := tag + kc
+                    note := note + (str.length(note) > 0 ? "  |  " : "") + kn + " " + ar +
+                         " @ " + str.tostring(zb, format.mintick) + "-" + str.tostring(zt, format.mintick)
+                    z.lastSig := bar_index
+            z.active := false
+            z.side   := cAbove ? 1 : -1
+
+anyBull = bull1 or bull2 or bull3
+anyBear = bear1 or bear2 or bear3
+
+// ─────────────────────────── OUTPUT ───────────────────────────
+plotshape(bull1, "1 wick up",    shape.triangleup,   location.belowbar, color.lime,    size = size.tiny)
+plotshape(bull2, "2 touch up",   shape.circle,       location.belowbar, color.green,   size = size.tiny)
+plotshape(bull3, "3 back up",    shape.diamond,      location.belowbar, color.aqua,    size = size.tiny)
+plotshape(bear1, "1 wick down",  shape.triangledown, location.abovebar, color.orange,  size = size.tiny)
+plotshape(bear2, "2 touch down", shape.circle,       location.abovebar, color.red,     size = size.tiny)
+plotshape(bear3, "3 back down",  shape.diamond,      location.abovebar, color.fuchsia, size = size.tiny)
+
+if showLb and (anyBull or anyBear)
+    label.new(bar_index, anyBull ? low : high, tag,
+         style     = anyBull ? label.style_label_up : label.style_label_down,
+         color     = color.new(anyBull ? color.green : color.red, 25),
+         textcolor = color.white, size = size.tiny, tooltip = note)
+
+if anyBull or anyBear
+    alert(syminfo.ticker + " " + timeframe.period + "  " + note, alert.freq_once_per_bar)
+
+alertcondition(anyBull, "Bullish zone bounce", "Bullish bounce off a zone")
+alertcondition(anyBear, "Bearish zone bounce", "Bearish rejection off a zone")
+
+// Sanity check that the paste parsed.
+var table tbl = table.new(position.top_right, 1, 1)
+if showTbl and barstate.islast
+    table.cell(tbl, 0, 0, str.tostring(array.size(zones)) + " zones",
+         text_color = color.gray, text_size = size.tiny)
