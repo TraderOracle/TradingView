@@ -69,7 +69,7 @@ lblOff  = input.int(4, "Title offset right (bars)", minval = 0, group = gN)
 gZ = "Zones (pasted rectangles)"
 shZn = input.bool(true, "Enable zones", group = gZ)
 zonesStr = input.text_area(
-     defval = "top,7747.88,bottom,7746.17,top,7765.05,bottom,7763.34,top,7786.07,bottom,7781.99,top,7820.84,bottom,7816.76,top,7831.17,bottom,7829.46",
+     defval = "top,7747.88,bottom,7746.17,top,7765.05,bottom,7763.34",
      title  = "Rectangles", group = gZ,
      tooltip = "Format: top,<price>,bottom,<price>,...\nSpaces, tabs and line breaks are ignored.")
 cZn = input.color(color.teal, "Zone colour", group = gZ)
