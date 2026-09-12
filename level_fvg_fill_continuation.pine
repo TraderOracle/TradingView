@@ -1,0 +1,281 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════
+//  Level → FVG → Fill → Continuation
+//  1. Price touches a reference level (IBH/IBL, PDH/PDL/PDC, ONH/ONL,
+//     VWAP, EMA, or custom)
+//  2. Within N bars a Fair Value Gap prints in the rejection direction
+//  3. Price returns and fills that gap
+//  4. Price closes back through the gap → signal
+// ═══════════════════════════════════════════════════════════════════
+indicator("Level → FVG → Fill → Continuation", "LFFC", overlay = true,
+     max_boxes_count = 500, max_labels_count = 500, max_lines_count = 500)
+
+// ─────────────────────────── TYPES ───────────────────────────
+type Touch
+    string nm
+    float  px
+    int    bar
+
+type Setup
+    string nm
+    int    dir        // 1 = bullish, -1 = bearish
+    float  gTop       // upper edge of the FVG
+    float  gBot       // lower edge of the FVG
+    float  lvlPx
+    float  confP      // price that must be closed through to confirm
+    int    fvgBar
+    int    fillBar
+    int    st         // 0 = waiting for fill, 1 = filled, waiting for continuation
+    box    bx
+
+// ─────────────────────────── INPUTS ──────────────────────────
+gLv    = "1 · Levels"
+tzIn   = input.string("America/New_York", "Session timezone", group = gLv)
+useIB  = input.bool(true,  "Initial Balance H/L", group = gLv)
+ibSess = input.session("0930-1030", "    IB window", group = gLv)
+usePD  = input.bool(true,  "Previous Day H / L / C", group = gLv)
+useON  = input.bool(false, "Overnight H/L", group = gLv)
+onSess = input.session("1800-0930", "    ON window", group = gLv)
+useVW  = input.bool(true,  "Session VWAP", group = gLv)
+useEma = input.bool(true,  "EMA", group = gLv)
+emaLen = input.int(200, "    EMA length", minval = 1, group = gLv)
+cust1  = input.float(0.0, "Custom level 1 (0 = off)", group = gLv)
+cust2  = input.float(0.0, "Custom level 2 (0 = off)", group = gLv)
+
+gTc     = "2 · Touch"
+tolMode = input.string("ATR", "Touch tolerance", options = ["ATR", "Ticks", "None"], group = gTc)
+tolAtr  = input.float(0.10, "    ATR multiple", step = 0.05, minval = 0, group = gTc)
+tolTick = input.int(4, "    Ticks", minval = 0, group = gTc)
+cooldn  = input.int(10, "Bars before the same level can re-arm", minval = 1, group = gTc)
+
+gFv     = "3 · FVG"
+minLag  = input.int(1, "Min bars from touch to FVG", minval = 0, group = gFv)
+maxLag  = input.int(4, "Max bars from touch to FVG", minval = 1, group = gFv)
+minGap  = input.float(0.10, "Min gap size (× ATR)", step = 0.05, minval = 0, group = gFv)
+minDisp = input.float(0.60, "Min displacement body (× ATR)", step = 0.10, minval = 0, group = gFv)
+needRej = input.bool(true, "FVG must reject the level (close on the correct side)", group = gFv)
+
+gFl      = "4 · Fill & continuation"
+fillMode = input.string("Full (far edge)", "Fill requirement",
+     options = ["Touch (near edge)", "50% (CE)", "Full (far edge)"], group = gFl)
+maxFill  = input.int(30, "Max bars to fill the gap", minval = 1, group = gFl)
+confMode = input.string("Close back through gap", "Continuation confirmation",
+     options = ["Close back through gap", "Close beyond FVG bar extreme"], group = gFl)
+maxConf  = input.int(15, "Max bars to confirm after the fill", minval = 1, group = gFl)
+invBuf   = input.float(0.15, "Invalidation buffer beyond gap (× ATR)", step = 0.05, minval = 0, group = gFl)
+oneADay  = input.bool(false, "Only one signal per level per day", group = gFl)
+
+gVi     = "5 · Visuals"
+showLv  = input.bool(true, "Plot levels", group = gVi)
+showFvg = input.bool(true, "Draw FVG boxes", group = gVi)
+showLbl = input.bool(true, "Signal labels", group = gVi)
+bullCol = input.color(color.new(color.teal, 75), "Bull FVG fill", group = gVi)
+bearCol = input.color(color.new(color.red,  75), "Bear FVG fill", group = gVi)
+
+// ───────────────────────── LEVEL VALUES ──────────────────────
+atrv   = ta.atr(14)
+newDay = timeframe.change("D")
+
+var int dayCount = 0
+if newDay
+    dayCount += 1
+
+// Initial Balance
+inIB = not na(time(timeframe.period, ibSess, tzIn))
+var float ibH = na
+var float ibL = na
+if newDay
+    ibH := na
+    ibL := na
+if inIB
+    ibH := na(ibH) ? high : math.max(ibH, high)
+    ibL := na(ibL) ? low  : math.min(ibL, low)
+
+// Overnight range
+inON = not na(time(timeframe.period, onSess, tzIn))
+var float onH = na
+var float onL = na
+if inON and not inON[1]
+    onH := high
+    onL := low
+else if inON
+    onH := math.max(onH, high)
+    onL := math.min(onL, low)
+
+// Previous day
+[pdH, pdL, pdC] = request.security(syminfo.tickerid, "D", [high[1], low[1], close[1]],
+     lookahead = barmerge.lookahead_on)
+
+vw   = ta.vwap(hlc3)
+emaV = ta.ema(close, emaLen)
+
+// ───────────────────────── STATE ─────────────────────────────
+var map<string, int>  lastTouchBar = map.new<string, int>()
+var map<string, int>  lastSigDay   = map.new<string, int>()
+var array<Touch>      touches      = array.new<Touch>()
+var array<Setup>      setups       = array.new<Setup>()
+
+addLvl(array<string> ns, array<float> vs, bool use, string nm, float v) =>
+    if use and not na(v)
+        ns.push(nm)
+        vs.push(v)
+    0
+
+bool   sigBull = false
+bool   sigBear = false
+string sigName = ""
+
+// ───────────────────────── ENGINE ────────────────────────────
+// Everything runs on confirmed bars only, so setups never repaint mid-bar.
+if barstate.isconfirmed and not na(atrv)
+
+    // ── collect active levels ──
+    names = array.new<string>()
+    vals  = array.new<float>()
+    addLvl(names, vals, useIB,  "IBH",  ibH)
+    addLvl(names, vals, useIB,  "IBL",  ibL)
+    addLvl(names, vals, usePD,  "PDH",  pdH)
+    addLvl(names, vals, usePD,  "PDL",  pdL)
+    addLvl(names, vals, usePD,  "PDC",  pdC)
+    addLvl(names, vals, useON,  "ONH",  onH)
+    addLvl(names, vals, useON,  "ONL",  onL)
+    addLvl(names, vals, useVW,  "VWAP", vw)
+    addLvl(names, vals, useEma, "EMA" + str.tostring(emaLen), emaV)
+    addLvl(names, vals, cust1 > 0, "CUST1", cust1)
+    addLvl(names, vals, cust2 > 0, "CUST2", cust2)
+
+    // ── STEP 1: register touches ──
+    float tol = tolMode == "ATR" ? atrv * tolAtr : tolMode == "Ticks" ? syminfo.mintick * tolTick : 0.0
+    if names.size() > 0
+        for i = 0 to names.size() - 1
+            nm = names.get(i)
+            lv = vals.get(i)
+            if low - tol <= lv and high + tol >= lv
+                prev = lastTouchBar.contains(nm) ? lastTouchBar.get(nm) : -999999
+                if bar_index - prev >= cooldn
+                    lastTouchBar.put(nm, bar_index)
+                    touches.push(Touch.new(nm, lv, bar_index))
+
+    // ── expire stale touches ──
+    if touches.size() > 0
+        for i = touches.size() - 1 to 0
+            if bar_index - touches.get(i).bar > maxLag
+                touches.remove(i)
+
+    // ── STEP 2: FVG on the 3-bar window ending here ──
+    disp = math.abs(close[1] - open[1])
+    bull = low  > high[2] and (low - high[2]) >= atrv * minGap and disp >= atrv * minDisp and close[1] > open[1]
+    bear = high < low[2]  and (low[2] - high) >= atrv * minGap and disp >= atrv * minDisp and close[1] < open[1]
+
+    if (bull or bear) and touches.size() > 0
+        int   dir  = bull ? 1 : -1
+        float gBot = bull ? high[2] : high
+        float gTop = bull ? low     : low[2]
+
+        int best = -1
+        for i = touches.size() - 1 to 0
+            t     = touches.get(i)
+            lag   = bar_index - t.bar
+            okLag = lag >= minLag and lag <= maxLag
+            okRej = not needRej or (dir == 1 ? close > t.px : close < t.px)
+            if okLag and okRej and best == -1
+                best := i
+
+        if best >= 0
+            t = touches.get(best)
+            float cp = na
+            if confMode == "Close back through gap"
+                cp := dir == 1 ? gTop : gBot
+            else
+                cp := dir == 1 ? high : low
+            box bx = na
+            if showFvg
+                bx := box.new(bar_index - 2, gTop, bar_index, gBot,
+                     border_color = color.new(dir == 1 ? color.teal : color.red, 40),
+                     bgcolor = dir == 1 ? bullCol : bearCol)
+            setups.push(Setup.new(t.nm, dir, gTop, gBot, t.px, cp, bar_index, 0, 0, bx))
+            touches.remove(best)
+
+    // ── STEPS 3 & 4: manage open setups ──
+    float buf = atrv * invBuf
+    if setups.size() > 0
+        for i = setups.size() - 1 to 0
+            s    = setups.get(i)
+            mid  = (s.gTop + s.gBot) / 2
+            bool dead  = false
+            bool fired = false
+
+            float fillP = na
+            if fillMode == "Full (far edge)"
+                fillP := s.dir == 1 ? s.gBot : s.gTop
+            else if fillMode == "50% (CE)"
+                fillP := mid
+            else
+                fillP := s.dir == 1 ? s.gTop : s.gBot
+
+            blown = s.dir == 1 ? close < s.gBot - buf : close > s.gTop + buf
+
+            // waiting for the retrace
+            if s.st == 0
+                filled = s.dir == 1 ? low <= fillP : high >= fillP
+                if filled
+                    s.st      := 1
+                    s.fillBar := bar_index
+                else if blown or bar_index - s.fvgBar > maxFill
+                    dead := true
+
+            // filled — waiting for the continuation close
+            if s.st == 1 and not dead
+                conf = s.dir == 1 ? close > s.confP : close < s.confP
+                ok   = not oneADay or not lastSigDay.contains(s.nm) or lastSigDay.get(s.nm) != dayCount
+                if conf and ok
+                    fired := true
+                    dead  := true
+                    lastSigDay.put(s.nm, dayCount)
+                    if s.dir == 1
+                        sigBull := true
+                    else
+                        sigBear := true
+                    sigName := s.nm
+                    if showLbl
+                        label.new(bar_index, s.dir == 1 ? low : high,
+                             (s.dir == 1 ? "▲ " : "▼ ") + s.nm,
+                             style  = s.dir == 1 ? label.style_label_up : label.style_label_down,
+                             color  = color.new(s.dir == 1 ? color.teal : color.red, 20),
+                             textcolor = color.white, size = size.small)
+                else if conf and not ok
+                    dead := true
+                else if blown or bar_index - s.fillBar > maxConf
+                    dead := true
+
+            if not na(s.bx) and not dead
+                s.bx.set_right(bar_index + 1)
+
+            if dead
+                if not na(s.bx)
+                    if fired
+                        s.bx.set_bgcolor(color.new(s.dir == 1 ? color.teal : color.red, 55))
+                        s.bx.set_right(bar_index)
+                    else
+                        box.delete(s.bx)
+                setups.remove(i)
+
+// ───────────────────────── OUTPUT ────────────────────────────
+plotshape(sigBull, "Long setup",  shape.triangleup,   location.belowbar, color.teal, size = size.small)
+plotshape(sigBear, "Short setup", shape.triangledown, location.abovebar, color.red,  size = size.small)
+
+alertcondition(sigBull, "LFFC Long",  "Bullish level → FVG → fill → continuation confirmed")
+alertcondition(sigBear, "LFFC Short", "Bearish level → FVG → fill → continuation confirmed")
+if sigBull or sigBear
+    alert((sigBull ? "LONG" : "SHORT") + " continuation off " + sigName + " — " +
+         syminfo.ticker + " " + timeframe.period, alert.freq_once_per_bar_close)
+
+plot(showLv and useIB  ? ibH  : na, "IBH",  color.orange,  1, plot.style_linebr)
+plot(showLv and useIB  ? ibL  : na, "IBL",  color.orange,  1, plot.style_linebr)
+plot(showLv and usePD  ? pdH  : na, "PDH",  color.blue,    1, plot.style_linebr)
+plot(showLv and usePD  ? pdL  : na, "PDL",  color.blue,    1, plot.style_linebr)
+plot(showLv and usePD  ? pdC  : na, "PDC",  color.new(color.blue, 55), 1, plot.style_linebr)
+plot(showLv and useON  ? onH  : na, "ONH",  color.purple,  1, plot.style_linebr)
+plot(showLv and useON  ? onL  : na, "ONL",  color.purple,  1, plot.style_linebr)
+plot(showLv and useVW  ? vw   : na, "VWAP", color.fuchsia, 1)
+plot(showLv and useEma ? emaV : na, "EMA",  color.yellow,  2)
