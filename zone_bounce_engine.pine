@@ -1,37 +1,32 @@
 //@version=6
 // ═══════════════════════════════════════════════════════════════════════════
-//  Zone & Line Bounce Engine  v7
+//  Zone & Line Bounce Engine  v9
 //
-//  Everything price can bounce off is a "Band" — a top and a bottom. Pasted
-//  rectangles are real bands; the EMA, VWAP and session levels are bands with
-//  top == bottom, widened only by the tolerance setting. One state machine
-//  handles all of them.
+//  TWO ENGINES SHARING ONE SET OF LEVELS
 //
-//  FOUR SIGNAL TYPES
-//    1  WICK   wick pierced an edge, no candle body ever inside
-//    2  TOUCH  body dipped in, closed back out the same side
-//    3  BACK   traversed to the far edge, rejected there, exited same side
-//    4  SWEEP  closed clean through, lingered ≤ X candles, closed back through
+//  A) BOUNCE / SWEEP — every level is a "Band" (a top and a bottom). Pasted
+//     ranges are real bands; the EMA, VWAP and session levels are bands with
+//     top == bottom, widened by the tolerance setting. One state machine:
+//       1  WICK   wick pierced an edge, no candle body ever inside
+//       2  TOUCH  body dipped in, closed back out the same side
+//       3  BACK   traversed to the far edge, rejected there, exited same side
+//       4  SWEEP  closed clean through, lingered ≤ X candles, closed back
 //
-//  Types 1–3 are rejections: price never made it past the band. Type 4 is a
-//  failed break: price DID make it past, then gave it all back. `useFar` is
-//  off for the lines because a zero-width band has no far side, so lines can
-//  only produce types 1, 2 and 4.
+//  B) LFFC — level → FVG → fill → continuation. A four-stage setup:
+//       1  price touches a level or zone
+//       2  within N bars an FVG prints in the rejection direction
+//       3  price returns and fills that gap
+//       4  price closes back through the gap → signal  (type 5)
 //
-//  Gates, in order:
-//    READY     session levels stay dead until their session has closed
-//    APPROACH  the N candles before first contact must travel toward the band
-//    BOUNCE    price closes back out the side it came from  (types 1–3)
-//      or
-//    RECLAIM   price closes back through within X candles   (type 4)
-//    CONFIRM   the next N candles close further in the signal direction
+//  The two run independently. A fails-fast rejection fires A; a rejection that
+//  builds structure and retests fires B. Both can fire on the same level.
 //
 //  Session times are written in the timezone you pick below. Defaults are
 //  US Central. CHANGE THE SESSION STRINGS if you change the timezone.
 // ═══════════════════════════════════════════════════════════════════════════
-indicator("Zone & Line Bounce Engine v7", overlay = true,
+indicator("TO Bounce Engine", "TO Bounce Engine", overlay = true,
      max_bars_back = 300, max_boxes_count = 500, max_labels_count = 500,
-     max_lines_count = 50)
+     max_lines_count = 500)
 
 // ═══════════════════════════ INPUTS ═══════════════════════════
 gT = "Timezone & sessions"
@@ -50,10 +45,8 @@ gL = "Lines"
 shEma  = input.bool(true, "EMA 200",          group = gL, inline = "ema")
 cEma   = input.color(#E8E4D9, "",             group = gL, inline = "ema")
 emaLen = input.int(200, "len", minval = 1,    group = gL, inline = "ema")
-emaTr  = input.int(20, "Line transparency %", minval = 0, maxval = 100, group = gL,
-     tooltip = "Applies to the EMA line only. Its bounce markers and title stay fully opaque.")
-emaGap = input.int(2, "EMA dot spacing (bars)", minval = 1, maxval = 10, group = gL,
-     tooltip = "1 = a dot on every bar. Raise it for a sparser dotted line.")
+emaTr  = input.int(20, "Line transparency %", minval = 0, maxval = 100, group = gL)
+emaGap = input.int(2, "EMA dot spacing (bars)", minval = 1, maxval = 10, group = gL)
 shVwp  = input.bool(true, "VWAP (NY anchor)",  group = gL, inline = "vwp")
 cVwp   = input.color(#2E6FD9, "",              group = gL, inline = "vwp")
 shOr   = input.bool(true, "1H opening range",  group = gL, inline = "or")
@@ -64,6 +57,35 @@ shLn   = input.bool(true, "London high / low", group = gL, inline = "ln")
 cLn    = input.color(#F5A9C4, "",              group = gL, inline = "ln")
 extRt  = input.int(3, "Extend levels right (bars)", minval = 0, group = gL)
 
+// ═══════════════ PASTED LEVELS & ZONES ═══════════════
+// One text area for the bulk paste, three single-line fields for one-offs.
+// All four are parsed into the same pool and feed BOTH engines.
+gP = "Pasted levels & zones"
+tipTxt = "Three formats, mixable, one entry per line.\n\n" +
+     "A) price or price range, then name (spaces):\n" +
+     "7714.00 - 7702.75 Extreme Short\n" +
+     "7606.75 Line in the Sand\n\n" +
+     "B) name/price pairs (commas):\n" +
+     "vix r1, 29402, vix r2, 29417, VAH, 29488\n\n" +
+     "C) top/bottom pairs (commas):\n" +
+     "top,7747.88,bottom,7746.17,top,7765.05,bottom,7763.34\n\n" +
+     "Ranges and top/bottom pairs become zones, single numbers become lines. " +
+     "Anything before a ':' is a ticker tag and is ignored. Header lines with " +
+     "nothing after the ':' are skipped. Duplicate names are auto-numbered. " +
+     "';' also works as a line break."
+useCust = input.bool(true, "Enable pasted levels", group = gP)
+txtA    = input.text_area(
+     "top,7747.88,bottom,7746.17,top,7765.05,bottom,7763.34",
+     "Paste block", tooltip = tipTxt, group = gP)
+lvl1 = input.string("", "Level 1", tooltip = tipTxt, group = gP)
+lvl2 = input.string("", "Level 2", tooltip = tipTxt, group = gP)
+lvl3 = input.string("", "Level 3", tooltip = tipTxt, group = gP)
+matchSym = input.bool(false, "Only use lines whose ticker tag matches this chart", group = gP)
+drawCust = input.bool(true, "Draw pasted levels", group = gP)
+cCust    = input.color(color.new(color.teal, 20), "    Line / border", group = gP)
+cCustBg  = input.color(color.new(color.teal, 88), "    Zone fill", group = gP)
+custSty  = input.string("Dotted", "    Line style", options = ["Solid", "Dashed", "Dotted"], group = gP)
+
 // ── Line titles ──
 // Pine can only use the chart's system font or a monospace font — Arial is not
 // selectable — and text size is an enum, not a point value.
@@ -72,18 +94,9 @@ lblOn   = input.bool(true, "Show titles at right of each line", group = gN)
 lblPx   = input.bool(false, "Append the price", group = gN)
 lblSzIn = input.string("Small", "Text size", options = ["Tiny", "Small", "Normal", "Large"], group = gN,
      tooltip = "Pine has no numeric font sizes. Small ≈ 9pt on a default chart.")
-lblFnIn = input.string("Default", "Font", options = ["Default", "Monospace"], group = gN,
-     tooltip = "Only these two families exist in Pine. Default is the chart's own sans-serif.")
+lblFnIn = input.string("Default", "Font", options = ["Default", "Monospace"], group = gN)
 lblWtIn = input.string("Regular", "Weight", options = ["Regular", "Bold", "Italic"], group = gN)
 lblOff  = input.int(4, "Title offset right (bars)", minval = 0, group = gN)
-
-gZ = "Zones (pasted rectangles)"
-shZn = input.bool(true, "Enable zones", group = gZ)
-zonesStr = input.text_area(
-     defval = "top,7747.88,bottom,7746.17,top,7765.05,bottom,7763.34",
-     title  = "Rectangles", group = gZ,
-     tooltip = "Format: top,<price>,bottom,<price>,...\nSpaces, tabs and line breaks are ignored.")
-cZn = input.color(color.teal, "Zone colour", group = gZ)
 
 gA       = "Approach"
 prevN    = input.int(2, "Approach candles", minval = 0, maxval = 10, group = gA,
@@ -101,7 +114,31 @@ cooldn   = input.int(0, "Cooldown bars per band", minval = 0, group = gB)
 
 gW       = "Sweep"
 sweepMax = input.int(2, "Max candles beyond the band", minval = 1, maxval = 20, group = gW,
-     tooltip = "How long price may hold past the band before the reclaim stops counting as a sweep. The breaking candle is the first one, so 2 allows a reclaim on the next candle or the one after. Longer than this and it was a genuine break.")
+     tooltip = "How long price may hold past the level before the reclaim stops counting as a sweep. The breaking candle is the first one.")
+
+// ═══════════ LFFC: LEVEL → FVG → FILL → CONTINUATION ═══════════
+gF       = "FVG continuation"
+atrLen   = input.int(14, "ATR length", minval = 1, group = gF)
+fTolMode = input.string("ATR", "Touch tolerance", options = ["ATR", "Ticks", "None"], group = gF)
+fTolAtr  = input.float(0.10, "    ATR multiple", step = 0.05, minval = 0, group = gF)
+fTolTick = input.int(4, "    Ticks", minval = 0, group = gF)
+fCool    = input.int(10, "Bars before the same level can re-arm", minval = 1, group = gF)
+minLag   = input.int(1, "Min bars from touch to FVG", minval = 0, group = gF)
+maxLag   = input.int(4, "Max bars from touch to FVG", minval = 1, group = gF)
+minGap   = input.float(0.10, "Min gap size (× ATR)", step = 0.05, minval = 0, group = gF)
+minDisp  = input.float(0.60, "Min displacement body (× ATR)", step = 0.10, minval = 0, group = gF)
+needRej  = input.bool(true, "FVG must reject the level (close clear of the zone)", group = gF)
+fillMode = input.string("Full (far edge)", "Fill requirement",
+     options = ["Touch (near edge)", "50% (CE)", "Full (far edge)"], group = gF)
+maxFill  = input.int(30, "Max bars to fill the gap", minval = 1, group = gF)
+confMode = input.string("Close back through gap", "Continuation confirmation",
+     options = ["Close back through gap", "Close beyond FVG bar extreme"], group = gF)
+maxConf  = input.int(15, "Max bars to confirm after the fill", minval = 1, group = gF)
+invBuf   = input.float(0.15, "Invalidation buffer beyond gap (× ATR)", step = 0.05, minval = 0, group = gF)
+oneADay  = input.bool(false, "Only one signal per level per day", group = gF)
+showFvg  = input.bool(true, "Draw FVG boxes", group = gF)
+cFvgB    = input.color(color.new(color.teal, 75), "    Bull FVG fill", group = gF)
+cFvgS    = input.color(color.new(color.red, 75),  "    Bear FVG fill", group = gF)
 
 gC       = "Confirmation"
 waitN    = input.int(1, "Wait candles", minval = 1, maxval = 5, group = gC)
@@ -113,12 +150,166 @@ gS     = "Signals"
 useT1  = input.bool(true, "1 · Wick rejection (no body inside)", group = gS)
 useT2  = input.bool(true, "2 · Touch & bounce",                  group = gS)
 useT3  = input.bool(true, "3 · Back-of-zone bounce (zones only)", group = gS)
-useT4  = input.bool(false, "4 · Sweep (failed break, reclaimed)",  group = gS)
+useT4  = input.bool(true, "4 · Sweep (failed break, reclaimed)",  group = gS)
+useT5  = input.bool(true, "5 · FVG continuation (level → FVG → fill)", group = gS)
 showLb = input.bool(true, "Signal labels", group = gS)
 
 lblSz = lblSzIn == "Tiny" ? size.tiny : lblSzIn == "Small" ? size.small : lblSzIn == "Normal" ? size.normal : size.large
 lblFn = lblFnIn == "Monospace" ? font.family_monospace : font.family_default
 lblWt = lblWtIn == "Bold" ? text.format_bold : lblWtIn == "Italic" ? text.format_italic : text.format_none
+
+// ════════════════════════ LEVEL PARSER ════════════════════════
+var array<string> pNames = array.new<string>()
+var array<float>  pTops  = array.new<float>()
+var array<float>  pBots  = array.new<float>()
+
+// Pine functions cannot assign to globals, so the zone counter lives in a
+// one-element array — arrays are passed by reference, so the function can
+// bump it and the count survives across all four input fields.
+var array<int> zoneSeq = array.new<int>(1, 0)
+
+// Only these exact words trigger top/bottom pairing. Everything else is
+// treated as a level name, so "Top of range, 7750" still works as format B.
+isTopKey(string k) =>
+    kk = str.lower(str.trim(k))
+    kk == "top" or kk == "t" or kk == "hi" or kk == "high"
+
+isBotKey(string k) =>
+    kk = str.lower(str.trim(k))
+    kk == "bottom" or kk == "bot" or kk == "b" or kk == "low" or kk == "lo"
+
+addParsed(array<string> outN, array<float> outT, array<float> outB, string nm, float a, float b) =>
+    base = str.length(str.trim(nm)) == 0 ? "LVL" : str.trim(nm)
+    string fin = base
+    int    k   = 2
+    while outN.includes(fin)
+        fin := base + " (" + str.tostring(k) + ")"
+        k   += 1
+    outN.push(fin)
+    outT.push(math.max(a, b))
+    outB.push(math.min(a, b))
+    0
+
+parseLevels(string src, array<string> outN, array<float> outT, array<float> outB, array<int> zSeq, bool matchTicker) =>
+    // Pending halves of a legacy top/bottom pair. Declared at function scope
+    // so a pair can straddle a line break as well as sitting on one line.
+    float pTop = na
+    float pBot = na
+    clean = str.replace_all(src, "\r", "\n")
+    clean := str.replace_all(clean, ";", "\n")
+    clean := str.replace_all(clean, "–", "-")
+    clean := str.replace_all(clean, "—", "-")
+    if str.length(str.trim(clean)) > 0
+        lines = str.split(clean, "\n")
+        for li = 0 to lines.size() - 1
+            ln = str.trim(lines.get(li))
+            if str.length(ln) > 0
+                string payload = ln
+                bool   use     = true
+                ci = str.pos(ln, ":")
+                if not na(ci)
+                    pre     = str.trim(str.substring(ln, 0, ci))
+                    payload := str.trim(str.substring(ln, ci + 1))
+                    if matchTicker and str.length(payload) > 0
+                        tag = str.replace_all(str.replace_all(pre, "$", ""), "!", "")
+                        use := str.length(tag) >= 2 and
+                             str.lower(str.substring(tag, 0, 2)) == str.lower(str.substring(syminfo.ticker, 0, 2))
+
+                // ── format B: comma-separated name / price pairs ──
+                // Also carries the legacy "top,<price>,bottom,<price>" stream.
+                // Those two keywords are held back and paired into a single
+                // zone rather than becoming two levels literally called "top"
+                // and "bottom".
+                if use and str.length(payload) > 0 and str.contains(payload, ",")
+                    toks = str.split(payload, ",")
+                    string buf = ""
+                    for ti = 0 to toks.size() - 1
+                        tk = str.trim(toks.get(ti))
+                        if str.length(tk) > 0
+                            num = str.tonumber(tk)
+                            float rt = na
+                            float rb = na
+                            if na(num) and str.contains(tk, "-")
+                                dp = str.pos(tk, "-")
+                                a  = str.tonumber(str.trim(str.substring(tk, 0, dp)))
+                                b  = str.tonumber(str.trim(str.substring(tk, dp + 1)))
+                                if not na(a) and not na(b)
+                                    rt := a
+                                    rb := b
+                            if not na(num)
+                                if isTopKey(buf)
+                                    // a second top with no bottom between them
+                                    // means the first was really a lone level
+                                    if not na(pTop)
+                                        addParsed(outN, outT, outB, "Level", pTop, pTop)
+                                    pTop := num
+                                else if isBotKey(buf)
+                                    if not na(pBot)
+                                        addParsed(outN, outT, outB, "Level", pBot, pBot)
+                                    pBot := num
+                                else
+                                    addParsed(outN, outT, outB, buf, num, num)
+                                buf := ""
+                                if not na(pTop) and not na(pBot)
+                                    zSeq.set(0, zSeq.get(0) + 1)
+                                    addParsed(outN, outT, outB, "Zone " + str.tostring(zSeq.get(0)), pTop, pBot)
+                                    pTop := na
+                                    pBot := na
+                            else if not na(rt)
+                                addParsed(outN, outT, outB, buf, rt, rb)
+                                buf := ""
+                            else
+                                buf := str.length(buf) == 0 ? tk : buf + " " + tk
+
+                // ── format A: "price [- price] name" ──
+                else if use and str.length(payload) > 0
+                    p    = str.replace_all(payload, "-", " - ")
+                    toks = str.split(p, " ")
+                    float n1   = na
+                    float n2   = na
+                    bool  dash = false
+                    int   nameStart = toks.size()
+                    for ti = 0 to toks.size() - 1
+                        tk = str.trim(toks.get(ti))
+                        if str.length(tk) > 0
+                            if tk == "-"
+                                if na(n1) or not na(n2)
+                                    nameStart := ti
+                                    break
+                                dash := true
+                            else
+                                v = str.tonumber(tk)
+                                if na(v) or (not na(n1) and not dash) or not na(n2)
+                                    nameStart := ti
+                                    break
+                                if na(n1)
+                                    n1 := v
+                                else
+                                    n2 := v
+                    string nm = ""
+                    if nameStart < toks.size()
+                        for ti = nameStart to toks.size() - 1
+                            tk = str.trim(toks.get(ti))
+                            if str.length(tk) > 0
+                                nm := str.length(nm) == 0 ? tk : nm + " " + tk
+                    if not na(n1)
+                        addParsed(outN, outT, outB, nm, n1, na(n2) ? n1 : n2)
+    // An unpaired half is a lone price, not half a zone — emit it rather than
+    // dropping it silently.
+    if not na(pTop)
+        addParsed(outN, outT, outB, "Level", pTop, pTop)
+    if not na(pBot)
+        addParsed(outN, outT, outB, "Level", pBot, pBot)
+    0
+
+if barstate.isfirst and useCust
+    parseLevels(txtA, pNames, pTops, pBots, zoneSeq, matchSym)
+    parseLevels(lvl1, pNames, pTops, pBots, zoneSeq, matchSym)
+    parseLevels(lvl2, pNames, pTops, pBots, zoneSeq, matchSym)
+    parseLevels(lvl3, pNames, pTops, pBots, zoneSeq, matchSym)
+
+abbrOf(string nm) =>
+    str.length(nm) <= 6 ? nm : str.substring(nm, 0, 6)
 
 // ════════════════════════ APPROACH FILTER ════════════════════════
 approaching(int dir) =>
@@ -149,10 +340,9 @@ type Band
     string abbr
     color  col
     bool   useFar  = false
-    box    bx      = na
-    float  fTop    = na      // fixed top/bottom, used by pasted zones only
+    float  fTop    = na      // fixed top/bottom, used by pasted levels only
     float  fBot    = na
-    int    side    = 0       // +1 price above band, -1 below, 0 unknown
+    int    side    = 0
     bool   active  = false
     int    origin  = 0
     bool   appr    = false
@@ -161,18 +351,16 @@ type Band
     int    start   = 0
     int    lastSig = -100000
     bool   swOn    = false   // a break is being watched for a reclaim
-    int    swBar   = 0       // bar the break closed
-    int    swDir   = 0       // side price broke FROM = the reclaim direction
-    bool   swAppr  = false   // approach flag carried from the broken interaction
+    int    swBar   = 0
+    int    swDir   = 0
+    bool   swAppr  = false
     int    pKind   = 0       // pending type, 0 = nothing armed
     int    pDir    = 0
     int    pBar    = 0
     float  pRef    = na
-    int    fired   = 0       // this bar's confirmed signal, 0 = none
+    int    fired   = 0
     int    fdir    = 0
 
-// One machine for zones and lines. Pass t == b for a single-price level.
-// Passing na parks the band: state clears and nothing can fire.
 method step(Band this, float t, float b) =>
     this.fired := 0
     this.fdir  := 0
@@ -193,7 +381,7 @@ method step(Band this, float t, float b) =>
         if this.pKind != 0
             stillOut = this.pDir == 1 ? cAbove : cBelow
             if not stillOut
-                this.pKind := 0                 // fell back through, void
+                this.pKind := 0
             else if bar_index - this.pBar >= waitN
                 prog = not needProg or (this.pDir == 1 ? close > this.pRef : close < this.pRef)
                 body = not needBody or (this.pDir == 1 ? close > open      : close < open)
@@ -203,10 +391,7 @@ method step(Band this, float t, float b) =>
                     this.lastSig := bar_index
                 this.pKind := 0
 
-        // ── 2. sweep watch: was a break given back in time? ──
-        // Runs independently of the interaction machine, because after a break
-        // price is on the far side and any new contact reads as a fresh
-        // approach from that side — the reclaim would otherwise be invisible.
+        // ── 2. sweep watch ──
         if this.swOn
             reclaimed = this.swDir == 1 ? cAbove : cBelow
             if reclaimed
@@ -217,7 +402,7 @@ method step(Band this, float t, float b) =>
                     this.pRef  := close
                 this.swOn := false
             else if bar_index - this.swBar > sweepMax
-                this.swOn := false              // held too long, it was a real break
+                this.swOn := false
 
         // ── 3. track the interaction ──
         if not hitZ
@@ -256,9 +441,6 @@ method step(Band this, float t, float b) =>
                         this.pDir  := this.origin
                         this.pBar  := bar_index
                         this.pRef  := close
-                // A break starts the sweep clock. The pKind guard stops a
-                // reclaim that just armed a sweep from immediately arming the
-                // opposite one and ping-ponging.
                 if broke and this.pKind == 0
                     this.swOn   := true
                     this.swBar  := bar_index
@@ -268,7 +450,6 @@ method step(Band this, float t, float b) =>
                 this.side   := cAbove ? 1 : -1
     this.fired
 
-// dir: +1 bullish, -1 bearish. sweep: true = type 4 only, false = types 1–3.
 method sig(Band this, int dir, bool sweep) =>
     this.fired != 0 and this.fdir == dir and (sweep ? this.fired == 4 : this.fired != 4)
 
@@ -310,6 +491,12 @@ lonStart  = lonOn  and not lonOn[1]
 
 ema200 = ta.ema(close, emaLen)
 vwp    = ta.vwap(hlc3, nyStart)
+atrv   = ta.atr(atrLen)
+newDay = timeframe.change("D")
+
+var int dayCount = 0
+if newDay
+    dayCount += 1
 
 sessHL(bool on, bool started, float prevH, float prevL) =>
     float h = prevH
@@ -355,7 +542,6 @@ asReady = not na(asH) and (not onlyDone or not asiaOn)
 lnReady = not na(lnH) and (not onlyDone or not lonOn)
 
 // ══════════════════════════ DRAWING ══════════════════════════
-// plot() has no dotted style, so the EMA is drawn as spaced circles.
 emaCol  = color.new(cEma, emaTr)
 emaDots = bar_index % emaGap == 0 ? ema200 : na
 plot(shEma ? emaDots : na, "EMA 200", color = emaCol, linewidth = 2, style = plot.style_circles)
@@ -382,6 +568,19 @@ drawLvl(lnAsH, asH, asX, cAs, shAs)
 drawLvl(lnAsL, asL, asX, cAs, shAs)
 drawLvl(lnLnH, lnH, lnX, cLn, shLn)
 drawLvl(lnLnL, lnL, lnX, cLn, shLn)
+
+// Pasted levels are static, so draw them once and extend both ways.
+if barstate.isfirst and useCust and drawCust and pNames.size() > 0
+    sty = custSty == "Solid" ? line.style_solid : custSty == "Dashed" ? line.style_dashed : line.style_dotted
+    for i = 0 to pNames.size() - 1
+        tp = pTops.get(i)
+        bt = pBots.get(i)
+        if tp == bt
+            line.new(bar_index, tp, bar_index + 1, tp, xloc = xloc.bar_index,
+                 extend = extend.both, color = cCust, style = sty, width = 1)
+        else
+            box.new(time, tp, time + 1, bt, xloc = xloc.bar_time, extend = extend.both,
+                 border_color = cCust, border_style = sty, border_width = 1, bgcolor = cCustBg)
 
 // ═══════════════════════ LINE TITLES ═══════════════════════
 // style_label_left anchors the text's LEFT edge at the point, so text sits to
@@ -412,6 +611,7 @@ var label tAsH = na
 var label tAsL = na
 var label tLnH = na
 var label tLnL = na
+var array<label> tCust = array.new<label>()
 
 if barstate.islast
     tEma := titleLbl(tEma, "EMA " + str.tostring(emaLen), ema200, shEma, cEma)
@@ -422,6 +622,24 @@ if barstate.islast
     tAsL := titleLbl(tAsL, "Asia Low",    asL, shAs,  cAs)
     tLnH := titleLbl(tLnH, "London High", lnH, shLn,  cLn)
     tLnL := titleLbl(tLnL, "London Low",  lnL, shLn,  cLn)
+    if tCust.size() > 0
+        for i = 0 to tCust.size() - 1
+            label.delete(tCust.get(i))
+        tCust.clear()
+    if useCust and drawCust and lblOn and pNames.size() > 0
+        for i = 0 to pNames.size() - 1
+            tp  = pTops.get(i)
+            bt  = pBots.get(i)
+            txt = pNames.get(i) + (lblPx ? "  " + (tp == bt ? str.tostring(tp, format.mintick)
+                 : str.tostring(bt, format.mintick) + "–" + str.tostring(tp, format.mintick)) : "")
+            tCust.push(label.new(bar_index + lblOff, tp, txt,
+                 style            = label.style_label_left,
+                 color            = color.new(color.black, 100),
+                 textcolor        = cCust,
+                 size             = lblSz,
+                 text_font_family = lblFn,
+                 text_formatting  = lblWt,
+                 textalign        = text.align_left))
 
 // ════════════════════════ BAND REGISTRY ════════════════════════
 var Band bEma = Band.new(name = "EMA 200",     abbr = "EMA", col = cEma)
@@ -433,57 +651,28 @@ var Band bAsL = Band.new(name = "Asia Low",    abbr = "ASL", col = cAs)
 var Band bLnH = Band.new(name = "London High", abbr = "LNH", col = cLn)
 var Band bLnL = Band.new(name = "London Low",  abbr = "LNL", col = cLn)
 
-var array<Band> zoneBands = array.new<Band>()
+var array<Band> custBands = array.new<Band>()
 var array<Band> allBands  = array.new<Band>()
 
-parseZones(string src) =>
-    tops  = array.new<float>()
-    bots  = array.new<float>()
-    clean = str.replace_all(str.replace_all(str.replace_all(src, " ", ""), "\n", ""), "\t", "")
-    string key = "top"
-    float  pT  = na
-    float  pB  = na
-    for tk in str.split(clean, ",")
-        if str.length(tk) > 0
-            n = str.tonumber(tk)
-            if na(n)
-                key := str.lower(tk)
-            else
-                if str.startswith(key, "b")
-                    pB := n
-                else
-                    pT := n
-                if not na(pT) and not na(pB)
-                    array.push(tops, math.max(pT, pB))
-                    array.push(bots, math.min(pT, pB))
-                    pT := na
-                    pB := na
-    [tops, bots]
-
 if barstate.isfirst
-    array.push(allBands, bEma)
-    array.push(allBands, bVwp)
-    array.push(allBands, bOrH)
-    array.push(allBands, bOrL)
-    array.push(allBands, bAsH)
-    array.push(allBands, bAsL)
-    array.push(allBands, bLnH)
-    array.push(allBands, bLnL)
-    if shZn
-        [tops, bots] = parseZones(zonesStr)
-        if array.size(tops) > 0
-            for i = 0 to array.size(tops) - 1
-                zt = array.get(tops, i)
-                zb = array.get(bots, i)
-                bx = box.new(time, zt, time + 1, zb, xloc = xloc.bar_time,
-                     extend = extend.both, bgcolor = color.new(cZn, 88),
-                     border_color = color.new(cZn, 35), border_width = 1)
-                bd = Band.new(name = "Zone " + str.tostring(zb, format.mintick),
-                     abbr = "Z", col = cZn, useFar = true, bx = bx, fTop = zt, fBot = zb)
-                array.push(zoneBands, bd)
-                array.push(allBands, bd)
+    allBands.push(bEma)
+    allBands.push(bVwp)
+    allBands.push(bOrH)
+    allBands.push(bOrL)
+    allBands.push(bAsH)
+    allBands.push(bAsL)
+    allBands.push(bLnH)
+    allBands.push(bLnL)
+    if useCust and pNames.size() > 0
+        for i = 0 to pNames.size() - 1
+            tp = pTops.get(i)
+            bt = pBots.get(i)
+            bd = Band.new(name = pNames.get(i), abbr = abbrOf(pNames.get(i)),
+                 col = cCust, useFar = tp != bt, fTop = tp, fBot = bt)
+            custBands.push(bd)
+            allBands.push(bd)
 
-// ════════════════════════ RUN THE MACHINE ════════════════════════
+// ════════════════════════ RUN ENGINE A ════════════════════════
 emaSrc = shEma ? ema200 : na
 vwpSrc = shVwp ? vwp : na
 orHSrc = shOr and orReady ? orH : na
@@ -502,19 +691,178 @@ bAsL.step(asLSrc, asLSrc)
 bLnH.step(lnHSrc, lnHSrc)
 bLnL.step(lnLSrc, lnLSrc)
 
-for bd in zoneBands
+for bd in custBands
     bd.step(bd.fTop, bd.fBot)
 
+// ═══════════════════ ENGINE B: LFFC ═══════════════════
+type Touch
+    string nm
+    float  top
+    float  bot
+    int    bar
+
+type Setup
+    string nm
+    int    dir        // 1 = bullish, -1 = bearish
+    float  gTop       // upper edge of the FVG
+    float  gBot       // lower edge of the FVG
+    float  confP      // price that must be closed through to confirm
+    int    fvgBar
+    int    fillBar
+    int    st         // 0 = waiting for fill, 1 = filled, waiting for continuation
+    box    bx
+
+var map<string, int> lastTouchBar = map.new<string, int>()
+var map<string, int> lastSigDay   = map.new<string, int>()
+var array<Touch>     touches      = array.new<Touch>()
+var array<Setup>     setups       = array.new<Setup>()
+
+addLvl(array<string> ns, array<float> ts, array<float> bs, bool use, string nm, float t, float b) =>
+    if use and not na(t) and not na(b)
+        ns.push(nm)
+        ts.push(t)
+        bs.push(b)
+    0
+
+bool   lffcBull = false
+bool   lffcBear = false
+string lffcName = ""
+
+// Confirmed bars only, so setups never repaint mid-bar.
+if useT5 and barstate.isconfirmed and not na(atrv)
+    names = array.new<string>()
+    tops  = array.new<float>()
+    bots  = array.new<float>()
+    addLvl(names, tops, bots, shEma, "EMA " + str.tostring(emaLen), ema200, ema200)
+    addLvl(names, tops, bots, shVwp, "VWAP", vwp, vwp)
+    addLvl(names, tops, bots, shOr and orReady, "OR High",     orH, orH)
+    addLvl(names, tops, bots, shOr and orReady, "OR Low",      orL, orL)
+    addLvl(names, tops, bots, shAs and asReady, "Asia High",   asH, asH)
+    addLvl(names, tops, bots, shAs and asReady, "Asia Low",    asL, asL)
+    addLvl(names, tops, bots, shLn and lnReady, "London High", lnH, lnH)
+    addLvl(names, tops, bots, shLn and lnReady, "London Low",  lnL, lnL)
+    if useCust and pNames.size() > 0
+        for i = 0 to pNames.size() - 1
+            addLvl(names, tops, bots, true, pNames.get(i), pTops.get(i), pBots.get(i))
+
+    // ── STAGE 1: register touches ──
+    float ftol = fTolMode == "ATR" ? atrv * fTolAtr : fTolMode == "Ticks" ? syminfo.mintick * fTolTick : 0.0
+    if names.size() > 0
+        for i = 0 to names.size() - 1
+            nm = names.get(i)
+            tp = tops.get(i)
+            bt = bots.get(i)
+            if low - ftol <= tp and high + ftol >= bt
+                prev = lastTouchBar.contains(nm) ? lastTouchBar.get(nm) : -999999
+                if bar_index - prev >= fCool
+                    lastTouchBar.put(nm, bar_index)
+                    touches.push(Touch.new(nm, tp, bt, bar_index))
+
+    if touches.size() > 0
+        for i = touches.size() - 1 to 0
+            if bar_index - touches.get(i).bar > maxLag
+                touches.remove(i)
+
+    // ── STAGE 2: FVG on the 3-bar window ending here ──
+    disp = math.abs(close[1] - open[1])
+    bull = low  > high[2] and (low - high[2]) >= atrv * minGap and disp >= atrv * minDisp and close[1] > open[1]
+    bear = high < low[2]  and (low[2] - high) >= atrv * minGap and disp >= atrv * minDisp and close[1] < open[1]
+
+    if (bull or bear) and touches.size() > 0
+        int   dir  = bull ? 1 : -1
+        float gBot = bull ? high[2] : high
+        float gTop = bull ? low     : low[2]
+
+        int best = -1
+        for i = touches.size() - 1 to 0
+            t     = touches.get(i)
+            lag   = bar_index - t.bar
+            okLag = lag >= minLag and lag <= maxLag
+            okRej = not needRej or (dir == 1 ? close > t.top : close < t.bot)
+            if okLag and okRej and best == -1
+                best := i
+
+        if best >= 0
+            t = touches.get(best)
+            float cp = na
+            if confMode == "Close back through gap"
+                cp := dir == 1 ? gTop : gBot
+            else
+                cp := dir == 1 ? high : low
+            box bx = na
+            if showFvg
+                bx := box.new(bar_index - 2, gTop, bar_index, gBot,
+                     border_color = color.new(dir == 1 ? color.teal : color.red, 40),
+                     bgcolor = dir == 1 ? cFvgB : cFvgS)
+            setups.push(Setup.new(t.nm, dir, gTop, gBot, cp, bar_index, 0, 0, bx))
+            touches.remove(best)
+
+    // ── STAGES 3 & 4: manage open setups ──
+    float buf = atrv * invBuf
+    if setups.size() > 0
+        for i = setups.size() - 1 to 0
+            s   = setups.get(i)
+            mid = (s.gTop + s.gBot) / 2
+            bool dead  = false
+            bool fired = false
+
+            float fillP = na
+            if fillMode == "Full (far edge)"
+                fillP := s.dir == 1 ? s.gBot : s.gTop
+            else if fillMode == "50% (CE)"
+                fillP := mid
+            else
+                fillP := s.dir == 1 ? s.gTop : s.gBot
+
+            blown = s.dir == 1 ? close < s.gBot - buf : close > s.gTop + buf
+
+            if s.st == 0
+                filled = s.dir == 1 ? low <= fillP : high >= fillP
+                if filled
+                    s.st      := 1
+                    s.fillBar := bar_index
+                else if blown or bar_index - s.fvgBar > maxFill
+                    dead := true
+
+            if s.st == 1 and not dead
+                conf = s.dir == 1 ? close > s.confP : close < s.confP
+                ok   = not oneADay or not lastSigDay.contains(s.nm) or lastSigDay.get(s.nm) != dayCount
+                if conf and ok
+                    fired := true
+                    dead  := true
+                    lastSigDay.put(s.nm, dayCount)
+                    if s.dir == 1
+                        lffcBull := true
+                    else
+                        lffcBear := true
+                    lffcName := s.nm
+                else if conf and not ok
+                    dead := true
+                else if blown or bar_index - s.fillBar > maxConf
+                    dead := true
+
+            if not na(s.bx) and not dead
+                s.bx.set_right(bar_index + 1)
+
+            if dead
+                if not na(s.bx)
+                    if fired
+                        s.bx.set_bgcolor(color.new(s.dir == 1 ? color.teal : color.red, 55))
+                        s.bx.set_right(bar_index)
+                    else
+                        box.delete(s.bx)
+                setups.remove(i)
+
 // ════════════════════════ AGGREGATE ════════════════════════
-zBncB = false
-zBncS = false
-zSwpB = false
-zSwpS = false
-for bd in zoneBands
-    zBncB := zBncB or bd.sig( 1, false)
-    zBncS := zBncS or bd.sig(-1, false)
-    zSwpB := zSwpB or bd.sig( 1, true)
-    zSwpS := zSwpS or bd.sig(-1, true)
+cBncB = false
+cBncS = false
+cSwpB = false
+cSwpS = false
+for bd in custBands
+    cBncB := cBncB or bd.sig( 1, false)
+    cBncS := cBncS or bd.sig(-1, false)
+    cSwpB := cSwpB or bd.sig( 1, true)
+    cSwpS := cSwpS or bd.sig(-1, true)
 
 emaBncB = bEma.sig( 1, false)
 emaBncS = bEma.sig(-1, false)
@@ -547,18 +895,21 @@ for bd in allBands
     note := joinTxt(note, bd.desc(),   "  |  ")
     tag  := joinTxt(tag,  bd.tagTxt(), " ")
 
-anyBull = emaBncB or vwpBncB or orBncB or asBncB or lnBncB or zBncB or
-     emaSwpB or vwpSwpB or orSwpB or asSwpB or lnSwpB or zSwpB
-anyBear = emaBncS or vwpBncS or orBncS or asBncS or lnBncS or zBncS or
-     emaSwpS or vwpSwpS or orSwpS or asSwpS or lnSwpS or zSwpS
+if lffcBull or lffcBear
+    note := joinTxt(note, "FVG continuation " + (lffcBull ? "long" : "short") + " off " + lffcName, "  |  ")
+    tag  := joinTxt(tag, "FVG" + (lffcBull ? "▲" : "▼"), " ")
+
+anyBull = emaBncB or vwpBncB or orBncB or asBncB or lnBncB or cBncB or
+     emaSwpB or vwpSwpB or orSwpB or asSwpB or lnSwpB or cSwpB or lffcBull
+anyBear = emaBncS or vwpBncS or orBncS or asBncS or lnBncS or cBncS or
+     emaSwpS or vwpSwpS or orSwpS or asSwpS or lnSwpS or cSwpS or lffcBear
 
 // ════════════════════════ MARKERS ════════════════════════
-// Colour = which line family. Shape = signal class:
-//   triangle  rejection off a line   (types 1, 2)
-//   diamond   rejection off a zone   (types 1, 2, 3)
-//   X         sweep, line or zone    (type 4)
-// Placement above/below the bar carries direction. Markers sit back on the
-// signal candle; the alert still fires on the confirmation bar.
+// Colour = which level family. Shape = signal class:
+//   triangle  rejection off a line     (types 1, 2)
+//   diamond   rejection off a zone     (types 1, 2, 3)
+//   X         sweep                    (type 4)
+//   arrow     FVG continuation         (type 5)
 mkOff = markBack ? -waitN : 0
 lbOff = markBack ?  waitN : 0
 
@@ -587,10 +938,13 @@ plotshape(lnBncS,  "London bounce down", shape.triangledown, location.abovebar, 
 plotshape(lnSwpB,  "London sweep up",    shape.xcross,       location.belowbar, cLn,  size = size.tiny, offset = mkOff)
 plotshape(lnSwpS,  "London sweep down",  shape.xcross,       location.abovebar, cLn,  size = size.tiny, offset = mkOff)
 
-plotshape(zBncB,   "Zone bounce up",     shape.diamond,      location.belowbar, cZn,  size = size.tiny, offset = mkOff)
-plotshape(zBncS,   "Zone bounce down",   shape.diamond,      location.abovebar, cZn,  size = size.tiny, offset = mkOff)
-plotshape(zSwpB,   "Zone sweep up",      shape.xcross,       location.belowbar, cZn,  size = size.tiny, offset = mkOff)
-plotshape(zSwpS,   "Zone sweep down",    shape.xcross,       location.abovebar, cZn,  size = size.tiny, offset = mkOff)
+plotshape(cBncB,   "Pasted bounce up",   shape.diamond,      location.belowbar, cCust, size = size.tiny, offset = mkOff)
+plotshape(cBncS,   "Pasted bounce down", shape.diamond,      location.abovebar, cCust, size = size.tiny, offset = mkOff)
+plotshape(cSwpB,   "Pasted sweep up",    shape.xcross,       location.belowbar, cCust, size = size.tiny, offset = mkOff)
+plotshape(cSwpS,   "Pasted sweep down",  shape.xcross,       location.abovebar, cCust, size = size.tiny, offset = mkOff)
+
+plotshape(lffcBull, "FVG continuation long",  shape.arrowup,   location.belowbar, color.teal, size = size.small)
+plotshape(lffcBear, "FVG continuation short", shape.arrowdown, location.abovebar, color.red,  size = size.small)
 
 if showLb and (anyBull or anyBear)
     label.new(bar_index - lbOff, anyBull ? low[lbOff] : high[lbOff], tag,
@@ -599,9 +953,10 @@ if showLb and (anyBull or anyBear)
          textcolor = color.white, size = size.tiny, tooltip = note)
 
 // ════════════════════════ ALERTS ════════════════════════
-// One condition per line, either direction, any signal type. The dynamic
+// One condition per level family, either direction, any signal type, plus
+// cross-cutting conditions for sweeps and FVG continuations. The dynamic
 // alert() carries full detail but only fires under "Any alert() function
-// call", which covers every band.
+// call", which covers everything.
 sEma = bEma.hit()
 sVwp = bVwp.hit()
 sOrH = bOrH.hit()
@@ -610,9 +965,10 @@ sAsH = bAsH.hit()
 sAsL = bAsL.hit()
 sLnH = bLnH.hit()
 sLnL = bLnL.hit()
-sZn  = zBncB or zBncS or zSwpB or zSwpS
+sCst = cBncB or cBncS or cSwpB or cSwpS
 sSwp = emaSwpB or emaSwpS or vwpSwpB or vwpSwpS or orSwpB or orSwpS or
-     asSwpB or asSwpS or lnSwpB or lnSwpS or zSwpB or zSwpS
+     asSwpB or asSwpS or lnSwpB or lnSwpS or cSwpB or cSwpS
+sFvg = lffcBull or lffcBear
 sAny = anyBull or anyBear
 
 alertcondition(sEma, "EMA 200 bounce",     "EMA 200 bounce")
@@ -623,9 +979,12 @@ alertcondition(sAsH, "Asia High bounce",   "Asia session high bounce")
 alertcondition(sAsL, "Asia Low bounce",    "Asia session low bounce")
 alertcondition(sLnH, "London High bounce", "London session high bounce")
 alertcondition(sLnL, "London Low bounce",  "London session low bounce")
-alertcondition(sZn,  "Zone bounce",        "Pasted zone bounce")
+alertcondition(sCst, "Pasted level bounce", "Pasted level or zone bounce")
 alertcondition(sSwp, "Any sweep",          "Sweep reclaimed on any level")
-alertcondition(sAny, "Any line or zone signal", "Confirmed bounce or sweep")
+alertcondition(lffcBull, "FVG continuation long",  "Bullish level → FVG → fill → continuation confirmed")
+alertcondition(lffcBear, "FVG continuation short", "Bearish level → FVG → fill → continuation confirmed")
+alertcondition(sFvg, "Any FVG continuation", "Level → FVG → fill → continuation confirmed")
+alertcondition(sAny, "Any signal", "Confirmed bounce, sweep or FVG continuation")
 
 if sAny
     alert(syminfo.ticker + " " + timeframe.period + "  " + note, alert.freq_once_per_bar)
