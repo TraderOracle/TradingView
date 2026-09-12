@@ -1,6 +1,6 @@
 //@version=6
 // ═══════════════════════════════════════════════════════════════════════════
-//  Zone & Line Bounce Engine  v9
+//  Zone & Line Bounce Engine  v11
 //
 //  TWO ENGINES SHARING ONE SET OF LEVELS
 //
@@ -12,70 +12,80 @@
 //       3  BACK   traversed to the far edge, rejected there, exited same side
 //       4  SWEEP  closed clean through, lingered ≤ X candles, closed back
 //
-//  B) LFFC — level → FVG → fill → continuation. A four-stage setup:
+//  B) LFFC — level → FVG → fill → continuation:
 //       1  price touches a level or zone
 //       2  within N bars an FVG prints in the rejection direction
 //       3  price returns and fills that gap
 //       4  price closes back through the gap → signal  (type 5)
 //
-//  The two run independently. A fails-fast rejection fires A; a rejection that
-//  builds structure and retests fires B. Both can fire on the same level.
-//
-//  Session times are written in the timezone you pick below. Defaults are
-//  US Central. CHANGE THE SESSION STRINGS if you change the timezone.
+//  PLOT BUDGET — Pine allows 64. plot() = 1, plotshape() = 2,
+//  alertcondition() = 1. Current use: 8 plotshapes (16) + 2 plots
+//  + 14 alertconditions = 32. Marker shapes are shared across level
+//  families and the colour is computed per bar to stay inside it.
 // ═══════════════════════════════════════════════════════════════════════════
-indicator("TO Bounce Engine", "TO Bounce Engine", overlay = true,
+indicator("TO Bounce Engine v11", "TO Bounce Engine", overlay = true,
      max_bars_back = 300, max_boxes_count = 500, max_labels_count = 500,
      max_lines_count = 500)
 
-// ═══════════════════════════ INPUTS ═══════════════════════════
-gT = "Timezone & sessions"
-tz = input.string("America/Chicago", "Timezone", group = gT, options = [
-     "America/Chicago", "America/New_York", "America/Denver", "America/Los_Angeles",
-     "America/Sao_Paulo", "Europe/London", "Europe/Berlin", "Europe/Moscow",
-     "Asia/Dubai", "Asia/Kolkata", "Asia/Shanghai", "Asia/Tokyo",
-     "Australia/Sydney", "UTC"],
-     tooltip = "All session strings below are interpreted in this timezone. Defaults are written for America/Chicago (CST/CDT) — if you switch timezone, rewrite them to match.")
-nySess   = input.session("0830-1500", "NY session",       group = gT, tooltip = "Anchors the VWAP at its first bar. CST default = 09:30–16:00 ET.")
-orSess   = input.session("0830-0930", "1H opening range", group = gT, tooltip = "First hour of the NY session. CST default = 09:30–10:30 ET.")
-asiaSess = input.session("1800-0300", "Asia session",     group = gT, tooltip = "CST default = 19:00–04:00 ET.")
-lonSess  = input.session("0200-1030", "London session",   group = gT, tooltip = "CST default = 03:00–11:30 ET.")
-
+// ═══════════════════════════ 1 · LINES ═══════════════════════════
 gL = "Lines"
-shEma  = input.bool(true, "EMA 200",          group = gL, inline = "ema")
-cEma   = input.color(#E8E4D9, "",             group = gL, inline = "ema")
-emaLen = input.int(200, "len", minval = 1,    group = gL, inline = "ema")
-emaTr  = input.int(20, "Line transparency %", minval = 0, maxval = 100, group = gL)
-emaGap = input.int(2, "EMA dot spacing (bars)", minval = 1, maxval = 10, group = gL)
-shVwp  = input.bool(true, "VWAP (NY anchor)",  group = gL, inline = "vwp")
-cVwp   = input.color(#2E6FD9, "",              group = gL, inline = "vwp")
-shOr   = input.bool(true, "1H opening range",  group = gL, inline = "or")
-cOr    = input.color(#FFFFFF, "",              group = gL, inline = "or")
-shAs   = input.bool(true, "Asia high / low",   group = gL, inline = "as")
-cAs    = input.color(#7EC8E3, "",              group = gL, inline = "as")
-shLn   = input.bool(true, "London high / low", group = gL, inline = "ln")
-cLn    = input.color(#F5A9C4, "",              group = gL, inline = "ln")
+shEma  = input.bool(true, "EMA 200",            group = gL, inline = "ema")
+cEma   = input.color(#E8E4D9, "",               group = gL, inline = "ema")
+emaLen = input.int(200, "len", minval = 1,      group = gL, inline = "ema")
+cEmaUp = input.color(#8BC34A, "    EMA signal   long", group = gL, inline = "emaS")
+cEmaDn = input.color(#E57373, "short",          group = gL, inline = "emaS")
+emaTr  = input.int(20, "    EMA line transparency %", minval = 0, maxval = 100, group = gL)
+emaGap = input.int(2,  "    EMA dot spacing (bars)",  minval = 1, maxval = 10, group = gL)
+
+shVwp  = input.bool(true, "VWAP (NY anchor)",   group = gL, inline = "vwp")
+cVwp   = input.color(#2E6FD9, "",               group = gL, inline = "vwp")
+cVwpUp = input.color(#26A69A, "    VWAP signal  long", group = gL, inline = "vwpS")
+cVwpDn = input.color(#EF5350, "short",          group = gL, inline = "vwpS")
+
+shOr   = input.bool(true, "1H opening range",   group = gL, inline = "or")
+cOr    = input.color(#FFFFFF, "",               group = gL, inline = "or")
+shAs   = input.bool(true, "Asia high / low",    group = gL, inline = "as")
+cAs    = input.color(#7EC8E3, "",               group = gL, inline = "as")
+shLn   = input.bool(true, "London high / low",  group = gL, inline = "ln")
+cLn    = input.color(#F5A9C4, "",               group = gL, inline = "ln")
+
+cFvgUp = input.color(#26A69A, "FVG continuation  long", group = gL, inline = "fvgC")
+cFvgDn = input.color(#EF5350, "short",          group = gL, inline = "fvgC")
+fvgTr  = input.int(75, "    FVG box transparency %", minval = 0, maxval = 100, group = gL)
+
 extRt  = input.int(3, "Extend levels right (bars)", minval = 0, group = gL)
 
-// ═══════════════ PASTED LEVELS & ZONES ═══════════════
-// One text area for the bulk paste, three single-line fields for one-offs.
-// All four are parsed into the same pool and feed BOTH engines.
+// ═══════════════════════ 2 · LINE TITLES ═══════════════════════
+// Pine can only use the chart's system font or a monospace font — Arial is
+// not selectable — and text size is an enum, not a point value.
+gN      = "Line titles"
+lblOn   = input.bool(true, "Show titles at right of each line", group = gN)
+lblPx   = input.bool(false, "Append the price", group = gN)
+lblSzIn = input.string("Small", "Text size", options = ["Tiny", "Small", "Normal", "Large"], group = gN,
+     tooltip = "Pine has no numeric font sizes. Small ≈ 9pt on a default chart.")
+lblFnIn = input.string("Default", "Font", options = ["Default", "Monospace"], group = gN)
+lblWtIn = input.string("Regular", "Weight", options = ["Regular", "Bold", "Italic"], group = gN)
+lblOff  = input.int(4, "Title offset right (bars)", minval = 0, group = gN)
+
+// ═════════════════ 3 · PASTED LEVELS & ZONES ═════════════════
+// NOTE: input.text_area() has no height or rows parameter — TradingView fixes
+// the widget height. Keeping the default to a single line is the only lever
+// that affects it. Use Level 1/2/3 for one-offs so the block stays short.
 gP = "Pasted levels & zones"
 tipTxt = "Three formats, mixable, one entry per line.\n\n" +
-     "A) price or price range, then name (spaces):\n" +
+     "A) price or price range, then name:\n" +
      "7714.00 - 7702.75 Extreme Short\n" +
      "7606.75 Line in the Sand\n\n" +
      "B) name/price pairs (commas):\n" +
-     "vix r1, 29402, vix r2, 29417, VAH, 29488\n\n" +
+     "vix r1, 29402, VAH, 29488\n\n" +
      "C) top/bottom pairs (commas):\n" +
-     "top,7747.88,bottom,7746.17,top,7765.05,bottom,7763.34\n\n" +
-     "Ranges and top/bottom pairs become zones, single numbers become lines. " +
-     "Anything before a ':' is a ticker tag and is ignored. Header lines with " +
-     "nothing after the ':' are skipped. Duplicate names are auto-numbered. " +
-     "';' also works as a line break."
+     "top,7747.88,bottom,7746.17\n\n" +
+     "Name-first also works: 'Range Daily Max 24500' and " +
+     "'Range Daily Max: 24500' both parse. A short single word before a ':' " +
+     "is treated as a ticker tag and dropped; anything longer or containing " +
+     "spaces is kept as the name. ';' works as a line break."
 useCust = input.bool(true, "Enable pasted levels", group = gP)
-txtA    = input.text_area(
-     "top,7747.88,bottom,7746.17,top,7765.05,bottom,7763.34",
+txtA    = input.text_area("top,7747.88,bottom,7746.17,top,7765.05,bottom,7763.34",
      "Paste block", tooltip = tipTxt, group = gP)
 lvl1 = input.string("", "Level 1", tooltip = tipTxt, group = gP)
 lvl2 = input.string("", "Level 2", tooltip = tipTxt, group = gP)
@@ -86,18 +96,20 @@ cCust    = input.color(color.new(color.teal, 20), "    Line / border", group = g
 cCustBg  = input.color(color.new(color.teal, 88), "    Zone fill", group = gP)
 custSty  = input.string("Dotted", "    Line style", options = ["Solid", "Dashed", "Dotted"], group = gP)
 
-// ── Line titles ──
-// Pine can only use the chart's system font or a monospace font — Arial is not
-// selectable — and text size is an enum, not a point value.
-gN      = "Line titles"
-lblOn   = input.bool(true, "Show titles at right of each line", group = gN)
-lblPx   = input.bool(false, "Append the price", group = gN)
-lblSzIn = input.string("Small", "Text size", options = ["Tiny", "Small", "Normal", "Large"], group = gN,
-     tooltip = "Pine has no numeric font sizes. Small ≈ 9pt on a default chart.")
-lblFnIn = input.string("Default", "Font", options = ["Default", "Monospace"], group = gN)
-lblWtIn = input.string("Regular", "Weight", options = ["Regular", "Bold", "Italic"], group = gN)
-lblOff  = input.int(4, "Title offset right (bars)", minval = 0, group = gN)
+// ═══════════════════ 4 · TIMEZONE & SESSIONS ═══════════════════
+gT = "Timezone & sessions"
+tz = input.string("America/Chicago", "Timezone", group = gT, options = [
+     "America/Chicago", "America/New_York", "America/Denver", "America/Los_Angeles",
+     "America/Sao_Paulo", "Europe/London", "Europe/Berlin", "Europe/Moscow",
+     "Asia/Dubai", "Asia/Kolkata", "Asia/Shanghai", "Asia/Tokyo",
+     "Australia/Sydney", "UTC"],
+     tooltip = "All session strings below are interpreted in this timezone. Defaults are written for America/Chicago (CST/CDT) — if you switch timezone, rewrite them to match.")
+nySess   = input.session("0830-1500", "NY session",       group = gT, tooltip = "Anchors the VWAP at its first bar. CST default = 09:30–16:00 ET.")
+orSess   = input.session("0830-0930", "1H opening range", group = gT, tooltip = "First hour of the NY session.")
+asiaSess = input.session("1800-0300", "Asia session",     group = gT)
+lonSess  = input.session("0200-1030", "London session",   group = gT)
 
+// ══════════════════════════ 5 · RULES ══════════════════════════
 gA       = "Approach"
 prevN    = input.int(2, "Approach candles", minval = 0, maxval = 10, group = gA,
      tooltip = "Candles before first contact that must be travelling toward the band. 0 disables.")
@@ -116,7 +128,6 @@ gW       = "Sweep"
 sweepMax = input.int(2, "Max candles beyond the band", minval = 1, maxval = 20, group = gW,
      tooltip = "How long price may hold past the level before the reclaim stops counting as a sweep. The breaking candle is the first one.")
 
-// ═══════════ LFFC: LEVEL → FVG → FILL → CONTINUATION ═══════════
 gF       = "FVG continuation"
 atrLen   = input.int(14, "ATR length", minval = 1, group = gF)
 fTolMode = input.string("ATR", "Touch tolerance", options = ["ATR", "Ticks", "None"], group = gF)
@@ -137,8 +148,6 @@ maxConf  = input.int(15, "Max bars to confirm after the fill", minval = 1, group
 invBuf   = input.float(0.15, "Invalidation buffer beyond gap (× ATR)", step = 0.05, minval = 0, group = gF)
 oneADay  = input.bool(false, "Only one signal per level per day", group = gF)
 showFvg  = input.bool(true, "Draw FVG boxes", group = gF)
-cFvgB    = input.color(color.new(color.teal, 75), "    Bull FVG fill", group = gF)
-cFvgS    = input.color(color.new(color.red, 75),  "    Bear FVG fill", group = gF)
 
 gC       = "Confirmation"
 waitN    = input.int(1, "Wait candles", minval = 1, maxval = 5, group = gC)
@@ -157,6 +166,8 @@ showLb = input.bool(true, "Signal labels", group = gS)
 lblSz = lblSzIn == "Tiny" ? size.tiny : lblSzIn == "Small" ? size.small : lblSzIn == "Normal" ? size.normal : size.large
 lblFn = lblFnIn == "Monospace" ? font.family_monospace : font.family_default
 lblWt = lblWtIn == "Bold" ? text.format_bold : lblWtIn == "Italic" ? text.format_italic : text.format_none
+cFvgBoxB = color.new(cFvgUp, fvgTr)
+cFvgBoxS = color.new(cFvgDn, fvgTr)
 
 // ════════════════════════ LEVEL PARSER ════════════════════════
 var array<string> pNames = array.new<string>()
@@ -164,12 +175,10 @@ var array<float>  pTops  = array.new<float>()
 var array<float>  pBots  = array.new<float>()
 
 // Pine functions cannot assign to globals, so the zone counter lives in a
-// one-element array — arrays are passed by reference, so the function can
-// bump it and the count survives across all four input fields.
+// one-element array — arrays pass by reference, so the count survives across
+// all four input fields.
 var array<int> zoneSeq = array.new<int>(1, 0)
 
-// Only these exact words trigger top/bottom pairing. Everything else is
-// treated as a level name, so "Top of range, 7750" still works as format B.
 isTopKey(string k) =>
     kk = str.lower(str.trim(k))
     kk == "top" or kk == "t" or kk == "hi" or kk == "high"
@@ -190,9 +199,21 @@ addParsed(array<string> outN, array<float> outT, array<float> outB, string nm, f
     outB.push(math.min(a, b))
     0
 
+// Join tokens from index ixA to ixB with single spaces, skipping blanks.
+// NB: the parameters are NOT called from/to — both are reserved words in Pine
+// ("to" is the for-loop keyword) and the declaration fails to parse.
+joinToks(array<string> toks, int ixA, int ixB) =>
+    string out = ""
+    if ixA <= ixB and ixA >= 0
+        for ti = ixA to ixB
+            tk = str.trim(toks.get(ti))
+            if str.length(tk) > 0
+                out := str.length(out) == 0 ? tk : out + " " + tk
+    out
+
 parseLevels(string src, array<string> outN, array<float> outT, array<float> outB, array<int> zSeq, bool matchTicker) =>
-    // Pending halves of a legacy top/bottom pair. Declared at function scope
-    // so a pair can straddle a line break as well as sitting on one line.
+    // Pending halves of a top/bottom pair, at function scope so a pair can
+    // straddle a line break as well as sitting on one line.
     float pTop = na
     float pBot = na
     clean = str.replace_all(src, "\r", "\n")
@@ -206,20 +227,33 @@ parseLevels(string src, array<string> outN, array<float> outT, array<float> outB
             if str.length(ln) > 0
                 string payload = ln
                 bool   use     = true
-                ci = str.pos(ln, ":")
-                if not na(ci)
-                    pre     = str.trim(str.substring(ln, 0, ci))
-                    payload := str.trim(str.substring(ln, ci + 1))
-                    if matchTicker and str.length(payload) > 0
-                        tag = str.replace_all(str.replace_all(pre, "$", ""), "!", "")
-                        use := str.length(tag) >= 2 and
-                             str.lower(str.substring(tag, 0, 2)) == str.lower(str.substring(syminfo.ticker, 0, 2))
 
-                // ── format B: comma-separated name / price pairs ──
-                // Also carries the legacy "top,<price>,bottom,<price>" stream.
-                // Those two keywords are held back and paired into a single
-                // zone rather than becoming two levels literally called "top"
-                // and "bottom".
+                // ── ticker tag ──
+                // Split-based, never index arithmetic: str.pos + str.substring
+                // dropped the leading character of the payload whenever there
+                // was no space after the colon.
+                // A tag is a SHORT SINGLE TOKEN. "Range Daily Max: 24500" is a
+                // name, not a tag, so the colon is simply dissolved and the
+                // words are kept.
+                if str.contains(ln, ":")
+                    cparts = str.split(ln, ":")
+                    pre    = str.trim(cparts.get(0))
+                    rest   = str.trim(joinToks(cparts, 1, cparts.size() - 1))
+                    tag    = str.replace_all(str.replace_all(pre, "$", ""), "!", "")
+                    isTag  = str.length(tag) > 0 and str.length(tag) <= 12 and not str.contains(tag, " ")
+                    if isTag
+                        payload := rest
+                        if matchTicker and str.length(rest) > 0
+                            use := str.length(tag) >= 2 and
+                                 str.lower(str.substring(tag, 0, 2)) == str.lower(str.substring(syminfo.ticker, 0, 2))
+                    else
+                        payload := pre + " " + rest
+                payload := str.trim(str.replace_all(payload, ":", " "))
+
+                // ── format B/C: comma-separated ──
+                // Name/price pairs, plus the legacy "top,<price>,bottom,<price>"
+                // stream, whose keywords are held back and paired into one zone
+                // rather than becoming levels literally called top and bottom.
                 if use and str.length(payload) > 0 and str.contains(payload, ",")
                     toks = str.split(payload, ",")
                     string buf = ""
@@ -230,16 +264,15 @@ parseLevels(string src, array<string> outN, array<float> outT, array<float> outB
                             float rt = na
                             float rb = na
                             if na(num) and str.contains(tk, "-")
-                                dp = str.pos(tk, "-")
-                                a  = str.tonumber(str.trim(str.substring(tk, 0, dp)))
-                                b  = str.tonumber(str.trim(str.substring(tk, dp + 1)))
-                                if not na(a) and not na(b)
-                                    rt := a
-                                    rb := b
+                                dparts = str.split(tk, "-")
+                                if dparts.size() == 2
+                                    a = str.tonumber(str.trim(dparts.get(0)))
+                                    b = str.tonumber(str.trim(dparts.get(1)))
+                                    if not na(a) and not na(b)
+                                        rt := a
+                                        rb := b
                             if not na(num)
                                 if isTopKey(buf)
-                                    // a second top with no bottom between them
-                                    // means the first was really a lone level
                                     if not na(pTop)
                                         addParsed(outN, outT, outB, "Level", pTop, pTop)
                                     pTop := num
@@ -261,7 +294,7 @@ parseLevels(string src, array<string> outN, array<float> outT, array<float> outB
                             else
                                 buf := str.length(buf) == 0 ? tk : buf + " " + tk
 
-                // ── format A: "price [- price] name" ──
+                // ── format A: "price [- price] name", or "name price" ──
                 else if use and str.length(payload) > 0
                     p    = str.replace_all(payload, "-", " - ")
                     toks = str.split(p, " ")
@@ -286,16 +319,26 @@ parseLevels(string src, array<string> outN, array<float> outT, array<float> outB
                                     n1 := v
                                 else
                                     n2 := v
-                    string nm = ""
-                    if nameStart < toks.size()
-                        for ti = nameStart to toks.size() - 1
-                            tk = str.trim(toks.get(ti))
-                            if str.length(tk) > 0
-                                nm := str.length(nm) == 0 ? tk : nm + " " + tk
+
                     if not na(n1)
+                        nm = joinToks(toks, nameStart, toks.size() - 1)
                         addParsed(outN, outT, outB, nm, n1, na(n2) ? n1 : n2)
-    // An unpaired half is a lone price, not half a zone — emit it rather than
-    // dropping it silently.
+                    else
+                        // No leading number — try "name ... price" instead, so
+                        // "Range Daily Max 24500" keeps its name.
+                        float tv   = na
+                        int   tIdx = -1
+                        for ti = toks.size() - 1 to 0
+                            tk = str.trim(toks.get(ti))
+                            if str.length(tk) > 0 and na(tv)
+                                v = str.tonumber(tk)
+                                if not na(v)
+                                    tv   := v
+                                    tIdx := ti
+                        if not na(tv) and tIdx > 0
+                            addParsed(outN, outT, outB, joinToks(toks, 0, tIdx - 1), tv, tv)
+
+    // An unpaired half is a lone price, not half a zone.
     if not na(pTop)
         addParsed(outN, outT, outB, "Level", pTop, pTop)
     if not na(pBot)
@@ -340,7 +383,7 @@ type Band
     string abbr
     color  col
     bool   useFar  = false
-    float  fTop    = na      // fixed top/bottom, used by pasted levels only
+    float  fTop    = na
     float  fBot    = na
     int    side    = 0
     bool   active  = false
@@ -350,11 +393,11 @@ type Band
     bool   farHit  = false
     int    start   = 0
     int    lastSig = -100000
-    bool   swOn    = false   // a break is being watched for a reclaim
+    bool   swOn    = false
     int    swBar   = 0
     int    swDir   = 0
     bool   swAppr  = false
-    int    pKind   = 0       // pending type, 0 = nothing armed
+    int    pKind   = 0
     int    pDir    = 0
     int    pBar    = 0
     float  pRef    = na
@@ -536,7 +579,6 @@ if asiaStart
 if lonStart
     lnX := bar_index
 
-// ── READY GATE ──
 orReady = not na(orH) and (not onlyDone or not orOn)
 asReady = not na(asH) and (not onlyDone or not asiaOn)
 lnReady = not na(lnH) and (not onlyDone or not lonOn)
@@ -569,7 +611,6 @@ drawLvl(lnAsL, asL, asX, cAs, shAs)
 drawLvl(lnLnH, lnH, lnX, cLn, shLn)
 drawLvl(lnLnL, lnL, lnX, cLn, shLn)
 
-// Pasted levels are static, so draw them once and extend both ways.
 if barstate.isfirst and useCust and drawCust and pNames.size() > 0
     sty = custSty == "Solid" ? line.style_solid : custSty == "Dashed" ? line.style_dashed : line.style_dotted
     for i = 0 to pNames.size() - 1
@@ -703,13 +744,13 @@ type Touch
 
 type Setup
     string nm
-    int    dir        // 1 = bullish, -1 = bearish
-    float  gTop       // upper edge of the FVG
-    float  gBot       // lower edge of the FVG
-    float  confP      // price that must be closed through to confirm
+    int    dir
+    float  gTop
+    float  gBot
+    float  confP
     int    fvgBar
     int    fillBar
-    int    st         // 0 = waiting for fill, 1 = filled, waiting for continuation
+    int    st
     box    bx
 
 var map<string, int> lastTouchBar = map.new<string, int>()
@@ -728,7 +769,6 @@ bool   lffcBull = false
 bool   lffcBear = false
 string lffcName = ""
 
-// Confirmed bars only, so setups never repaint mid-bar.
 if useT5 and barstate.isconfirmed and not na(atrv)
     names = array.new<string>()
     tops  = array.new<float>()
@@ -792,8 +832,8 @@ if useT5 and barstate.isconfirmed and not na(atrv)
             box bx = na
             if showFvg
                 bx := box.new(bar_index - 2, gTop, bar_index, gBot,
-                     border_color = color.new(dir == 1 ? color.teal : color.red, 40),
-                     bgcolor = dir == 1 ? cFvgB : cFvgS)
+                     border_color = color.new(dir == 1 ? cFvgUp : cFvgDn, 40),
+                     bgcolor = dir == 1 ? cFvgBoxB : cFvgBoxS)
             setups.push(Setup.new(t.nm, dir, gTop, gBot, cp, bar_index, 0, 0, bx))
             touches.remove(best)
 
@@ -847,7 +887,7 @@ if useT5 and barstate.isconfirmed and not na(atrv)
             if dead
                 if not na(s.bx)
                     if fired
-                        s.bx.set_bgcolor(color.new(s.dir == 1 ? color.teal : color.red, 55))
+                        s.bx.set_bgcolor(color.new(s.dir == 1 ? cFvgUp : cFvgDn, math.max(fvgTr - 20, 0)))
                         s.bx.set_right(bar_index)
                     else
                         box.delete(s.bx)
@@ -905,46 +945,36 @@ anyBear = emaBncS or vwpBncS or orBncS or asBncS or lnBncS or cBncS or
      emaSwpS or vwpSwpS or orSwpS or asSwpS or lnSwpS or cSwpS or lffcBear
 
 // ════════════════════════ MARKERS ════════════════════════
-// Colour = which level family. Shape = signal class:
+// Shape = signal class, colour = level family:
 //   triangle  rejection off a line     (types 1, 2)
-//   diamond   rejection off a zone     (types 1, 2, 3)
+//   diamond   rejection off a pasted level or zone (types 1, 2, 3)
 //   X         sweep                    (type 4)
 //   arrow     FVG continuation         (type 5)
+// Shapes are shared to stay inside the 64-plot budget; if two families fire
+// on the same bar the marker takes the first colour in the order below and
+// the label tooltip still lists every one.
 mkOff = markBack ? -waitN : 0
 lbOff = markBack ?  waitN : 0
 
-plotshape(emaBncB, "EMA bounce up",      shape.triangleup,   location.belowbar, cEma, size = size.tiny, offset = mkOff)
-plotshape(emaBncS, "EMA bounce down",    shape.triangledown, location.abovebar, cEma, size = size.tiny, offset = mkOff)
-plotshape(emaSwpB, "EMA sweep up",       shape.xcross,       location.belowbar, cEma, size = size.tiny, offset = mkOff)
-plotshape(emaSwpS, "EMA sweep down",     shape.xcross,       location.abovebar, cEma, size = size.tiny, offset = mkOff)
+lineBncB  = emaBncB or vwpBncB or orBncB or asBncB or lnBncB
+lineBncS  = emaBncS or vwpBncS or orBncS or asBncS or lnBncS
+lineBncBc = emaBncB ? cEmaUp : vwpBncB ? cVwpUp : orBncB ? cOr : asBncB ? cAs : cLn
+lineBncSc = emaBncS ? cEmaDn : vwpBncS ? cVwpDn : orBncS ? cOr : asBncS ? cAs : cLn
 
-plotshape(vwpBncB, "VWAP bounce up",     shape.triangleup,   location.belowbar, cVwp, size = size.tiny, offset = mkOff)
-plotshape(vwpBncS, "VWAP bounce down",   shape.triangledown, location.abovebar, cVwp, size = size.tiny, offset = mkOff)
-plotshape(vwpSwpB, "VWAP sweep up",      shape.xcross,       location.belowbar, cVwp, size = size.tiny, offset = mkOff)
-plotshape(vwpSwpS, "VWAP sweep down",    shape.xcross,       location.abovebar, cVwp, size = size.tiny, offset = mkOff)
+swpB  = emaSwpB or vwpSwpB or orSwpB or asSwpB or lnSwpB or cSwpB
+swpS  = emaSwpS or vwpSwpS or orSwpS or asSwpS or lnSwpS or cSwpS
+swpBc = emaSwpB ? cEmaUp : vwpSwpB ? cVwpUp : orSwpB ? cOr : asSwpB ? cAs : lnSwpB ? cLn : cCust
+swpSc = emaSwpS ? cEmaDn : vwpSwpS ? cVwpDn : orSwpS ? cOr : asSwpS ? cAs : lnSwpS ? cLn : cCust
 
-plotshape(orBncB,  "OR bounce up",       shape.triangleup,   location.belowbar, cOr,  size = size.tiny, offset = mkOff)
-plotshape(orBncS,  "OR bounce down",     shape.triangledown, location.abovebar, cOr,  size = size.tiny, offset = mkOff)
-plotshape(orSwpB,  "OR sweep up",        shape.xcross,       location.belowbar, cOr,  size = size.tiny, offset = mkOff)
-plotshape(orSwpS,  "OR sweep down",      shape.xcross,       location.abovebar, cOr,  size = size.tiny, offset = mkOff)
+plotshape(lineBncB, "Line bounce up",   shape.triangleup,   location.belowbar, lineBncBc, size = size.tiny, offset = mkOff)
+plotshape(lineBncS, "Line bounce down", shape.triangledown, location.abovebar, lineBncSc, size = size.tiny, offset = mkOff)
+plotshape(cBncB,    "Zone bounce up",   shape.diamond,      location.belowbar, cCust,     size = size.tiny, offset = mkOff)
+plotshape(cBncS,    "Zone bounce down", shape.diamond,      location.abovebar, cCust,     size = size.tiny, offset = mkOff)
+plotshape(swpB,     "Sweep up",         shape.xcross,       location.belowbar, swpBc,     size = size.tiny, offset = mkOff)
+plotshape(swpS,     "Sweep down",       shape.xcross,       location.abovebar, swpSc,     size = size.tiny, offset = mkOff)
 
-plotshape(asBncB,  "Asia bounce up",     shape.triangleup,   location.belowbar, cAs,  size = size.tiny, offset = mkOff)
-plotshape(asBncS,  "Asia bounce down",   shape.triangledown, location.abovebar, cAs,  size = size.tiny, offset = mkOff)
-plotshape(asSwpB,  "Asia sweep up",      shape.xcross,       location.belowbar, cAs,  size = size.tiny, offset = mkOff)
-plotshape(asSwpS,  "Asia sweep down",    shape.xcross,       location.abovebar, cAs,  size = size.tiny, offset = mkOff)
-
-plotshape(lnBncB,  "London bounce up",   shape.triangleup,   location.belowbar, cLn,  size = size.tiny, offset = mkOff)
-plotshape(lnBncS,  "London bounce down", shape.triangledown, location.abovebar, cLn,  size = size.tiny, offset = mkOff)
-plotshape(lnSwpB,  "London sweep up",    shape.xcross,       location.belowbar, cLn,  size = size.tiny, offset = mkOff)
-plotshape(lnSwpS,  "London sweep down",  shape.xcross,       location.abovebar, cLn,  size = size.tiny, offset = mkOff)
-
-plotshape(cBncB,   "Pasted bounce up",   shape.diamond,      location.belowbar, cCust, size = size.tiny, offset = mkOff)
-plotshape(cBncS,   "Pasted bounce down", shape.diamond,      location.abovebar, cCust, size = size.tiny, offset = mkOff)
-plotshape(cSwpB,   "Pasted sweep up",    shape.xcross,       location.belowbar, cCust, size = size.tiny, offset = mkOff)
-plotshape(cSwpS,   "Pasted sweep down",  shape.xcross,       location.abovebar, cCust, size = size.tiny, offset = mkOff)
-
-plotshape(lffcBull, "FVG continuation long",  shape.arrowup,   location.belowbar, color.teal, size = size.small)
-plotshape(lffcBear, "FVG continuation short", shape.arrowdown, location.abovebar, color.red,  size = size.small)
+plotshape(lffcBull, "FVG continuation long",  shape.arrowup,   location.belowbar, cFvgUp, size = size.small)
+plotshape(lffcBear, "FVG continuation short", shape.arrowdown, location.abovebar, cFvgDn, size = size.small)
 
 if showLb and (anyBull or anyBear)
     label.new(bar_index - lbOff, anyBull ? low[lbOff] : high[lbOff], tag,
@@ -953,10 +983,6 @@ if showLb and (anyBull or anyBear)
          textcolor = color.white, size = size.tiny, tooltip = note)
 
 // ════════════════════════ ALERTS ════════════════════════
-// One condition per level family, either direction, any signal type, plus
-// cross-cutting conditions for sweeps and FVG continuations. The dynamic
-// alert() carries full detail but only fires under "Any alert() function
-// call", which covers everything.
 sEma = bEma.hit()
 sVwp = bVwp.hit()
 sOrH = bOrH.hit()
