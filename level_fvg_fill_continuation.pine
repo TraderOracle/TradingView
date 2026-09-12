@@ -1,8 +1,7 @@
 //@version=6
 // ═══════════════════════════════════════════════════════════════════
 //  Level → FVG → Fill → Continuation
-//  1. Price touches a reference level (IBH/IBL, PDH/PDL/PDC, ONH/ONL,
-//     VWAP, EMA, or custom)
+//  1. Price touches a reference level or zone
 //  2. Within N bars a Fair Value Gap prints in the rejection direction
 //  3. Price returns and fills that gap
 //  4. Price closes back through the gap → signal
@@ -13,7 +12,8 @@ indicator("Level → FVG → Fill → Continuation", "LFFC", overlay = true,
 // ─────────────────────────── TYPES ───────────────────────────
 type Touch
     string nm
-    float  px
+    float  top
+    float  bot
     int    bar
 
 type Setup
@@ -28,8 +28,43 @@ type Setup
     int    st         // 0 = waiting for fill, 1 = filled, waiting for continuation
     box    bx
 
-// ─────────────────────────── INPUTS ──────────────────────────
-gLv    = "1 · Levels"
+// ══════════════════ 1 · PASTED LEVELS & ZONES ════════════════
+gCu = "1 · Pasted levels & zones"
+tipTxt = "Two formats, mixable, one entry per line.\n\n" +
+     "A) name/price pairs (commas):\n" +
+     "$NQ1!: vix r1, 29402, vix r2, 29417, VAH, 29488, range daily min, 28743\n\n" +
+     "B) price or price range, then name (spaces):\n" +
+     "7714.00 - 7702.75 Extreme Short\n" +
+     "7606.75 Line in the Sand\n\n" +
+     "Anything before a ':' is a ticker tag and is ignored. Header lines " +
+     "with nothing after the ':' are skipped. Ranges become zones, single " +
+     "numbers become lines. Duplicate names are auto-numbered. ';' also " +
+     "works as a line break."
+useCust  = input.bool(true, "Enable pasted levels", group = gCu)
+txtA     = input.text_area("ES Execution/Target Zones:\n" +
+     "7714.00 - 7702.75 Extreme Short\n" +
+     "7674.00 - 7664.75 Highest Odds Short FTU\n" +
+     "7633.50 - 7624.50 Range Short\n" +
+     "\n" +
+     "7606.75 Line in the Sand\n" +
+     "\n" +
+     "7603.75 - 7594.25 Range Long\n" +
+     "7536.75 - 7526.00 Highest Odds Long FTD\n" +
+     "7493.00 - 7483.75 Extreme Long", "Set A", tooltip = tipTxt, group = gCu)
+txtB     = input.text_area("", "Set B", group = gCu)
+txtC     = input.text_area("", "Set C", group = gCu)
+txtD     = input.text_area("", "Set D", group = gCu)
+matchSym = input.bool(false, "Only use lines whose ticker tag matches this chart", group = gCu)
+drawCust = input.bool(true, "Draw pasted levels", group = gCu)
+custBack = input.int(200, "    Length (bars back)", minval = 1, group = gCu)
+custExt  = input.int(15,  "    Extend right (bars)", minval = 0, group = gCu)
+custCol  = input.color(color.new(color.gray, 20), "    Line / border", group = gCu)
+custFill = input.color(color.new(color.gray, 88), "    Zone fill", group = gCu)
+custSty  = input.string("Dotted", "    Line style", options = ["Solid", "Dashed", "Dotted"], group = gCu)
+custPx   = input.bool(true, "    Show price in label", group = gCu)
+
+// ═══════════════════ 2 · BUILT-IN LEVELS ═════════════════════
+gLv    = "2 · Built-in levels"
 tzIn   = input.string("America/New_York", "Session timezone", group = gLv)
 useIB  = input.bool(true,  "Initial Balance H/L", group = gLv)
 ibSess = input.session("0930-1030", "    IB window", group = gLv)
@@ -39,23 +74,25 @@ onSess = input.session("1800-0930", "    ON window", group = gLv)
 useVW  = input.bool(true,  "Session VWAP", group = gLv)
 useEma = input.bool(true,  "EMA", group = gLv)
 emaLen = input.int(200, "    EMA length", minval = 1, group = gLv)
-cust1  = input.float(0.0, "Custom level 1 (0 = off)", group = gLv)
-cust2  = input.float(0.0, "Custom level 2 (0 = off)", group = gLv)
+showLv = input.bool(true, "Plot built-in levels", group = gLv)
 
-gTc     = "2 · Touch"
+// ═══════════════════════ 3 · TOUCH ═══════════════════════════
+gTc     = "3 · Touch"
 tolMode = input.string("ATR", "Touch tolerance", options = ["ATR", "Ticks", "None"], group = gTc)
 tolAtr  = input.float(0.10, "    ATR multiple", step = 0.05, minval = 0, group = gTc)
 tolTick = input.int(4, "    Ticks", minval = 0, group = gTc)
 cooldn  = input.int(10, "Bars before the same level can re-arm", minval = 1, group = gTc)
 
-gFv     = "3 · FVG"
+// ════════════════════════ 4 · FVG ════════════════════════════
+gFv     = "4 · FVG"
 minLag  = input.int(1, "Min bars from touch to FVG", minval = 0, group = gFv)
 maxLag  = input.int(4, "Max bars from touch to FVG", minval = 1, group = gFv)
 minGap  = input.float(0.10, "Min gap size (× ATR)", step = 0.05, minval = 0, group = gFv)
 minDisp = input.float(0.60, "Min displacement body (× ATR)", step = 0.10, minval = 0, group = gFv)
-needRej = input.bool(true, "FVG must reject the level (close on the correct side)", group = gFv)
+needRej = input.bool(true, "FVG must reject the level (close clear of the zone)", group = gFv)
 
-gFl      = "4 · Fill & continuation"
+// ═══════════ 5 · FILL & CONTINUATION ═════════════════════════
+gFl      = "5 · Fill & continuation"
 fillMode = input.string("Full (far edge)", "Fill requirement",
      options = ["Touch (near edge)", "50% (CE)", "Full (far edge)"], group = gFl)
 maxFill  = input.int(30, "Max bars to fill the gap", minval = 1, group = gFl)
@@ -65,12 +102,117 @@ maxConf  = input.int(15, "Max bars to confirm after the fill", minval = 1, group
 invBuf   = input.float(0.15, "Invalidation buffer beyond gap (× ATR)", step = 0.05, minval = 0, group = gFl)
 oneADay  = input.bool(false, "Only one signal per level per day", group = gFl)
 
-gVi     = "5 · Visuals"
-showLv  = input.bool(true, "Plot levels", group = gVi)
+// ═══════════════════════ 6 · VISUALS ═════════════════════════
+gVi     = "6 · Visuals"
 showFvg = input.bool(true, "Draw FVG boxes", group = gVi)
 showLbl = input.bool(true, "Signal labels", group = gVi)
 bullCol = input.color(color.new(color.teal, 75), "Bull FVG fill", group = gVi)
 bearCol = input.color(color.new(color.red,  75), "Bear FVG fill", group = gVi)
+
+// ════════════════════════ PARSER ═════════════════════════════
+var array<string> pNames = array.new<string>()
+var array<float>  pTops  = array.new<float>()
+var array<float>  pBots  = array.new<float>()
+
+addParsed(array<string> outN, array<float> outT, array<float> outB, string nm, float a, float b) =>
+    base = str.length(str.trim(nm)) == 0 ? "LVL" : str.trim(nm)
+    string fin = base
+    int    k   = 2
+    while outN.includes(fin)
+        fin := base + " (" + str.tostring(k) + ")"
+        k   += 1
+    outN.push(fin)
+    outT.push(math.max(a, b))
+    outB.push(math.min(a, b))
+    0
+
+parseLevels(string src, array<string> outN, array<float> outT, array<float> outB, bool matchTicker) =>
+    clean = str.replace_all(src, "\r", "\n")
+    clean := str.replace_all(clean, ";", "\n")
+    clean := str.replace_all(clean, "–", "-")
+    clean := str.replace_all(clean, "—", "-")
+    if str.length(str.trim(clean)) > 0
+        lines = str.split(clean, "\n")
+        for li = 0 to lines.size() - 1
+            ln = str.trim(lines.get(li))
+            if str.length(ln) > 0
+                string payload = ln
+                bool   use     = true
+                ci = str.pos(ln, ":")
+                if not na(ci)
+                    pre     = str.trim(str.substring(ln, 0, ci))
+                    payload := str.trim(str.substring(ln, ci + 1))
+                    if matchTicker and str.length(payload) > 0
+                        tag = str.replace_all(str.replace_all(pre, "$", ""), "!", "")
+                        use := str.length(tag) >= 2 and
+                             str.lower(str.substring(tag, 0, 2)) == str.lower(str.substring(syminfo.ticker, 0, 2))
+
+                // ── format A: comma-separated name / price pairs ──
+                if use and str.length(payload) > 0 and str.contains(payload, ",")
+                    toks = str.split(payload, ",")
+                    string buf = ""
+                    for ti = 0 to toks.size() - 1
+                        tk = str.trim(toks.get(ti))
+                        if str.length(tk) > 0
+                            num = str.tonumber(tk)
+                            float rt = na
+                            float rb = na
+                            if na(num) and str.contains(tk, "-")
+                                dp = str.pos(tk, "-")
+                                a  = str.tonumber(str.trim(str.substring(tk, 0, dp)))
+                                b  = str.tonumber(str.trim(str.substring(tk, dp + 1)))
+                                if not na(a) and not na(b)
+                                    rt := a
+                                    rb := b
+                            if not na(num)
+                                addParsed(outN, outT, outB, buf, num, num)
+                                buf := ""
+                            else if not na(rt)
+                                addParsed(outN, outT, outB, buf, rt, rb)
+                                buf := ""
+                            else
+                                buf := str.length(buf) == 0 ? tk : buf + " " + tk
+
+                // ── format B: "price [- price] name" ──
+                else if use and str.length(payload) > 0
+                    p    = str.replace_all(payload, "-", " - ")
+                    toks = str.split(p, " ")
+                    float n1   = na
+                    float n2   = na
+                    bool  dash = false
+                    int   nameStart = toks.size()
+                    for ti = 0 to toks.size() - 1
+                        tk = str.trim(toks.get(ti))
+                        if str.length(tk) > 0
+                            if tk == "-"
+                                if na(n1) or not na(n2)
+                                    nameStart := ti
+                                    break
+                                dash := true
+                            else
+                                v = str.tonumber(tk)
+                                if na(v) or (not na(n1) and not dash) or not na(n2)
+                                    nameStart := ti
+                                    break
+                                if na(n1)
+                                    n1 := v
+                                else
+                                    n2 := v
+                    string nm = ""
+                    if nameStart < toks.size()
+                        for ti = nameStart to toks.size() - 1
+                            tk = str.trim(toks.get(ti))
+                            if str.length(tk) > 0
+                                nm := str.length(nm) == 0 ? tk : nm + " " + tk
+                    if not na(n1)
+                        addParsed(outN, outT, outB, nm, n1, na(n2) ? n1 : n2)
+    0
+
+if barstate.isfirst and useCust
+    parseLevels(txtA, pNames, pTops, pBots, matchSym)
+    parseLevels(txtB, pNames, pTops, pBots, matchSym)
+    parseLevels(txtC, pNames, pTops, pBots, matchSym)
+    parseLevels(txtD, pNames, pTops, pBots, matchSym)
 
 // ───────────────────────── LEVEL VALUES ──────────────────────
 atrv   = ta.atr(14)
@@ -80,7 +222,6 @@ var int dayCount = 0
 if newDay
     dayCount += 1
 
-// Initial Balance
 inIB = not na(time(timeframe.period, ibSess, tzIn))
 var float ibH = na
 var float ibL = na
@@ -91,7 +232,6 @@ if inIB
     ibH := na(ibH) ? high : math.max(ibH, high)
     ibL := na(ibL) ? low  : math.min(ibL, low)
 
-// Overnight range
 inON = not na(time(timeframe.period, onSess, tzIn))
 var float onH = na
 var float onL = na
@@ -102,7 +242,6 @@ else if inON
     onH := math.max(onH, high)
     onL := math.min(onL, low)
 
-// Previous day
 [pdH, pdL, pdC] = request.security(syminfo.tickerid, "D", [high[1], low[1], close[1]],
      lookahead = barmerge.lookahead_on)
 
@@ -115,10 +254,11 @@ var map<string, int>  lastSigDay   = map.new<string, int>()
 var array<Touch>      touches      = array.new<Touch>()
 var array<Setup>      setups       = array.new<Setup>()
 
-addLvl(array<string> ns, array<float> vs, bool use, string nm, float v) =>
-    if use and not na(v)
+addLvl(array<string> ns, array<float> ts, array<float> bs, bool use, string nm, float t, float b) =>
+    if use and not na(t) and not na(b)
         ns.push(nm)
-        vs.push(v)
+        ts.push(t)
+        bs.push(b)
     0
 
 bool   sigBull = false
@@ -126,37 +266,38 @@ bool   sigBear = false
 string sigName = ""
 
 // ───────────────────────── ENGINE ────────────────────────────
-// Everything runs on confirmed bars only, so setups never repaint mid-bar.
+// Runs on confirmed bars only, so setups never repaint mid-bar.
 if barstate.isconfirmed and not na(atrv)
 
-    // ── collect active levels ──
     names = array.new<string>()
-    vals  = array.new<float>()
-    addLvl(names, vals, useIB,  "IBH",  ibH)
-    addLvl(names, vals, useIB,  "IBL",  ibL)
-    addLvl(names, vals, usePD,  "PDH",  pdH)
-    addLvl(names, vals, usePD,  "PDL",  pdL)
-    addLvl(names, vals, usePD,  "PDC",  pdC)
-    addLvl(names, vals, useON,  "ONH",  onH)
-    addLvl(names, vals, useON,  "ONL",  onL)
-    addLvl(names, vals, useVW,  "VWAP", vw)
-    addLvl(names, vals, useEma, "EMA" + str.tostring(emaLen), emaV)
-    addLvl(names, vals, cust1 > 0, "CUST1", cust1)
-    addLvl(names, vals, cust2 > 0, "CUST2", cust2)
+    tops  = array.new<float>()
+    bots  = array.new<float>()
+    addLvl(names, tops, bots, useIB,  "IBH",  ibH,  ibH)
+    addLvl(names, tops, bots, useIB,  "IBL",  ibL,  ibL)
+    addLvl(names, tops, bots, usePD,  "PDH",  pdH,  pdH)
+    addLvl(names, tops, bots, usePD,  "PDL",  pdL,  pdL)
+    addLvl(names, tops, bots, usePD,  "PDC",  pdC,  pdC)
+    addLvl(names, tops, bots, useON,  "ONH",  onH,  onH)
+    addLvl(names, tops, bots, useON,  "ONL",  onL,  onL)
+    addLvl(names, tops, bots, useVW,  "VWAP", vw,   vw)
+    addLvl(names, tops, bots, useEma, "EMA" + str.tostring(emaLen), emaV, emaV)
+    if useCust and pNames.size() > 0
+        for i = 0 to pNames.size() - 1
+            addLvl(names, tops, bots, true, pNames.get(i), pTops.get(i), pBots.get(i))
 
-    // ── STEP 1: register touches ──
+    // ── STEP 1: register touches (bar range overlaps the level/zone) ──
     float tol = tolMode == "ATR" ? atrv * tolAtr : tolMode == "Ticks" ? syminfo.mintick * tolTick : 0.0
     if names.size() > 0
         for i = 0 to names.size() - 1
             nm = names.get(i)
-            lv = vals.get(i)
-            if low - tol <= lv and high + tol >= lv
+            tp = tops.get(i)
+            bt = bots.get(i)
+            if low - tol <= tp and high + tol >= bt
                 prev = lastTouchBar.contains(nm) ? lastTouchBar.get(nm) : -999999
                 if bar_index - prev >= cooldn
                     lastTouchBar.put(nm, bar_index)
-                    touches.push(Touch.new(nm, lv, bar_index))
+                    touches.push(Touch.new(nm, tp, bt, bar_index))
 
-    // ── expire stale touches ──
     if touches.size() > 0
         for i = touches.size() - 1 to 0
             if bar_index - touches.get(i).bar > maxLag
@@ -177,7 +318,7 @@ if barstate.isconfirmed and not na(atrv)
             t     = touches.get(i)
             lag   = bar_index - t.bar
             okLag = lag >= minLag and lag <= maxLag
-            okRej = not needRej or (dir == 1 ? close > t.px : close < t.px)
+            okRej = not needRej or (dir == 1 ? close > t.top : close < t.bot)
             if okLag and okRej and best == -1
                 best := i
 
@@ -193,7 +334,7 @@ if barstate.isconfirmed and not na(atrv)
                 bx := box.new(bar_index - 2, gTop, bar_index, gBot,
                      border_color = color.new(dir == 1 ? color.teal : color.red, 40),
                      bgcolor = dir == 1 ? bullCol : bearCol)
-            setups.push(Setup.new(t.nm, dir, gTop, gBot, t.px, cp, bar_index, 0, 0, bx))
+            setups.push(Setup.new(t.nm, dir, gTop, gBot, dir == 1 ? t.top : t.bot, cp, bar_index, 0, 0, bx))
             touches.remove(best)
 
     // ── STEPS 3 & 4: manage open setups ──
@@ -215,7 +356,6 @@ if barstate.isconfirmed and not na(atrv)
 
             blown = s.dir == 1 ? close < s.gBot - buf : close > s.gTop + buf
 
-            // waiting for the retrace
             if s.st == 0
                 filled = s.dir == 1 ? low <= fillP : high >= fillP
                 if filled
@@ -224,7 +364,6 @@ if barstate.isconfirmed and not na(atrv)
                 else if blown or bar_index - s.fvgBar > maxFill
                     dead := true
 
-            // filled — waiting for the continuation close
             if s.st == 1 and not dead
                 conf = s.dir == 1 ? close > s.confP : close < s.confP
                 ok   = not oneADay or not lastSigDay.contains(s.nm) or lastSigDay.get(s.nm) != dayCount
@@ -240,8 +379,8 @@ if barstate.isconfirmed and not na(atrv)
                     if showLbl
                         label.new(bar_index, s.dir == 1 ? low : high,
                              (s.dir == 1 ? "▲ " : "▼ ") + s.nm,
-                             style  = s.dir == 1 ? label.style_label_up : label.style_label_down,
-                             color  = color.new(s.dir == 1 ? color.teal : color.red, 20),
+                             style     = s.dir == 1 ? label.style_label_up : label.style_label_down,
+                             color     = color.new(s.dir == 1 ? color.teal : color.red, 20),
                              textcolor = color.white, size = size.small)
                 else if conf and not ok
                     dead := true
@@ -279,3 +418,43 @@ plot(showLv and useON  ? onH  : na, "ONH",  color.purple,  1, plot.style_linebr)
 plot(showLv and useON  ? onL  : na, "ONL",  color.purple,  1, plot.style_linebr)
 plot(showLv and useVW  ? vw   : na, "VWAP", color.fuchsia, 1)
 plot(showLv and useEma ? emaV : na, "EMA",  color.yellow,  2)
+
+// ─────────── DRAW PASTED LEVELS & ZONES ──────────────────────
+var array<line>  pLines = array.new<line>()
+var array<box>   pBoxes = array.new<box>()
+var array<label> pLabs  = array.new<label>()
+
+if barstate.islast and useCust and drawCust and pNames.size() > 0
+    if pLines.size() > 0
+        for i = 0 to pLines.size() - 1
+            line.delete(pLines.get(i))
+        pLines.clear()
+    if pBoxes.size() > 0
+        for i = 0 to pBoxes.size() - 1
+            box.delete(pBoxes.get(i))
+        pBoxes.clear()
+    if pLabs.size() > 0
+        for i = 0 to pLabs.size() - 1
+            label.delete(pLabs.get(i))
+        pLabs.clear()
+
+    sty   = custSty == "Solid" ? line.style_solid : custSty == "Dashed" ? line.style_dashed : line.style_dotted
+    left  = bar_index - custBack
+    right = bar_index + custExt
+
+    for i = 0 to pNames.size() - 1
+        tp = pTops.get(i)
+        bt = pBots.get(i)
+        if tp == bt
+            pLines.push(line.new(left, tp, right, tp, color = custCol, style = sty, width = 1))
+        else
+            pBoxes.push(box.new(left, tp, right, bt, border_color = custCol,
+                 border_style = sty, border_width = 1, bgcolor = custFill))
+        txt = pNames.get(i) + (custPx ? "  " +
+             (tp == bt ? str.tostring(tp, format.mintick)
+                       : str.tostring(tp, format.mintick) + "–" + str.tostring(bt, format.mintick)) : "")
+        pLabs.push(label.new(right, tp, txt,
+             style     = label.style_label_left,
+             color     = color.new(color.black, 100),
+             textcolor = custCol,
+             size      = size.tiny))
