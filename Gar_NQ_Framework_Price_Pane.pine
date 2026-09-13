@@ -1,0 +1,597 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════════════
+//  NQ CHART FRAMEWORK — PRICE PANE  (1 of 3)
+//  TradingView port of the NinjaTrader NQ day-trading template described in
+//  "Charts – NQ" (update 8-28-26).
+//
+//  PLOT BUDGET NOTE
+//  TradingView allows 64 "plot counts" per script, and a plot() whose value is
+//  conditional counts as TWO. The first build drew every horizontal level with
+//  plot() and came to 110. All horizontal levels are therefore drawn with line
+//  objects instead, which cost nothing against that limit and additionally give
+//  us dashed and dotted styles that plot() cannot do.
+//    plot()           : 6  (4 EMAs, SuperTrend, VWAP)          = 12 counts
+//    plotshape()      : 3  (confluence markers)                =  3 counts
+//    alertcondition() : 9                                      =  9 counts
+//                                                        total = 24 of 64
+// ═══════════════════════════════════════════════════════════════════════════════
+
+indicator("NQ Chart Framework — Price Pane", "NQ FW", overlay = true,
+   max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+
+// ── groups ────────────────────────────────────────────────────────────────────
+G_SES = "1 · Sessions"
+G_EMA = "2 · EMAs"
+G_ST  = "3 · SuperTrend dots"
+G_VW  = "4 · VWAP"
+G_HVB = "5 · High Volume Box"
+G_PIV = "6 · Pivots & Camarilla"
+G_IB  = "7 · Initial Balance"
+G_ORB = "8 · Opening Range"
+G_LVL = "9 · Session / prior-day levels"
+G_ZON = "10 · Hundred-level zones"
+G_SIG = "11 · Signals"
+G_STY = "12 · Style"
+
+// ── sessions ──────────────────────────────────────────────────────────────────
+tzIn    = input.string("America/New_York", "Session timezone", group = G_SES,
+   tooltip = "The write-up quotes Pacific times; 6:35 am PT = 9:35 am ET. Levels are built in exchange time.")
+rthSess = input.session("0930-1600", "RTH session",          group = G_SES)
+onSess  = input.session("1800-0930", "Overnight (Globex)",   group = G_SES)
+lonSess = input.session("0300-0930", "London session",       group = G_SES)
+ahSess  = input.session("1600-1800", "After-hours session",  group = G_SES)
+
+f_in(string s) => not na(time(timeframe.period, s, tzIn))
+
+inRTH = f_in(rthSess)
+inON  = f_in(onSess)
+inLON = f_in(lonSess)
+inAH  = f_in(ahSess)
+
+rthStart = inRTH and not inRTH[1]
+onStart  = inON  and not inON[1]
+lonStart = inLON and not inLON[1]
+ahStart  = inAH  and not inAH[1]
+
+var int rthT0 = na
+if rthStart
+    rthT0 := time
+
+// ── style ─────────────────────────────────────────────────────────────────────
+showLab  = input.bool(true, "Show level name labels", group = G_STY)
+labOff   = input.int(3, "Label offset (bars right)", minval = 0, maxval = 50, group = G_STY)
+dimLvl   = input.int(0, "Level line transparency", minval = 0, maxval = 50, group = G_STY)
+lvlBackI = input.int(0, "Level length (bars back, 0 = since session open)", minval = 0, group = G_STY)
+
+f_t(int add) => math.min(dimLvl + add, 100)
+
+var line[]  LNS = array.new<line>()
+var label[] LBS = array.new<label>()
+
+// Every horizontal level goes through here. Lines and labels do not count
+// against the 64 plot limit, only against max_lines_count / max_labels_count.
+f_lvl(float p, string txt, color c, int wid, string sty, int x1) =>
+    if not na(p)
+        array.push(LNS, line.new(x1, p, bar_index + labOff, p, xloc = xloc.bar_index,
+           color = c, style = sty, width = wid))
+        if showLab
+            array.push(LBS, label.new(bar_index + labOff, p, txt, xloc = xloc.bar_index,
+               style = label.style_label_left, color = color.new(color.black, 100),
+               textcolor = c, size = size.small))
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  1 · EMAs   "The 21 and 120 are the two most important ema lines on the chart."
+// ═══════════════════════════════════════════════════════════════════════════════
+showEma = input.bool(true, "Show EMAs", group = G_EMA)
+len1    = input.int(9,   "EMA 1 — working line", minval = 1, group = G_EMA)
+len2    = input.int(21,  "EMA 2 — primary",      minval = 1, group = G_EMA)
+len3    = input.int(120, "EMA 3 — primary",      minval = 1, group = G_EMA)
+len4    = input.int(200, "EMA 4 — tertiary",     minval = 1, group = G_EMA)
+ema1_1m = input.bool(true, "Only draw EMA 1 on 1-minute and faster", group = G_EMA,
+   tooltip = "The write-up uses the 9 EMA only on the 1-minute, where it shows resistance well during down moves.")
+upCol   = input.color(#00C853, "Up slope",   group = G_EMA, inline = "ec")
+dnCol   = input.color(#FF1744, "Down slope", group = G_EMA, inline = "ec")
+
+e1 = ta.ema(close, len1)
+e2 = ta.ema(close, len2)
+e3 = ta.ema(close, len3)
+e4 = ta.ema(close, len4)
+
+f_col(float s) => s > s[1] ? upCol : dnCol
+
+show1 = showEma and (not ema1_1m or timeframe.in_seconds(timeframe.period) <= 60)
+
+plot(show1   ? e1 : na, "EMA 9",   color = f_col(e1), linewidth = 1)
+plot(showEma ? e2 : na, "EMA 21",  color = f_col(e2), linewidth = 3)
+plot(showEma ? e3 : na, "EMA 120", color = f_col(e3), linewidth = 2)
+plot(showEma ? e4 : na, "EMA 200", color = f_col(e4), linewidth = 1)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  2 · SuperTrend dots
+//      Red dots above price = resistance.  Blue dots under price = support.
+// ═══════════════════════════════════════════════════════════════════════════════
+showST = input.bool(true, "Show SuperTrend dots", group = G_ST)
+stFac  = input.float(3.0, "ATR multiplier", minval = 0.1, step = 0.1, group = G_ST,
+   tooltip = "anaSuperTrendU11's exact defaults are not public. 3.0 / 10 is the classic setting — compare against your NinjaTrader chart and nudge until the flips line up.")
+stLen  = input.int(10, "ATR length", minval = 1, group = G_ST)
+stUpC  = input.color(#00E5FF, "Support dots",    group = G_ST, inline = "sc")
+stDnC  = input.color(#FF1744, "Resistance dots", group = G_ST, inline = "sc")
+
+[stVal, stDir] = ta.supertrend(stFac, stLen)
+
+plot(showST ? stVal : na, "SuperTrend", color = stDir < 0 ? stUpC : stDnC,
+   style = plot.style_circles, linewidth = 2)
+
+stFlipUp = stDir < 0 and stDir[1] > 0
+stFlipDn = stDir > 0 and stDir[1] < 0
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  3 · VWAP — "I use the vwap as target from below or above."
+// ═══════════════════════════════════════════════════════════════════════════════
+showVW = input.bool(true, "Show VWAP", group = G_VW)
+vwAnch = input.string("RTH open", "Anchor", options = ["RTH open", "Globex open", "Calendar day"], group = G_VW)
+vwCol  = input.color(#FFEB3B, "Colour", group = G_VW)
+
+vwCond = vwAnch == "RTH open" ? rthStart : vwAnch == "Globex open" ? onStart : ta.change(time("D")) != 0
+vw     = ta.vwap(hlc3, vwCond)
+
+plot(showVW ? vw : na, "VWAP", color = vwCol, linewidth = 2)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  4 · HIGH VOLUME BOX
+//      "I build a box using the highest volume RTH on the 5 minute and
+//       transpose it to the one minute."
+// ═══════════════════════════════════════════════════════════════════════════════
+showHVB  = input.bool(true, "Show High Volume Box", group = G_HVB)
+hvbTF    = input.timeframe("5", "Source timeframe", group = G_HVB)
+hvb2On   = input.bool(true, "Also show 2nd-highest volume box", group = G_HVB,
+   tooltip = "Second box lower than the first is generally a SOW; higher is generally a SOS.")
+hvbFill  = input.color(color.new(#7B1FA2, 80), "Box fill",   group = G_HVB, inline = "hc")
+hvbEdge  = input.color(color.new(#CE93D8, 40), "Box border", group = G_HVB, inline = "hc")
+hvbMidOn = input.bool(true, "Show box 50% line", group = G_HVB)
+hvbTxtOn = input.bool(true, "Show box readout",  group = G_HVB)
+hvbExt   = input.int(30, "Extend box (bars)", minval = 0, group = G_HVB)
+
+chartSec = timeframe.in_seconds(timeframe.period)
+hvbSec   = timeframe.in_seconds(hvbTF)
+useChart = chartSec >= hvbSec
+
+[xH, xL, xV, xT] = request.security(syminfo.tickerid, hvbTF, [high, low, volume, time],
+   lookahead = barmerge.lookahead_off)
+xRth = request.security(syminfo.tickerid, hvbTF,
+   na(time(timeframe.period, rthSess, tzIn)) ? 0 : 1, lookahead = barmerge.lookahead_off)
+
+srcH   = useChart ? high   : xH
+srcL   = useChart ? low    : xL
+srcV   = useChart ? volume : xV
+srcT   = int(useChart ? time : xT)
+srcR   = useChart ? (inRTH ? 1 : 0) : xRth
+newSrc = useChart ? true : srcT != nz(srcT[1], 0)
+
+var float h1 = na
+var float l1 = na
+var float v1 = na
+var int   t1 = na
+var float h2 = na
+var float l2 = na
+var float v2 = na
+var int   t2 = na
+
+var box   bx1 = na
+var box   bx2 = na
+var line  md1 = na
+var label tx1 = na
+
+if rthStart
+    // freeze the previous session's drawings at the session boundary, then start fresh
+    if not na(bx1)
+        box.set_right(bx1, time)
+    if not na(bx2)
+        box.set_right(bx2, time)
+    if not na(md1)
+        line.set_x2(md1, time)
+    bx1 := na
+    bx2 := na
+    md1 := na
+    tx1 := na
+    h1 := na
+    l1 := na
+    v1 := na
+    t1 := na
+    h2 := na
+    l2 := na
+    v2 := na
+    t2 := na
+
+if newSrc and nz(srcR[1], 0) == 1 and not na(srcV[1])
+    vv = srcV[1]
+    if na(v1) or vv > v1
+        h2 := h1
+        l2 := l1
+        v2 := v1
+        t2 := t1
+        h1 := srcH[1]
+        l1 := srcL[1]
+        v1 := vv
+        t1 := srcT[1]
+    else if na(v2) or vv > v2
+        h2 := srcH[1]
+        l2 := srcL[1]
+        v2 := vv
+        t2 := srcT[1]
+
+hvbMid   = (h1 + l1) / 2
+rightT   = time + hvbExt * chartSec * 1000
+aboveHVB = not na(h1) and close > h1
+belowHVB = not na(l1) and close < l1
+
+if showHVB and not na(t1)
+    if na(bx1)
+        bx1 := box.new(t1, h1, rightT, l1, xloc = xloc.bar_time,
+           border_color = hvbEdge, bgcolor = hvbFill)
+    else
+        box.set_lefttop(bx1, t1, h1)
+        box.set_rightbottom(bx1, rightT, l1)
+    if hvbMidOn
+        if na(md1)
+            md1 := line.new(t1, hvbMid, rightT, hvbMid, xloc = xloc.bar_time,
+               color = hvbEdge, style = line.style_dotted)
+        else
+            line.set_xy1(md1, t1, hvbMid)
+            line.set_xy2(md1, rightT, hvbMid)
+    if hvbTxtOn
+        s = str.tostring(h1, format.mintick) + "   " + str.tostring(l1, format.mintick) +
+           "   " + str.tostring(hvbMid, format.mintick) + "=50%\n" +
+           str.tostring(v1 / 1000, "#.##") + "k   " + str.format_time(t1, "HHmm", tzIn) + "  HVB"
+        if na(tx1)
+            tx1 := label.new(t1, l1, s, xloc = xloc.bar_time, style = label.style_none,
+               textcolor = hvbEdge, size = size.small, textalign = text.align_left)
+        else
+            label.set_xy(tx1, t1, l1)
+            label.set_text(tx1, s)
+
+if showHVB and hvb2On and not na(t2)
+    if na(bx2)
+        bx2 := box.new(t2, h2, rightT, l2, xloc = xloc.bar_time,
+           border_color = color.new(hvbEdge, 65), bgcolor = color.new(hvbFill, 90))
+    else
+        box.set_lefttop(bx2, t2, h2)
+        box.set_rightbottom(bx2, rightT, l2)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  5 · FLOOR PIVOTS + CAMARILLA
+//      "The most important ones are the CS3 – aquamarine – and CR3 – magenta."
+// ═══════════════════════════════════════════════════════════════════════════════
+showPiv = input.bool(true,  "Show floor pivots",        group = G_PIV)
+showCam = input.bool(true,  "Show Camarilla R1-4/S1-4", group = G_PIV)
+pivBase = input.string("Daily (chart session)", "Built from",
+   options = ["Daily (chart session)", "Previous RTH only"], group = G_PIV)
+cr3Col  = input.color(#FF00FF, "CR3", group = G_PIV, inline = "c3")
+cs3Col  = input.color(#00E5FF, "CS3", group = G_PIV, inline = "c3")
+camCol  = input.color(#B388FF, "Other Cam", group = G_PIV, inline = "c3")
+pivCol  = input.color(#FF7043, "Pivots",    group = G_PIV, inline = "c3")
+
+[dH, dL, dC] = request.security(syminfo.tickerid, "D", [high[1], low[1], close[1]],
+   lookahead = barmerge.lookahead_on)
+dO = request.security(syminfo.tickerid, "D", open[1], lookahead = barmerge.lookahead_on)
+
+var float rH = na
+var float rL = na
+var float rC = na
+var float prH = na
+var float prL = na
+var float prC = na
+if rthStart
+    prH := rH
+    prL := rL
+    prC := rC
+    rH := high
+    rL := low
+else if inRTH
+    rH := math.max(nz(rH, high), high)
+    rL := math.min(nz(rL, low),  low)
+if inRTH
+    rC := close
+
+useRth = pivBase == "Previous RTH only"
+bH = useRth ? prH : dH
+bL = useRth ? prL : dL
+bC = useRth ? prC : dC
+rg = bH - bL
+
+pp = (bH + bL + bC) / 3
+r1 = 2 * pp - bL
+s1 = 2 * pp - bH
+r2 = pp + rg
+s2 = pp - rg
+r3 = bH + 2 * (pp - bL)
+s3 = bL - 2 * (bH - pp)
+
+cr4 = bC + rg * 1.1 / 2
+cr3 = bC + rg * 1.1 / 4
+cr2 = bC + rg * 1.1 / 6
+cr1 = bC + rg * 1.1 / 12
+cs1 = bC - rg * 1.1 / 12
+cs2 = bC - rg * 1.1 / 6
+cs3 = bC - rg * 1.1 / 4
+cs4 = bC - rg * 1.1 / 2
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  6 · INITIAL BALANCE + EXTENSIONS
+//      "Use 50% and find the midpoint. Then extend price above and below."
+// ═══════════════════════════════════════════════════════════════════════════════
+showIB  = input.bool(true, "Show Initial Balance", group = G_IB)
+ibMin   = input.int(60, "IB length (minutes)", minval = 5, group = G_IB)
+ibFar   = input.bool(false, "Also show 150 / 200 / 250%", group = G_IB,
+   tooltip = "The write-up extends to 200% and 250% on trend days.")
+ibCol   = input.color(#FFAB40, "IB colour", group = G_IB)
+
+var float ibH = na
+var float ibL = na
+var bool  ibLock = false
+if rthStart
+    ibH := high
+    ibL := low
+    ibLock := false
+else if inRTH and not ibLock
+    if time < rthT0 + ibMin * 60000
+        ibH := math.max(ibH, high)
+        ibL := math.min(ibL, low)
+    else
+        ibLock := true
+
+ibR   = ibH - ibL
+ibMid = (ibH + ibL) / 2
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  7 · OPENING RANGE  (the "15 orb" annotation on the NinjaTrader charts)
+// ═══════════════════════════════════════════════════════════════════════════════
+showORB = input.bool(true, "Show opening range", group = G_ORB)
+orbMin  = input.int(15, "Opening range (minutes)", minval = 1, group = G_ORB)
+orbCol  = input.color(#80CBC4, "Colour", group = G_ORB)
+
+var float orbH = na
+var float orbL = na
+var bool  orbLock = false
+if rthStart
+    orbH := high
+    orbL := low
+    orbLock := false
+else if inRTH and not orbLock
+    if time < rthT0 + orbMin * 60000
+        orbH := math.max(orbH, high)
+        orbL := math.min(orbL, low)
+    else
+        orbLock := true
+
+orbMid = (orbH + orbL) / 2
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  8 · SESSION / PRIOR-DAY LEVELS
+// ═══════════════════════════════════════════════════════════════════════════════
+showON  = input.bool(true,  "Overnight high / low",   group = G_LVL)
+showLON = input.bool(true,  "London high / low",      group = G_LVL)
+showAH  = input.bool(false, "After-hours high / low", group = G_LVL)
+showPD  = input.bool(true,  "Prior day O/H/L/C",      group = G_LVL)
+showMO  = input.bool(true,  "Midnight open",          group = G_LVL)
+showRO  = input.bool(true,  "RTH open",               group = G_LVL)
+lvlCol  = input.color(#FF9800, "Colour", group = G_LVL)
+
+var float onHi = na
+var float onLo = na
+if onStart
+    onHi := high
+    onLo := low
+else if inON
+    onHi := math.max(onHi, high)
+    onLo := math.min(onLo, low)
+
+var float lonHi = na
+var float lonLo = na
+if lonStart
+    lonHi := high
+    lonLo := low
+else if inLON
+    lonHi := math.max(lonHi, high)
+    lonLo := math.min(lonLo, low)
+
+var float ahHi = na
+var float ahLo = na
+if ahStart
+    ahHi := high
+    ahLo := low
+else if inAH
+    ahHi := math.max(ahHi, high)
+    ahLo := math.min(ahLo, low)
+
+var float midnO = na
+if ta.change(dayofmonth(time, tzIn)) != 0
+    midnO := open
+
+var float rthO = na
+if rthStart
+    rthO := open
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  9 · HUNDRED-LEVEL ZONES
+//      "This zone consists of 95 to 06.25 with 01.25 an important number
+//       between."  Measured around every X00 handle.
+// ═══════════════════════════════════════════════════════════════════════════════
+showZone = input.bool(true, "Show 100-level zones", group = G_ZON)
+zoneLo   = input.float(-5.00, "Zone bottom offset from X00", step = 0.25, group = G_ZON)
+zoneHi   = input.float( 6.25, "Zone top offset from X00",    step = 0.25, group = G_ZON)
+zoneKey  = input.float( 1.25, "Key level offset from X00",   step = 0.25, group = G_ZON)
+zoneN    = input.int(2, "Zones above / below price", minval = 0, maxval = 6, group = G_ZON)
+zoneBack = input.int(250, "Zone width (bars back)", minval = 20, group = G_ZON)
+zoneCol  = input.color(color.new(#FFFFFF, 92), "Zone fill", group = G_ZON, inline = "zc")
+zoneKCol = input.color(color.new(#FFFFFF, 55), "Key line",  group = G_ZON, inline = "zc")
+
+var box[] ZB = array.new<box>()
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  10 · SIGNALS
+// ═══════════════════════════════════════════════════════════════════════════════
+sigOn   = input.bool(true, "Show confluence markers", group = G_SIG)
+tsiLong = input.int(25, "TSI long smoothing",  minval = 1, group = G_SIG)
+tsiShrt = input.int(13, "TSI short smoothing", minval = 1, group = G_SIG)
+tsiSigL = input.int(7,  "TSI signal EMA",      minval = 1, group = G_SIG)
+rsiLen  = input.int(9,  "RSI length",          minval = 1, group = G_SIG)
+
+mom    = ta.change(close)
+dsNum  = ta.ema(ta.ema(mom, tsiLong), tsiShrt)
+dsDen  = ta.ema(ta.ema(math.abs(mom), tsiLong), tsiShrt)
+tsi    = dsDen != 0 ? 100 * dsNum / dsDen : 0.0
+tsiSig = ta.ema(tsi, tsiSigL)
+rsiV   = ta.rsi(close, rsiLen)
+
+pinkOver = tsi > tsiSig
+
+// "When RSI crosses the 50 line and the anaTSIUniversal has pink crossing white
+//  the 21 ema on the 1 minute will be crossed. This can be an entry."
+longEntry  = ta.crossover(close, e2)  and pinkOver     and rsiV > 50
+shortEntry = ta.crossunder(close, e2) and not pinkOver and rsiV < 50
+
+// "If 1 minute 21 EMA is upward sloped and the pink line stays above the white
+//  line, if the 21 is touched from above that is a place to enter a high
+//  probability long."
+touchLong = e2 > e2[1] and pinkOver and low <= e2 and close > e2 and low[1] > e2[1]
+
+// HVB breakout — "Break the top or bottom of HVB and run."
+hvbBreakUp = not na(h1) and close > h1 and close[1] <= h1
+hvbBreakDn = not na(l1) and close < l1 and close[1] >= l1
+
+plotshape(sigOn and longEntry,  "Long  (21 EMA + TSI + RSI)", style = shape.triangleup,
+   location = location.belowbar, color = #00C853, size = size.tiny)
+plotshape(sigOn and shortEntry, "Short (21 EMA + TSI + RSI)", style = shape.triangledown,
+   location = location.abovebar, color = #FF1744, size = size.tiny)
+plotshape(sigOn and touchLong,  "21 EMA touch from above",    style = shape.circle,
+   location = location.belowbar, color = #B2FF59, size = size.tiny)
+
+alertcondition(longEntry,  "NQ FW · Long confluence",      "21 EMA crossed up, pink over white, RSI > 50")
+alertcondition(shortEntry, "NQ FW · Short confluence",     "21 EMA lost, pink under white, RSI < 50")
+alertcondition(touchLong,  "NQ FW · 21 EMA touch long",    "Up-sloped 21 EMA touched from above with pink over white")
+alertcondition(stFlipUp,   "NQ FW · SuperTrend flip up",   "SuperTrend flipped to support")
+alertcondition(stFlipDn,   "NQ FW · SuperTrend flip down", "SuperTrend flipped to resistance")
+alertcondition(hvbBreakUp, "NQ FW · HVB break up",         "Price closed above the High Volume Box")
+alertcondition(hvbBreakDn, "NQ FW · HVB break down",       "Price closed below the High Volume Box")
+alertcondition(ta.crossover(close, cr3),  "NQ FW · CR3 break up",   "Closed above CR3 — SOS if it holds")
+alertcondition(ta.crossunder(close, cs3), "NQ FW · CS3 break down", "Closed below CS3 — SOW if it holds")
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  11 · STATUS TABLE
+// ═══════════════════════════════════════════════════════════════════════════════
+tblOn  = input.bool(true, "Show status table", group = G_STY)
+tblPos = input.string("Top right", "Position", options = ["Top right", "Bottom right", "Bottom left"], group = G_STY)
+
+var table T = table.new(
+   tblPos == "Top right" ? position.top_right : tblPos == "Bottom right" ? position.bottom_right : position.bottom_left,
+   2, 7, border_width = 1, frame_width = 1, frame_color = color.new(color.gray, 60))
+
+f_cell(int r, string k, string v, color c) =>
+    table.cell(T, 0, r, k, text_color = color.new(color.gray, 10), text_size = size.small, text_halign = text.align_left)
+    table.cell(T, 1, r, v, text_color = c, text_size = size.small, text_halign = text.align_right)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  LAST-BAR DRAWING
+// ═══════════════════════════════════════════════════════════════════════════════
+barsDay = math.min(nz(ta.barssince(rthStart), 300), 1500)
+xDay    = bar_index - (lvlBackI > 0 ? lvlBackI : math.max(barsDay, 30))
+
+if barstate.islast
+    while array.size(LNS) > 0
+        line.delete(array.pop(LNS))
+    while array.size(LBS) > 0
+        label.delete(array.pop(LBS))
+
+    // pivots ------------------------------------------------------------------
+    if showPiv
+        f_lvl(pp, "PP", color.new(pivCol, f_t(0)),  3, line.style_solid, xDay)
+        f_lvl(r1, "R1", color.new(pivCol, f_t(30)), 1, line.style_solid, xDay)
+        f_lvl(r2, "R2", color.new(pivCol, f_t(30)), 1, line.style_solid, xDay)
+        f_lvl(r3, "R3", color.new(pivCol, f_t(30)), 1, line.style_solid, xDay)
+        f_lvl(s1, "S1", color.new(pivCol, f_t(30)), 1, line.style_solid, xDay)
+        f_lvl(s2, "S2", color.new(pivCol, f_t(30)), 1, line.style_solid, xDay)
+        f_lvl(s3, "S3", color.new(pivCol, f_t(30)), 1, line.style_solid, xDay)
+
+    // camarilla — CR3 magenta and CS3 aqua carry the weight --------------------
+    if showCam
+        f_lvl(cr4, "CR4", color.new(camCol, f_t(0)), 1, line.style_solid,  xDay)
+        f_lvl(cr3, "CR3", color.new(cr3Col, f_t(0)), 3, line.style_dashed, xDay)
+        f_lvl(cr2, "CR2", color.new(camCol, f_t(0)), 1, line.style_solid,  xDay)
+        f_lvl(cr1, "CR1", color.new(camCol, f_t(0)), 1, line.style_solid,  xDay)
+        f_lvl(cs1, "CS1", color.new(camCol, f_t(0)), 1, line.style_solid,  xDay)
+        f_lvl(cs2, "CS2", color.new(camCol, f_t(0)), 1, line.style_solid,  xDay)
+        f_lvl(cs3, "CS3", color.new(cs3Col, f_t(0)), 3, line.style_dashed, xDay)
+        f_lvl(cs4, "CS4", color.new(camCol, f_t(0)), 1, line.style_solid,  xDay)
+
+    // initial balance ---------------------------------------------------------
+    if showIB
+        f_lvl(ibH,   "IB hi",  color.new(ibCol, f_t(0)),  2, line.style_solid,  xDay)
+        f_lvl(ibL,   "IB lo",  color.new(ibCol, f_t(0)),  2, line.style_solid,  xDay)
+        f_lvl(ibMid, "50% ib", color.new(ibCol, f_t(40)), 1, line.style_dotted, xDay)
+        f_lvl(ibH + ibR * 0.5, "u 50%",  color.new(ibCol, f_t(25)), 1, line.style_dashed, xDay)
+        f_lvl(ibH + ibR * 1.0, "u 100%", color.new(ibCol, f_t(25)), 1, line.style_dashed, xDay)
+        f_lvl(ibL - ibR * 0.5, "d 50%",  color.new(ibCol, f_t(25)), 1, line.style_dashed, xDay)
+        f_lvl(ibL - ibR * 1.0, "d 100%", color.new(ibCol, f_t(25)), 1, line.style_dashed, xDay)
+        if ibFar
+            f_lvl(ibH + ibR * 1.5, "u 150%", color.new(ibCol, f_t(45)), 1, line.style_dashed, xDay)
+            f_lvl(ibH + ibR * 2.0, "u 200%", color.new(ibCol, f_t(45)), 1, line.style_dashed, xDay)
+            f_lvl(ibH + ibR * 2.5, "u 250%", color.new(ibCol, f_t(45)), 1, line.style_dashed, xDay)
+            f_lvl(ibL - ibR * 1.5, "d 150%", color.new(ibCol, f_t(45)), 1, line.style_dashed, xDay)
+            f_lvl(ibL - ibR * 2.0, "d 200%", color.new(ibCol, f_t(45)), 1, line.style_dashed, xDay)
+            f_lvl(ibL - ibR * 2.5, "d 250%", color.new(ibCol, f_t(45)), 1, line.style_dashed, xDay)
+
+    // opening range -----------------------------------------------------------
+    if showORB
+        f_lvl(orbH,   "orb hi",  color.new(orbCol, f_t(0)),  1, line.style_solid,  xDay)
+        f_lvl(orbL,   "orb lo",  color.new(orbCol, f_t(0)),  1, line.style_solid,  xDay)
+        f_lvl(orbMid, "orb mid", color.new(orbCol, f_t(40)), 1, line.style_dotted, xDay)
+
+    // session and prior-day levels --------------------------------------------
+    if showON
+        f_lvl(onHi, "ONHI", color.new(lvlCol, f_t(0)), 1, line.style_solid, xDay)
+        f_lvl(onLo, "ONLO", color.new(lvlCol, f_t(0)), 1, line.style_solid, xDay)
+    if showLON
+        f_lvl(lonHi, "LH", color.new(lvlCol, f_t(35)), 1, line.style_dashed, xDay)
+        f_lvl(lonLo, "LL", color.new(lvlCol, f_t(35)), 1, line.style_dashed, xDay)
+    if showAH
+        f_lvl(ahHi, "AH", color.new(lvlCol, f_t(45)), 1, line.style_dashed, xDay)
+        f_lvl(ahLo, "AL", color.new(lvlCol, f_t(45)), 1, line.style_dashed, xDay)
+    if showPD
+        f_lvl(dH, "PDH", color.new(#BDBDBD, f_t(20)), 1, line.style_solid,  xDay)
+        f_lvl(dL, "PDL", color.new(#BDBDBD, f_t(20)), 1, line.style_solid,  xDay)
+        f_lvl(dC, "PDC", color.new(#BDBDBD, f_t(40)), 1, line.style_dotted, xDay)
+        f_lvl(dO, "PDO", color.new(#BDBDBD, f_t(40)), 1, line.style_dotted, xDay)
+    if showMO
+        f_lvl(midnO, "midn", color.new(#FFFFFF, f_t(45)), 1, line.style_dotted, xDay)
+    if showRO
+        f_lvl(rthO, "reo", color.new(#FFFFFF, f_t(45)), 1, line.style_dotted, xDay)
+    if showVW and showLab
+        array.push(LBS, label.new(bar_index + labOff, vw, "VWAP", xloc = xloc.bar_index,
+           style = label.style_label_left, color = color.new(color.black, 100),
+           textcolor = vwCol, size = size.small))
+
+    // hundred-level zones -----------------------------------------------------
+    while array.size(ZB) > 0
+        box.delete(array.pop(ZB))
+    if showZone
+        baseLvl = math.floor(close / 100) * 100
+        for i = -zoneN to zoneN
+            lv = baseLvl + i * 100
+            array.push(ZB, box.new(bar_index - zoneBack, lv + zoneHi, bar_index + labOff, lv + zoneLo,
+               xloc = xloc.bar_index, border_color = color.new(color.white, 100), bgcolor = zoneCol))
+            array.push(LNS, line.new(bar_index - zoneBack, lv + zoneKey, bar_index + labOff, lv + zoneKey,
+               xloc = xloc.bar_index, color = zoneKCol, style = line.style_dotted))
+
+    // status table ------------------------------------------------------------
+    if tblOn
+        f_cell(0, "21 EMA",  e2 > e2[1] ? "up" : "down", e2 > e2[1] ? upCol : dnCol)
+        f_cell(1, "120 EMA", e3 > e3[1] ? "up" : "down", e3 > e3[1] ? upCol : dnCol)
+        f_cell(2, "SuperTrend", stDir < 0 ? "support" : "resistance", stDir < 0 ? stUpC : stDnC)
+        f_cell(3, "vs HVB", na(h1) ? "n/a" : aboveHVB ? "above" : belowHVB ? "below" : "inside",
+           na(h1) ? color.gray : aboveHVB ? upCol : belowHVB ? dnCol : color.new(color.gray, 10))
+        f_cell(4, "vs VWAP", close > vw ? "above" : "below", close > vw ? upCol : dnCol)
+        f_cell(5, "CR3 / CS3", close > cr3 ? "over CR3" : close < cs3 ? "under CS3" : "between",
+           close > cr3 ? upCol : close < cs3 ? dnCol : color.new(color.gray, 10))
+        f_cell(6, "TSI / RSI", (pinkOver ? "pink>white" : "pink<white") + "  " + str.tostring(rsiV, "#.#"),
+           pinkOver and rsiV > 50 ? upCol : not pinkOver and rsiV < 50 ? dnCol : color.new(color.gray, 10))

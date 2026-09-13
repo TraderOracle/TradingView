@@ -1,0 +1,84 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════════════
+//  anaTSI UNIVERSAL — clone  (2 of 3)
+//  Sub-pane companion to "NQ Chart Framework — Price Pane".
+//
+//  From the write-up:
+//    "The anaTSIuniversal is composed of two lines – one pink and one white.
+//     When pink crosses the white strength is coming into price. When pink
+//     crosses under the white then weakness is showing up. The zero red line,
+//     when crossed with price moving up is a SOS and when crossed down is SOW.
+//     The histogram shows relative strength or weakness above or below the
+//     zero line."
+//
+//  Verified against the 7/16/26 chart: the axis read pink 14.19, white 21.5,
+//  histogram -7.31.  14.19 - 21.5 = -7.31, so the histogram is TSI minus
+//  signal, NOT the TSI itself.  Band lines measured off four charts sit at
+//  roughly +25 (grey dashed) and -20 (green dashed) with zero in red dashed.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+indicator("anaTSI Universal (clone)", "TSI-U", overlay = false, precision = 2)
+
+G_CALC = "1 · Calculation"
+G_BAND = "2 · Bands"
+G_STY  = "3 · Style"
+
+// ── calculation ───────────────────────────────────────────────────────────────
+src    = input.source(close, "Source",             group = G_CALC)
+lenLg  = input.int(25, "Long smoothing (r)",  minval = 1, group = G_CALC)
+lenSh  = input.int(13, "Short smoothing (s)", minval = 1, group = G_CALC)
+lenSig = input.int(7,  "Signal EMA",          minval = 1, group = G_CALC,
+   tooltip = "Controls how far the white line lags the pink. On the source charts the white line peaks roughly 3-4 bars after pink, which is consistent with a 7-period EMA. Raise it toward 13 if your white line turns too early.")
+sigTyp = input.string("EMA", "Signal type", options = ["EMA", "SMA"], group = G_CALC)
+
+mom   = ta.change(src)
+dsNum = ta.ema(ta.ema(mom, lenLg), lenSh)
+dsDen = ta.ema(ta.ema(math.abs(mom), lenLg), lenSh)
+
+tsi    = dsDen != 0 ? 100 * dsNum / dsDen : 0.0
+signal = sigTyp == "EMA" ? ta.ema(tsi, lenSig) : ta.sma(tsi, lenSig)
+hist   = tsi - signal
+
+// ── bands ─────────────────────────────────────────────────────────────────────
+bandUp = input.float( 25, "Upper band", step = 1, group = G_BAND)
+bandDn = input.float(-20, "Lower band", step = 1, group = G_BAND)
+
+// ── style ─────────────────────────────────────────────────────────────────────
+pinkCol = input.color(#FF00FF, "TSI (pink)",  group = G_STY, inline = "l")
+whitCol = input.color(#FFFFFF, "Signal (white)", group = G_STY, inline = "l")
+histCol = input.color(#00E5FF, "Histogram", group = G_STY, inline = "h")
+histSgn = input.bool(false, "Colour histogram by sign", group = G_STY, inline = "h",
+   tooltip = "The source charts use one flat colour for every bar. Turn this on if you would rather see the sign.")
+shadeOn = input.bool(true, "Shade between pink and white", group = G_STY)
+
+hc = histSgn ? (hist >= 0 ? #00C853 : #FF1744) : histCol
+
+plot(hist, "Histogram", color = hc, style = plot.style_columns, linewidth = 3)
+
+pT = plot(tsi,    "TSI (pink)",     color = pinkCol, linewidth = 2)
+pS = plot(signal, "Signal (white)", color = whitCol, linewidth = 2)
+
+fill(pT, pS, color = shadeOn ? (tsi > signal ? color.new(#00C853, 82) : color.new(#FF1744, 82)) : color.new(color.white, 100),
+   title = "Strength / weakness shading")
+
+hline(0,       "Zero",       color = #CD0404, linestyle = hline.style_dashed, linewidth = 1)
+hline(bandUp,  "Upper band", color = color.new(#B0B0B0, 30), linestyle = hline.style_dashed)
+hline(bandDn,  "Lower band", color = color.new(#28D828, 20), linestyle = hline.style_dashed)
+
+// ── signals ───────────────────────────────────────────────────────────────────
+xUp   = ta.crossover(tsi, signal)     // pink crosses white — strength coming in
+xDn   = ta.crossunder(tsi, signal)    // pink crosses under white — weakness
+zUp   = ta.crossover(tsi, 0)          // SOS
+zDn   = ta.crossunder(tsi, 0)         // SOW
+
+showX = input.bool(true, "Mark pink/white crosses", group = G_STY)
+
+plotshape(showX and xUp, "Pink over white",  style = shape.triangleup,
+   location = location.bottom, color = #00C853, size = size.tiny)
+plotshape(showX and xDn, "Pink under white", style = shape.triangledown,
+   location = location.top,    color = #FF1744, size = size.tiny)
+
+alertcondition(xUp, "TSI-U · Pink crosses over white",  "Strength coming into price")
+alertcondition(xDn, "TSI-U · Pink crosses under white", "Weakness showing up")
+alertcondition(zUp, "TSI-U · Zero cross up",            "SOS — TSI crossed zero from below")
+alertcondition(zDn, "TSI-U · Zero cross down",          "SOW — TSI crossed zero from above")

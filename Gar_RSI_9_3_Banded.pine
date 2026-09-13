@@ -1,0 +1,83 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════════════
+//  RSI 9,3 — BANDED 50 / 20  (3 of 3)
+//  Sub-pane companion to "NQ Chart Framework — Price Pane".
+//
+//  From the write-up:
+//    "RSI uses a 9,3 setting. It is banded by 50 on top and 20 on the bottom.
+//     When RSI crosses the 50 line and the anaTSIUniversal has pink crossing
+//     white the 21 ema on the 1 minute will be crossed. This can be an entry.
+//     The RSI is banded by 20 at the bottom because when that breaks –
+//     particularly on the 5 minute chart – then expect price to break up as
+//     the bottom of the band (20) is broken back up."
+//
+//  Levels measured off the 8/23/26 and 8/21/26 charts, pixel-calibrated
+//  against the axis: red solid 80, yellow dashed 60, blue solid 50,
+//  peach dashed 40, band fill from 50 down to 20.
+//
+//  The 9,3 pair is NinjaTrader's Period / Smooth. NinjaTrader computes a
+//  Wilder RSI of length 9 and an SMA of it of length 3 ("Avg"). The single
+//  green line on the source charts is the RSI plot; the Avg is available
+//  below as an option.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+indicator("RSI 9,3 — Banded 50/20", "RSI 9,3", overlay = false, precision = 2,
+   scale = scale.right)
+
+G_CALC = "1 · Calculation"
+G_LVL  = "2 · Levels"
+G_STY  = "3 · Style"
+
+// ── calculation ───────────────────────────────────────────────────────────────
+src     = input.source(close, "Source", group = G_CALC)
+lenRsi  = input.int(9, "RSI period",  minval = 1, group = G_CALC)
+lenSm   = input.int(3, "Smooth (NinjaTrader 'Smooth')", minval = 1, group = G_CALC)
+showAvg = input.bool(false, "Show the smoothed Avg line too", group = G_CALC,
+   tooltip = "NinjaTrader's RSI carries two plots. Only one green line is visible on the source charts, so the Avg is off by default.")
+
+r   = ta.rsi(src, lenRsi)
+avg = ta.sma(r, lenSm)
+
+// ── levels ────────────────────────────────────────────────────────────────────
+lvl80   = input.float(80, "Overbought (red solid)",    step = 1, group = G_LVL)
+lvl60   = input.float(60, "Upper mid (yellow dashed)", step = 1, group = G_LVL)
+lvlTop  = input.float(50, "Band top (blue solid)",     step = 1, group = G_LVL)
+lvl40   = input.float(40, "Lower mid (peach dashed)",  step = 1, group = G_LVL)
+lvlBot  = input.float(20, "Band bottom",               step = 1, group = G_LVL)
+
+// ── style ─────────────────────────────────────────────────────────────────────
+rsiCol   = input.color(#22B14C, "RSI line", group = G_STY)
+bandCol  = input.color(color.new(#7B1FA2, 55), "Band fill", group = G_STY)
+bandOn   = input.bool(true, "Shade the 50–20 band", group = G_STY)
+markOn   = input.bool(true, "Mark 50 and 20 crosses", group = G_STY)
+
+plot(r, "RSI", color = rsiCol, linewidth = 2)
+plot(showAvg ? avg : na, "Avg", color = color.new(#9CCC65, 20), linewidth = 1)
+
+h80  = hline(lvl80,  "80", color = #FF0404, linestyle = hline.style_solid,  linewidth = 2)
+h60  = hline(lvl60,  "60", color = #DBA623, linestyle = hline.style_dashed, linewidth = 1)
+hTop = hline(lvlTop, "50", color = #2292FF, linestyle = hline.style_solid,  linewidth = 1)
+h40  = hline(lvl40,  "40", color = #E37E5B, linestyle = hline.style_dashed, linewidth = 1)
+hBot = hline(lvlBot, "20", color = color.new(#2292FF, 40), linestyle = hline.style_solid, linewidth = 1)
+
+fill(hTop, hBot, color = bandOn ? bandCol : color.new(color.white, 100), title = "50-20 band")
+
+// ── signals ───────────────────────────────────────────────────────────────────
+x50Up = ta.crossover(r, lvlTop)     // pairs with pink-over-white for the 21 EMA cross
+x50Dn = ta.crossunder(r, lvlTop)
+x20Up = ta.crossover(r, lvlBot)     // the band break the write-up calls out
+x20Dn = ta.crossunder(r, lvlBot)
+hot80 = ta.crossover(r, lvl80)      // expect corrective action at some point
+
+plotshape(markOn and x50Up ? r : na, "RSI over 50",  style = shape.circle,
+   location = location.absolute, color = #00C853, size = size.tiny)
+plotshape(markOn and x50Dn ? r : na, "RSI under 50", style = shape.circle,
+   location = location.absolute, color = #FF1744, size = size.tiny)
+plotshape(markOn and x20Up, "RSI back over 20", style = shape.triangleup, location = location.bottom,
+   color = #B2FF59, size = size.tiny)
+
+alertcondition(x50Up, "RSI 9,3 · Crossed 50 up",   "RSI crossed 50 from below")
+alertcondition(x50Dn, "RSI 9,3 · Crossed 50 down", "RSI crossed 50 from above")
+alertcondition(x20Up, "RSI 9,3 · Band break back up", "RSI broke back above 20 — expect price to break up")
+alertcondition(x20Dn, "RSI 9,3 · Lost the 20 band",   "RSI broke under 20 — price can run further before the turn")
+alertcondition(hot80, "RSI 9,3 · Reached 80",         "Expect corrective action at some point, or a trend day")
