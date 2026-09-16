@@ -1,0 +1,225 @@
+//@version=6
+indicator("FitMom Strategy", shorttitle = "FitMom Strategy", overlay = true, max_lines_count = 500, max_labels_count = 500)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INPUTS
+// ─────────────────────────────────────────────────────────────────────────────
+grpS = "Sessions"
+tzIn         = input.string("America/Chicago", "Timezone", group = grpS, tooltip = "America/Chicago handles CST/CDT automatically.")
+nySessIn     = input.session("0830-1500", "NY session (profile built here)", group = grpS)
+nightSessIn  = input.session("1700-0500", "Level display window", group = grpS)
+rangeSessIn  = input.session("1800-1900", "High/Low window", group = grpS)
+
+grpP = "Volume Profile"
+rowsIn  = input.int(1000, "Profile rows", minval = 10, maxval = 1000, group = grpP, tooltip = "More rows = finer price resolution for POC/VAH/VAL.")
+vaPctIn = input.float(70, "Value area %", minval = 10, maxval = 100, step = 1, group = grpP) / 100
+
+grpL = "Value Area Levels"
+showPOC    = input.bool(true, "POC", inline = "poc", group = grpL)
+pocCol     = input.color(color.orange, "", inline = "poc", group = grpL)
+showVAH    = input.bool(true, "VAH", inline = "vah", group = grpL)
+vahCol     = input.color(color.teal, "", inline = "vah", group = grpL)
+showVAL    = input.bool(true, "VAL", inline = "val", group = grpL)
+valCol     = input.color(color.teal, "", inline = "val", group = grpL)
+lvlWidthIn = input.int(2, "Width", minval = 1, maxval = 5, group = grpL)
+lvlStyleIn = input.string("Solid", "Style", options = ["Solid", "Dashed", "Dotted"], group = grpL)
+showVAFill = input.bool(false, "Shade value area", inline = "fill", group = grpL)
+vaFillCol  = input.color(color.new(color.teal, 90), "", inline = "fill", group = grpL)
+
+grpR = "High/Low Window"
+showRH     = input.bool(true, "High", inline = "rh", group = grpR)
+rhCol      = input.color(color.lime, "", inline = "rh", group = grpR)
+showRL     = input.bool(true, "Low", inline = "rl", group = grpR)
+rlCol      = input.color(color.red, "", inline = "rl", group = grpR)
+rWidthIn   = input.int(1, "Width", minval = 1, maxval = 5, group = grpR)
+rStyleIn   = input.string("Dashed", "Style", options = ["Solid", "Dashed", "Dotted"], group = grpR)
+rangeName  = input.string("6-7pm", "Label prefix", group = grpR)
+
+grpLb = "Labels"
+showLabels  = input.bool(true, "Show labels", group = grpLb)
+showDates   = input.bool(true, "Include date in label", group = grpLb)
+labelSizeIn = input.string("Small", "Label size", options = ["Tiny", "Small", "Normal"], group = grpLb)
+
+if timeframe.isdwm or timeframe.in_seconds() > 3600
+    runtime.error("Use an intraday chart of 1 hour or lower (1-5 min recommended for an accurate profile).")
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+f_style(string s) =>
+    s == "Dashed" ? line.style_dashed : s == "Dotted" ? line.style_dotted : line.style_solid
+
+f_size(string s) =>
+    s == "Tiny" ? size.tiny : s == "Normal" ? size.normal : size.small
+
+// Make sessions apply to all 7 days unless the user specified days
+f_sess(string s) =>
+    str.contains(s, ":") ? s : s + ":1234567"
+
+// Minutes after midnight from "HHMM" starting at position pos of a session string
+f_clock(string s, int pos) =>
+    int h = int(str.tonumber(str.substring(s, pos, pos + 2)))
+    int m = int(str.tonumber(str.substring(s, pos + 2, pos + 4)))
+    h * 60 + m
+
+f_text(string name, int dateTs) =>
+    showDates ? name + " " + str.format_time(dateTs, "MMM d", tzIn) : name
+
+// Builds a volume profile from stored bar highs/lows/volumes and returns [POC, VAH, VAL]
+f_valueArea(array<float> hs, array<float> ls, array<float> vs, int rows, float vaPct) =>
+    float poc = na
+    float vah = na
+    float val = na
+    int n = hs.size()
+    if n > 0
+        float hi = hs.max()
+        float lo = ls.min()
+        if hi > lo
+            float step = (hi - lo) / rows
+            bool noVol = vs.sum() <= 0      // fall back to time-at-price if symbol has no volume
+            array<float> hist = array.new<float>(rows, 0.0)
+            for i = 0 to n - 1
+                float bH = hs.get(i)
+                float bL = ls.get(i)
+                float w  = noVol ? 1.0 : vs.get(i)
+                float rng = bH - bL
+                int r0 = math.max(0, math.min(rows - 1, math.floor((bL - lo) / step)))
+                int r1 = math.max(0, math.min(rows - 1, math.floor((bH - lo) / step)))
+                if rng <= 0
+                    hist.set(r0, hist.get(r0) + w)
+                else
+                    // spread the bar's volume across the rows it covers, proportional to overlap
+                    for r = r0 to r1
+                        float rowLo = lo + r * step
+                        float ov = math.min(bH, rowLo + step) - math.max(bL, rowLo)
+                        if ov > 0
+                            hist.set(r, hist.get(r) + w * ov / rng)
+            int pocRow  = hist.indexof(hist.max())
+            float target = hist.sum() * vaPct
+            float acc    = hist.get(pocRow)
+            int up = pocRow
+            int dn = pocRow
+            // expand value area outward from POC toward the heavier side
+            while acc < target and (up < rows - 1 or dn > 0)
+                float vUp = up < rows - 1 ? hist.get(up + 1) : -1.0
+                float vDn = dn > 0 ? hist.get(dn - 1) : -1.0
+                if vUp >= vDn
+                    up += 1
+                    acc += vUp
+                else
+                    dn -= 1
+                    acc += vDn
+            poc := math.round_to_mintick(lo + (pocRow + 0.5) * step)
+            vah := math.round_to_mintick(lo + (up + 1) * step)
+            val := math.round_to_mintick(lo + dn * step)
+        else
+            poc := hi
+            vah := hi
+            val := hi
+    [poc, vah, val]
+
+f_drawLevel(bool show, float price, int x1, int x2, color col, string name, int dateTs) =>
+    line ln = na
+    if show and not na(price)
+        ln := line.new(x1, price, x2, price, xloc.bar_time, extend.none, col, f_style(lvlStyleIn), lvlWidthIn)
+        if showLabels
+            label.new(x2, price, f_text(name, dateTs), xloc.bar_time, yloc.price, color(na), label.style_label_left, col, f_size(labelSizeIn))
+    ln
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SESSION STATE
+// ─────────────────────────────────────────────────────────────────────────────
+string nySess    = f_sess(nySessIn)
+string nightSess = f_sess(nightSessIn)
+string rangeSess = f_sess(rangeSessIn)
+
+bool inNY    = not na(time(timeframe.period, nySess, tzIn))
+bool inNight = not na(time(timeframe.period, nightSess, tzIn))
+bool inRange = not na(time(timeframe.period, rangeSess, tzIn))
+bool newDay  = dayofmonth(time, tzIn) != dayofmonth(time[1], tzIn)
+
+var array<float> hArr = array.new<float>()
+var array<float> lArr = array.new<float>()
+var array<float> vArr = array.new<float>()
+var bool  nyActive   = false
+var bool  pending    = false
+var int   nyDate     = na
+var int   pDate      = na
+var float pPOC       = na
+var float pVAH       = na
+var float pVAL       = na
+var int   nightEndTs = na
+
+var float rHi     = na
+var float rLo     = na
+var line  rHiLine = na
+var line  rLoLine = na
+var label rHiLbl  = na
+var label rLoLbl  = na
+
+// 1) NY session finished -> compute that day's POC / VAH / VAL
+if nyActive and (not inNY or newDay)
+    [vaP, vaH, vaL] = f_valueArea(hArr, lArr, vArr, rowsIn, vaPctIn)
+    pPOC := vaP
+    pVAH := vaH
+    pVAL := vaL
+    pDate    := nyDate
+    pending  := not na(vaP)
+    nyActive := false
+
+// 2) Collect bars during the NY session
+if inNY and not nyActive
+    hArr.clear()
+    lArr.clear()
+    vArr.clear()
+    nyDate   := time
+    nyActive := true
+
+if inNY
+    hArr.push(high)
+    lArr.push(low)
+    vArr.push(nz(volume))
+
+// 3) Overnight window opens (5pm) -> draw the most recent session's levels until 5am
+//    Friday's levels appear at Sunday's 5pm open, since that's the next overnight session.
+if inNight and not inNight[1]
+    int sMin = f_clock(nightSessIn, 0)
+    int eMin = f_clock(nightSessIn, 5)
+    int dur  = eMin - sMin <= 0 ? eMin - sMin + 1440 : eMin - sMin
+    int startTs = timestamp(tzIn, year(time, tzIn), month(time, tzIn), dayofmonth(time, tzIn), math.floor(sMin / 60), sMin % 60)
+    if startTs > time
+        startTs -= 86400000
+    nightEndTs := startTs + dur * 60000
+
+    if pending
+        line vahLn = f_drawLevel(showVAH, pVAH, startTs, nightEndTs, vahCol, "NY VAH", pDate)
+        line valLn = f_drawLevel(showVAL, pVAL, startTs, nightEndTs, valCol, "NY VAL", pDate)
+        f_drawLevel(showPOC, pPOC, startTs, nightEndTs, pocCol, "NY POC", pDate)
+        if showVAFill and not na(vahLn) and not na(valLn)
+            linefill.new(vahLn, valLn, vaFillCol)
+        pending := false
+
+// 4) 6pm-7pm high/low, extended to the end of the overnight window (5am)
+if inRange and not inRange[1]
+    rHi := high
+    rLo := low
+    int x1 = time
+    int x2 = not na(nightEndTs) and nightEndTs > time ? nightEndTs : time + 11 * 3600000
+    string rs = f_style(rStyleIn)
+    rHiLine := showRH ? line.new(x1, rHi, x2, rHi, xloc.bar_time, extend.none, rhCol, rs, rWidthIn) : na
+    rLoLine := showRL ? line.new(x1, rLo, x2, rLo, xloc.bar_time, extend.none, rlCol, rs, rWidthIn) : na
+    rHiLbl  := showRH and showLabels ? label.new(x2, rHi, f_text(rangeName + " High", time), xloc.bar_time, yloc.price, color(na), label.style_label_left, rhCol, f_size(labelSizeIn)) : na
+    rLoLbl  := showRL and showLabels ? label.new(x2, rLo, f_text(rangeName + " Low", time), xloc.bar_time, yloc.price, color(na), label.style_label_left, rlCol, f_size(labelSizeIn)) : na
+else if inRange
+    rHi := math.max(rHi, high)
+    rLo := math.min(rLo, low)
+    if not na(rHiLine)
+        rHiLine.set_y1(rHi)
+        rHiLine.set_y2(rHi)
+    if not na(rLoLine)
+        rLoLine.set_y1(rLo)
+        rLoLine.set_y2(rLo)
+    if not na(rHiLbl)
+        rHiLbl.set_y(rHi)
+    if not na(rLoLbl)
+        rLoLbl.set_y(rLo)
