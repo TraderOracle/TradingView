@@ -7,7 +7,7 @@ indicator("FitMom Strategy", shorttitle = "FitMom Strategy", overlay = true, max
 grpS = "Sessions"
 tzIn         = input.string("America/Chicago", "Timezone", group = grpS, tooltip = "America/Chicago handles CST/CDT automatically.")
 nySessIn     = input.session("0830-1500", "NY session (profile built here)", group = grpS)
-nightSessIn  = input.session("1700-0500", "Level display window", group = grpS)
+nightSessIn  = input.session("1700-0100", "Level display window", group = grpS)
 rangeSessIn  = input.session("1800-1900", "High/Low window", group = grpS)
 
 grpP = "Volume Profile"
@@ -34,6 +34,15 @@ rlCol      = input.color(color.red, "", inline = "rl", group = grpR)
 rWidthIn   = input.int(1, "Width", minval = 1, maxval = 5, group = grpR)
 rStyleIn   = input.string("Dashed", "Style", options = ["Solid", "Dashed", "Dotted"], group = grpR)
 rangeName  = input.string("6-7pm", "Label prefix", group = grpR)
+
+grpV = "Trading Start Line"
+showVLine  = input.bool(true, "Show vertical line", group = grpV)
+vHourIn    = input.int(19, "Hour", minval = 0, maxval = 23, inline = "vt", group = grpV)
+vMinIn     = input.int(0, "Minute", minval = 0, maxval = 59, inline = "vt", group = grpV)
+vTextIn    = input.string("trading begins", "Text", group = grpV)
+vCol       = input.color(color.gray, "Color", group = grpV)
+vWidthIn   = input.int(1, "Width", minval = 1, maxval = 5, group = grpV)
+vStyleIn   = input.string("Dotted", "Style", options = ["Solid", "Dashed", "Dotted"], group = grpV)
 
 grpLb = "Labels"
 showLabels  = input.bool(true, "Show labels", group = grpLb)
@@ -223,3 +232,10 @@ else if inRange
         rHiLbl.set_y(rHi)
     if not na(rLoLbl)
         rLoLbl.set_y(rLo)
+
+// 5) Vertical "trading begins" line at 19:00 CT each day
+int vTs = timestamp(tzIn, year(time, tzIn), month(time, tzIn), dayofmonth(time, tzIn), vHourIn, vMinIn)
+if showVLine and time >= vTs and time[1] < vTs
+    float yTop = high > low ? high : high + syminfo.mintick
+    line.new(vTs, low, vTs, yTop, xloc.bar_time, extend.both, vCol, f_style(vStyleIn), vWidthIn)
+    label.new(vTs, high, vTextIn, xloc.bar_time, yloc.abovebar, color(na), label.style_label_down, vCol, f_size(labelSizeIn))
