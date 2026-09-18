@@ -1,0 +1,269 @@
+//@version=6
+// -----------------------------------------------------------------------------
+//  Midpoint Mania
+//
+//  Finds swing highs / swing lows, then draws a horizontal line at the exact
+//  midpoint ( (swingHigh + swingLow) / 2 ) of every swing leg.
+//
+//  • While a leg is still forming, the midpoint is drawn live against the
+//    running extreme and re-prices itself each bar as that extreme extends.
+//  • When the opposite swing point confirms, the leg is finished: the line
+//    freezes at its final level and stays on the chart as history.
+//  • Optional hit-rate table: a leg "hits" when price trades back to its 50%
+//    midpoint before taking out the extreme that ended the leg.
+// -----------------------------------------------------------------------------
+indicator("MidPoint Mania", "MidPoint Mania", overlay = true,
+   max_lines_count = 500, max_labels_count = 500)
+
+// ------------------------------- Inputs --------------------------------------
+gS = "Swing detection"
+lenL     = input.int(5, "Pivot left bars", minval = 1, group = gS,
+   tooltip = "Bars to the LEFT that must be lower (for a high) / higher (for a low).")
+lenR     = input.int(5, "Pivot right bars", minval = 1, group = gS,
+   tooltip = "Bars to the RIGHT that must confirm the swing point. Larger = fewer, bigger swings and more confirmation lag. This is the only lag in the tool: the forming midpoint itself updates every bar.")
+useWicks = input.bool(true, "Use wicks (high/low) for swing points", group = gS,
+   tooltip = "Off = swings are found on closing prices only.")
+
+gM = "Midpoint lines"
+showLive   = input.bool(true, "Draw the forming midpoint live", group = gM)
+extendBars = input.int(3, "Extend a finished midpoint right (bars)", minval = 0, maxval = 500, group = gM)
+keepN      = input.int(100, "Historical midpoints to keep", minval = 1, maxval = 200, group = gM,
+   tooltip = "Older lines are removed once this many finished midpoints are on the chart.")
+showPrice  = input.bool(false, "Print the price on each finished midpoint", group = gM)
+
+gY = "Style"
+cDone  = input.color(#2196F3, "Finished midpoint", inline = "d", group = gY)
+wDone  = input.int(4, "width", minval = 1, maxval = 10, inline = "d", group = gY)
+cLive  = input.color(color.new(#2196F3, 45), "Forming midpoint", inline = "l", group = gY)
+wLive  = input.int(2, "width", minval = 1, maxval = 10, inline = "l", group = gY)
+sLiveS = input.string("Dashed", "Forming line style", options = ["Solid", "Dashed", "Dotted"], group = gY)
+showZZ = input.bool(false, "Draw zig-zag between swing points", group = gY)
+cZZ    = input.color(color.new(color.white, 25), "Zig-zag color", group = gY)
+
+gP = "Performance"
+showStats = input.bool(true, "Show hit-rate table", group = gP,
+   tooltip = "Counts how often a finished leg's 50% midpoint was reached before the leg's own extreme was broken.")
+tblPos    = input.string("Top right", "Table position",
+   options = ["Top right", "Top left", "Bottom right", "Bottom left"], group = gP)
+
+liveStyle = sLiveS == "Solid" ? line.style_solid : sLiveS == "Dashed" ? line.style_dashed : line.style_dotted
+srcH = useWicks ? high : close
+srcL = useWicks ? low  : close
+
+// ------------------------------- State ---------------------------------------
+type Leg
+    float mid      // 50% level of the finished leg
+    float ext      // the extreme that ended the leg (invalidation level)
+    int   dir      // 1 = leg ended on a swing HIGH, -1 = ended on a swing LOW
+    int   bar      // bar_index of that swing point
+
+var float p0Price = na      // previous confirmed swing point
+var int   p0Bar   = na
+var float p1Price = na      // most recent confirmed swing point
+var int   p1Bar   = na
+var int   p1Dir   = 0       // 1 = p1 is a swing high, -1 = swing low, 0 = none yet
+var float runExt  = na      // running extreme of the leg currently forming
+var float doneMid = na      // level of the most recent finished midpoint
+
+var line  liveLn = na       // the forming line (becomes the finished line on confirmation)
+var line  doneLn = na
+var label doneLb = na
+var line  zzLn   = na
+
+var array<line>  histLn = array.new<line>()
+var array<label> histLb = array.new<label>()
+var array<line>  histZZ = array.new<line>()
+
+var array<Leg> pend    = array.new<Leg>()
+var int        nHit    = 0
+var int        nMiss   = 0
+var int        sumBars = 0
+
+// --------------------------- Pivot detection ---------------------------------
+ph = ta.pivothigh(srcH, lenL, lenR)
+pl = ta.pivotlow(srcL, lenL, lenR)
+
+float pvPrice = na
+int   pvDir   = 0
+if not na(ph)
+    pvPrice := ph
+    pvDir   := 1
+else if not na(pl)
+    pvPrice := pl
+    pvDir   := -1
+
+bool newDone = false
+
+if not na(pvPrice)
+    int   pb = bar_index - lenR          // the bar the swing point actually sits on
+    float pv = pvPrice
+    int   d  = pvDir
+    bool  changed = false
+
+    if p1Dir == 0
+        // first swing point ever — nothing to measure against yet
+        p1Price := pv
+        p1Bar   := pb
+        p1Dir   := d
+        changed := true
+
+    else if d == p1Dir
+        // same-direction pivot: only matters if it is a more extreme swing point,
+        // in which case the current swing point (and the last finished leg) move.
+        if (d == 1 and pv > p1Price) or (d == -1 and pv < p1Price)
+            p1Price := pv
+            p1Bar   := pb
+            changed := true
+            if not na(doneLn) and not na(p0Price)
+                float m2 = (p0Price + p1Price) / 2
+                doneMid := m2
+                line.set_xy1(doneLn, p0Bar, m2)
+                line.set_xy2(doneLn, p1Bar + extendBars, m2)
+                if not na(doneLb)
+                    label.set_xy(doneLb, p1Bar + extendBars, m2)
+                    label.set_text(doneLb, str.tostring(m2, format.mintick))
+            if showZZ and not na(zzLn)
+                line.set_xy2(zzLn, p1Bar, p1Price)
+
+    else
+        // -- opposite swing point: the forming leg is finished --
+        float oldP = p1Price
+        int   oldB = p1Bar
+        float m    = (oldP + pv) / 2      // exact midpoint of the completed leg
+        doneMid := m
+        newDone := true
+
+        if na(liveLn)
+            liveLn := line.new(oldB, m, pb, m, xloc.bar_index)
+        line.set_xy1(liveLn, oldB, m)
+        line.set_xy2(liveLn, pb + extendBars, m)
+        line.set_color(liveLn, cDone)
+        line.set_width(liveLn, wDone)
+        line.set_style(liveLn, line.style_solid)
+        doneLn := liveLn
+        array.push(histLn, doneLn)
+        liveLn := na
+
+        doneLb := na
+        if showPrice
+            doneLb := label.new(x = pb + extendBars, y = m, text = str.tostring(m, format.mintick),
+               xloc = xloc.bar_index, yloc = yloc.price, color = color.new(color.black, 100),
+               style = label.style_label_left, textcolor = cDone, size = size.small)
+            array.push(histLb, doneLb)
+
+        if showZZ
+            zzLn := line.new(oldB, oldP, pb, pv, xloc.bar_index, color = cZZ, style = line.style_dashed, width = 1)
+            array.push(histZZ, zzLn)
+
+        // performance: was the 50% already tagged during the confirmation bars?
+        bool retroHit  = false
+        int  retroBars = 0
+        for i = lenR to 0
+            bool tagged = d == 1 ? low[i] <= m : high[i] >= m
+            if tagged
+                retroHit  := true
+                retroBars := lenR - i
+                break
+        if retroHit
+            nHit    := nHit + 1
+            sumBars := sumBars + retroBars
+        else
+            array.push(pend, Leg.new(m, pv, d, pb))
+
+        p0Price := oldP
+        p0Bar   := oldB
+        p1Price := pv
+        p1Bar   := pb
+        p1Dir   := d
+        changed := true
+
+    // re-seed the running extreme for the new leg, scanning the bars that have
+    // already printed between the swing point and the confirmation bar
+    if changed
+        runExt := na
+        for i = 0 to lenR
+            float v = p1Dir == 1 ? srcL[i] : srcH[i]
+            if na(runExt) or (p1Dir == 1 ? v < runExt : v > runExt)
+                runExt := v
+
+// ----------------- Forming leg: track extreme + draw live midpoint -----------
+if p1Dir != 0
+    float v = p1Dir == 1 ? srcL : srcH
+    if na(runExt) or (p1Dir == 1 ? v < runExt : v > runExt)
+        runExt := v
+
+float liveMid = na
+if p1Dir != 0 and not na(runExt)
+    liveMid := (p1Price + runExt) / 2
+    if showLive
+        if na(liveLn)
+            liveLn := line.new(p1Bar, liveMid, bar_index, liveMid, xloc.bar_index,
+               color = cLive, style = liveStyle, width = wLive)
+        else
+            line.set_xy1(liveLn, p1Bar, liveMid)
+            line.set_xy2(liveLn, bar_index, liveMid)
+            line.set_color(liveLn, cLive)
+            line.set_style(liveLn, liveStyle)
+            line.set_width(liveLn, wLive)
+
+// ----------------------- Resolve open performance legs -----------------------
+if array.size(pend) > 0
+    for i = array.size(pend) - 1 to 0
+        Leg g = array.get(pend, i)
+        bool tagged  = g.dir == 1 ? low <= g.mid : high >= g.mid
+        bool broken  = g.dir == 1 ? high > g.ext : low < g.ext
+        if tagged
+            nHit    := nHit + 1
+            sumBars := sumBars + (bar_index - g.bar)
+            array.remove(pend, i)
+        else if broken
+            nMiss := nMiss + 1
+            array.remove(pend, i)
+
+// --------------------------- History housekeeping ----------------------------
+while array.size(histLn) > keepN
+    line.delete(array.shift(histLn))
+while array.size(histLb) > keepN
+    label.delete(array.shift(histLb))
+while array.size(histZZ) > keepN
+    line.delete(array.shift(histZZ))
+
+// ------------------------------- Stats table ---------------------------------
+tblP = tblPos == "Top right" ? position.top_right : tblPos == "Top left" ? position.top_left :
+       tblPos == "Bottom right" ? position.bottom_right : position.bottom_left
+var table st = table.new(tblP, 2, 7, border_width = 1, border_color = color.new(color.gray, 70))
+
+if showStats and barstate.islast
+    int   total = nHit + nMiss
+    float rate  = total > 0 ? 100.0 * nHit / total : na
+    color bg    = color.new(color.black, 20)
+    color fg    = color.new(color.white, 0)
+
+    table.cell(st, 0, 0, "Swing 50% midpoint", text_color = fg, text_size = size.small, bgcolor = color.new(cDone, 35))
+    table.cell(st, 1, 0, "", bgcolor = color.new(cDone, 35))
+    table.merge_cells(st, 0, 0, 1, 0)
+
+    table.cell(st, 0, 1, "Legs finished", text_color = fg, text_size = size.small, bgcolor = bg)
+    table.cell(st, 1, 1, str.tostring(total + array.size(pend)), text_color = fg, text_size = size.small, bgcolor = bg)
+
+    table.cell(st, 0, 2, "Reached 50%", text_color = fg, text_size = size.small, bgcolor = bg)
+    table.cell(st, 1, 2, str.tostring(nHit), text_color = color.new(color.lime, 0), text_size = size.small, bgcolor = bg)
+
+    table.cell(st, 0, 3, "Extreme broken first", text_color = fg, text_size = size.small, bgcolor = bg)
+    table.cell(st, 1, 3, str.tostring(nMiss), text_color = color.new(color.red, 0), text_size = size.small, bgcolor = bg)
+
+    table.cell(st, 0, 4, "Hit rate", text_color = fg, text_size = size.small, bgcolor = bg)
+    table.cell(st, 1, 4, na(rate) ? "—" : str.tostring(rate, "#.#") + "%", text_color = fg, text_size = size.small, bgcolor = bg)
+
+    table.cell(st, 0, 5, "Avg bars to reach", text_color = fg, text_size = size.small, bgcolor = bg)
+    table.cell(st, 1, 5, nHit > 0 ? str.tostring(sumBars / nHit, "#.#") : "—", text_color = fg, text_size = size.small, bgcolor = bg)
+
+    table.cell(st, 0, 6, "Still open", text_color = fg, text_size = size.small, bgcolor = bg)
+    table.cell(st, 1, 6, str.tostring(array.size(pend)), text_color = fg, text_size = size.small, bgcolor = bg)
+
+// ------------------------- Plots (data window) + alerts ----------------------
+plot(liveMid, "Forming midpoint",  color = na, display = display.data_window)
+plot(doneMid, "Finished midpoint", color = na, display = display.data_window)
+
+alertcondition(newDone, "New swing midpoint set", "A swing leg finished — its 50% midpoint is now fixed.")
+alertcondition(not na(liveMid) and ta.cross(close, liveMid), "Price crossed forming midpoint", "Price crossed the forming swing midpoint.")
