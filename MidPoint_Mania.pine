@@ -5,11 +5,11 @@
 //  Finds swing highs / swing lows, then draws a horizontal line at the exact
 //  midpoint ( (swingHigh + swingLow) / 2 ) of every swing leg.
 //
-//  • While a leg is still forming, the midpoint is drawn live against the
+//  â€¢ While a leg is still forming, the midpoint is drawn live against the
 //    running extreme and re-prices itself each bar as that extreme extends.
-//  • When the opposite swing point confirms, the leg is finished: the line
+//  â€¢ When the opposite swing point confirms, the leg is finished: the line
 //    freezes at its final level and stays on the chart as history.
-//  • Optional hit-rate table: a leg "hits" when price trades back to its 50%
+//  â€¢ Optional hit-rate table: a leg "hits" when price trades back to its 50%
 //    midpoint before taking out the extreme that ended the leg.
 // -----------------------------------------------------------------------------
 indicator("MidPoint Mania", "MidPoint Mania", overlay = true,
@@ -101,7 +101,7 @@ if not na(pvPrice)
     bool  changed = false
 
     if p1Dir == 0
-        // first swing point ever — nothing to measure against yet
+        // first swing point ever â€” nothing to measure against yet
         p1Price := pv
         p1Bar   := pb
         p1Dir   := d
@@ -239,7 +239,7 @@ if showStats and barstate.islast
     color bg    = color.new(color.black, 20)
     color fg    = color.new(color.white, 0)
 
-    table.cell(st, 0, 0, "Swing 50% midpoint", text_color = fg, text_size = size.small, bgcolor = color.new(cDone, 35))
+    table.cell(st, 0, 0, "Midpoint Mania", text_color = fg, text_size = size.small, bgcolor = color.new(cDone, 35))
     table.cell(st, 1, 0, "", bgcolor = color.new(cDone, 35))
     table.merge_cells(st, 0, 0, 1, 0)
 
@@ -253,10 +253,10 @@ if showStats and barstate.islast
     table.cell(st, 1, 3, str.tostring(nMiss), text_color = color.new(color.red, 0), text_size = size.small, bgcolor = bg)
 
     table.cell(st, 0, 4, "Hit rate", text_color = fg, text_size = size.small, bgcolor = bg)
-    table.cell(st, 1, 4, na(rate) ? "—" : str.tostring(rate, "#.#") + "%", text_color = fg, text_size = size.small, bgcolor = bg)
+    table.cell(st, 1, 4, na(rate) ? "â€”" : str.tostring(rate, "#.#") + "%", text_color = fg, text_size = size.small, bgcolor = bg)
 
     table.cell(st, 0, 5, "Avg bars to reach", text_color = fg, text_size = size.small, bgcolor = bg)
-    table.cell(st, 1, 5, nHit > 0 ? str.tostring(sumBars / nHit, "#.#") : "—", text_color = fg, text_size = size.small, bgcolor = bg)
+    table.cell(st, 1, 5, nHit > 0 ? str.tostring(sumBars / nHit, "#.#") : "â€”", text_color = fg, text_size = size.small, bgcolor = bg)
 
     table.cell(st, 0, 6, "Still open", text_color = fg, text_size = size.small, bgcolor = bg)
     table.cell(st, 1, 6, str.tostring(array.size(pend)), text_color = fg, text_size = size.small, bgcolor = bg)
@@ -265,5 +265,5 @@ if showStats and barstate.islast
 plot(liveMid, "Forming midpoint",  color = na, display = display.data_window)
 plot(doneMid, "Finished midpoint", color = na, display = display.data_window)
 
-alertcondition(newDone, "New swing midpoint set", "A swing leg finished — its 50% midpoint is now fixed.")
+alertcondition(newDone, "New swing midpoint set", "A swing leg finished â€” its 50% midpoint is now fixed.")
 alertcondition(not na(liveMid) and ta.cross(close, liveMid), "Price crossed forming midpoint", "Price crossed the forming swing midpoint.")
