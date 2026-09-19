@@ -1,0 +1,864 @@
+//@version=6
+// -----------------------------------------------------------------------------
+//  Midpoint Mania
+//
+//  Finds swing highs / swing lows, then draws a horizontal line at the exact
+//  midpoint ( (swingHigh + swingLow) / 2 ) of every swing leg.
+//
+//  • While a leg is still forming, the midpoint is drawn live against the
+//    running extreme and re-prices itself each bar as that extreme extends.
+//  • When the opposite swing point confirms, the leg is finished: the line
+//    becomes a historical line. The latest finished line can still adjust
+//    if a more extreme same-direction pivot replaces its endpoint.
+//  • Optional hit-rate table: a leg "hits" when price trades back to its 50%
+//    midpoint before taking out the extreme that ended the leg.
+// -----------------------------------------------------------------------------
+indicator("MidPoint Mania", "MidPoint Mania", overlay = true,
+   max_lines_count = 500, max_labels_count = 500, max_bars_back = 5000)
+// ------------------------------- Inputs --------------------------------------
+gS = "Swing detection"
+lenL     = input.int(5, "Pivot left bars", minval = 1, maxval = 2000, group = gS,
+   tooltip = "Bars to the LEFT that must be lower (for a high) / higher (for a low).")
+lenR     = input.int(5, "Pivot right bars", minval = 1, maxval = 2000, group = gS,
+   tooltip = "Bars to the RIGHT that must confirm the swing point. Larger = fewer, bigger swings and more confirmation lag. This is the only lag in the tool: the forming midpoint itself updates every bar.")
+useWicks = input.bool(true, "Use wicks (high/low) for swing points", group = gS,
+   tooltip = "Off = swings are found on closing prices only.")
+// v3: Independent opacity control for pivot circle markers.
+gV = "Pivot levels"
+showPivots = input.bool(true, "Draw pivot high / low lines", group = gV)
+pivotExtendBars = input.int(20, "Extend pivot lines right (bars from pivot)", minval = 1, maxval = 500, group = gV,
+    tooltip = "Measured from the actual pivot bar. Pivots appear after Pivot right bars of confirmation. Set this higher than Pivot right bars to extend beyond the confirmation bar.")
+keepPivots = input.int(50, "Pivot levels to keep", minval = 1, maxval = 500, group = gV,
+    tooltip = "Maximum 90 keeps the combined pivot, midpoint and zig-zag lines below TradingView's 500-line limit.")
+showPivotMarks = input.bool(true, "Mark pivot points", group = gV)
+pivotMarkerOpacity = input.int(50, "Pivot circle opacity (%)", minval = 0, maxval = 100, group = gV,
+    tooltip = "0 = invisible; 100 = fully opaque. Affects only pivot circles, not the pivot lines.")
+pivotHighColor = input.color(color.red, "Pivot high color", group = gV)
+pivotLowColor = input.color(color.lime, "Pivot low color", group = gV)
+pivotWidth = input.int(1, "Pivot line width", minval = 1, maxval = 5, group = gV)
+pivotStyleInput = input.string("Solid", "Pivot line style", options = ["Solid", "Dashed", "Dotted"], group = gV)
+pivotStyle = pivotStyleInput == "Dashed" ? line.style_dashed : pivotStyleInput == "Dotted" ? line.style_dotted : line.style_solid
+usePivotProximity = input.bool(true, "Compact pivots unless price is near", group = gV,
+    tooltip = "Far pivot levels are one bar long. Near levels extend from the pivot to the current bar. Disable to use the original extension setting.")
+pivotNearTicks = input.int(20, "Near pivot distance (ticks)", minval = 0, maxval = 100000, group = gV)
+pivotNearHighColor = input.color(color.red, "Near pivot high color", group = gV)
+pivotNearLowColor = input.color(color.lime, "Near pivot low color", group = gV)
+pivotNearWidth = input.int(3, "Near pivot width", minval = 1, maxval = 10, group = gV)
+pivotFarHighColor = input.color(color.new(color.red, 50), "Far pivot high color", group = gV)
+pivotFarLowColor = input.color(color.new(color.lime, 50), "Far pivot low color", group = gV)
+pivotFarWidth = input.int(1, "Far pivot width", minval = 1, maxval = 10, group = gV)
+
+
+gT = "Structure signals and relevant swing"
+referenceMode = input.string("Latest confirmed swing", "Relevant swing selection", options = ["Latest confirmed swing", "New highs/lows only"], group = gT,
+    tooltip = "Latest confirmed swing follows each completed swing in the current trend direction. New highs/lows only uses v4's stricter extreme-extension rule and may retain a much older swing.")
+directionMode = input.string("Four-color early warning", "Direction / coloring mode", options = ["Selected swing (original)", "Recent pivot", "Four-color early warning"], group = gT,
+    tooltip = "Original: selected swing pivot controls direction. Recent pivot: latest independently confirmed high/low controls direction and B/S letters. Four-color: recent countertrend breaks give mild colors; selected swing breaks confirm full reversals. W signals always use the selected swing midpoint.")
+mildBullColor = input.color(color.aqua, "Mildly bullish color", group = gT)
+mildBearColor = input.color(color.orange, "Mildly bearish color", group = gT)
+showSignalStatus = input.bool(true, "Show signal status (bottom left)", group = gT)
+showStructure = input.bool(true, "Highlight relevant swing", group = gT)
+showStructureLabels = input.bool(true, "Show relevant swing labels", group = gT)
+showWatchSignals = input.bool(true, "Show W watch letters", group = gT)
+showFlipSignals = input.bool(true, "Show B / S signal letters", group = gT)
+paintStructureBars = input.bool(true, "Color bars by selected direction mode", group = gT)
+structureBull = input.color(color.lime, "Bullish color", group = gT)
+structureBear = input.color(color.red, "Bearish color", group = gT)
+structureWatch = input.color(color.orange, "Midpoint watch color", group = gT)
+structureWidth = input.int(3, "Highlighted swing width", minval = 1, maxval = 5, group = gT)
+structureRight = input.int(10, "Relevant levels right extension (bar durations)", minval = 1, maxval = 100, group = gT)
+// Signals always use closed bars. Reference midpoint prices are fixed between
+// accepted structural swings, independently of the original live midpoint.
+
+gDots = "Bar-color text dots"
+showFullDots = input.bool(true, "Show bullish / bearish dots", group = gDots)
+fullDotOffset = input.int(4, "Bullish / bearish distance (ticks)", minval = 0, maxval = 10000, group = gDots,
+    tooltip = "Price distance from the candle high/low, in minimum ticks. Pine cannot set a custom pixel gap from a candle. Screen distance changes with chart scaling.")
+fullDotSize = input.int(10, "Bullish / bearish font size (points)", minval = 1, maxval = 36, group = gDots)
+fullDotFont = input.string("Default", "Bullish / bearish font", options = ["Default", "Monospace"], group = gDots)
+showMildDots = input.bool(true, "Show mildly bullish / bearish dots", group = gDots)
+mildDotOffset = input.int(4, "Mildly bullish / bearish distance (ticks)", minval = 0, maxval = 10000, group = gDots,
+    tooltip = "Price distance from the candle high/low. Uses ticks, not screen pixels.")
+mildDotSize = input.int(8, "Mildly bullish / bearish font size (points)", minval = 1, maxval = 36, group = gDots)
+mildDotFont = input.string("Default", "Mildly bullish / bearish font", options = ["Default", "Monospace"], group = gDots)
+keepColorDots = input.int(200, "Text dots to keep", minval = 1, maxval = 200, group = gDots,
+    tooltip = "Keeps the latest enabled dot marks. The 200-dot cap reserves enough labels for existing midpoint prices, pivot circles and swing labels. W/B/S letters are unaffected.")
+
+gM = "Midpoint lines"
+showLive   = input.bool(true, "Draw the forming midpoint live", group = gM)
+extendBars = input.int(3, "Extend a finished midpoint right (bars)", minval = 0, maxval = 500, group = gM)
+keepN      = input.int(100, "Historical midpoints to keep", minval = 1, maxval = 200, group = gM,
+   tooltip = "Older lines are removed once this many finished midpoints are on the chart.")
+showPrice  = input.bool(false, "Print the price on each finished midpoint", group = gM)
+useMidProximity = input.bool(true, "Compact midpoints unless price is near", group = gM,
+    tooltip = "Completed and forming midpoint lines become one chart bar long when far away. Near lines extend from the swing endpoint to the current bar. Disable to use the original midpoint extension settings. The selected structural reference uses its own highlight settings.")
+midNearTicks = input.int(20, "Near midpoint distance (ticks)", minval = 0, maxval = 100000, group = gM,
+    tooltip = "Near means the latest price (close) is within this many minimum ticks of the midpoint. Updates as price moves, including during the open bar.")
+midNearColor = input.color(color.orange, "Near midpoint color", group = gM)
+midNearWidth = input.int(3, "Near midpoint width", minval = 1, maxval = 10, group = gM)
+midFarColor = input.color(color.new(#2196F3, 35), "Far midpoint color", group = gM)
+midFarWidth = input.int(1, "Far midpoint width", minval = 1, maxval = 10, group = gM)
+
+gPriority = "Level priority / clutter control"
+priorityMode = input.string("Relevant + Nearby", "Level display mode", options = ["All", "Relevant Only", "Relevant + Nearby", "Largest Swings"], group = gPriority,
+    tooltip = "All uses the original proximity controls. Filtered modes keep enabled selected-swing references and latest confirmed high/low visible. Nearby ranks eligible history by swing size and distance. Largest ranks retained history by swing size without a distance gate. Generic forming midpoints are hidden in filtered modes; the highlighted forming swing remains available.")
+priorityUnits = input.string("ATR", "Nearby distance units", options = ["ATR", "Ticks"], group = gPriority)
+priorityAtrLen = input.int(14, "ATR length", minval = 1, maxval = 500, group = gPriority)
+priorityAtrDistance = input.float(2.0, "Nearby distance (ATR)", minval = 0.1, step = 0.1, group = gPriority)
+priorityTickDistance = input.int(80, "Nearby distance (ticks)", minval = 1, maxval = 100000, group = gPriority)
+priorityAbove = input.int(2, "Additional levels above price", minval = 0, maxval = 10, group = gPriority)
+priorityBelow = input.int(2, "Additional levels below price", minval = 0, maxval = 10, group = gPriority)
+prioritySizeWeight = input.int(65, "Swing-size weight (%)", minval = 0, maxval = 100, group = gPriority,
+    tooltip = "Nearby ranking blends log(1 + swing range / ATR at confirmation) with proximity. 100 prioritizes size, 0 prioritizes distance. Largest Swings always prioritizes size.")
+priorityClusterTicks = input.int(4, "Cluster distance (ticks)", minval = 0, maxval = 10000, group = gPriority,
+    tooltip = "Historical levels within this distance of an always-visible reference or a higher-ranked selected level are not emphasized. Always-visible references are never removed. Zero merges exact prices only.")
+priorityExitPct = input.int(25, "Extra exit distance (%)", minval = 0, maxval = 200, group = gPriority,
+    tooltip = "Previously selected nearby levels can remain selected this much beyond the entry window. A small score bonus also reduces switching between similar levels. Rank and display limits still apply.")
+priorityRemainder = input.string("Hide", "Other historical levels", options = ["Hide", "One-bar marks"], group = gPriority)
+priorityWidth = input.int(3, "Priority historical line width", minval = 1, maxval = 10, group = gPriority)
+priorityRecentWidth = input.int(2, "Recent pivot line width", minval = 1, maxval = 10, group = gPriority)
+priorityFaint = input.int(85, "Other historical mark transparency", minval = 0, maxval = 100, group = gPriority)
+priorityAtr = ta.atr(priorityAtrLen)
+// Historical strength is frozen at pivot confirmation, not rescaled by today's ATR.
+
+gY = "Style"
+cDone  = input.color(#2196F3, "Finished midpoint", inline = "d", group = gY)
+wDone  = input.int(4, "width", minval = 1, maxval = 10, inline = "d", group = gY)
+cLive  = input.color(color.new(#2196F3, 45), "Forming midpoint", inline = "l", group = gY)
+wLive  = input.int(2, "width", minval = 1, maxval = 10, inline = "l", group = gY)
+sLiveS = input.string("Dashed", "Forming line style", options = ["Solid", "Dashed", "Dotted"], group = gY)
+showZZ = input.bool(false, "Draw zig-zag between swing points", group = gY)
+cZZ    = input.color(color.new(color.white, 25), "Zig-zag color", group = gY)
+gP = "Performance"
+showStats = input.bool(true, "Show hit-rate table", group = gP,
+   tooltip = "Counts how often a finished leg's 50% midpoint was reached before the leg's own extreme was broken.")
+tblPos    = input.string("Top right", "Table position",
+   options = ["Top right", "Top left", "Bottom right", "Bottom left"], group = gP)
+liveStyle = sLiveS == "Solid" ? line.style_solid : sLiveS == "Dashed" ? line.style_dashed : line.style_dotted
+srcH = useWicks ? high : close
+srcL = useWicks ? low  : close
+// Store time coordinates when each anchor is first observed. Redrawing old
+// levels never needs time[bar_index - anchorBar] or implicit index conversion.
+int drawStep = math.max(1, int(nz(time_close - time, nz(time - time[1], 60000))))
+int drawNextTime = nz(time_close, time + drawStep)
+int midpointRightTime = extendBars <= lenR ? time[lenR - extendBars] : time + (extendBars - lenR) * drawStep
+int pivotRightTime = pivotExtendBars <= lenR ? time[lenR - pivotExtendBars] : time + (pivotExtendBars - lenR) * drawStep
+// Known extensions use actual timestamps; not-yet-printed bars are projected
+// using the current bar duration, as in the selected-swing highlight.
+// ------------------------------- State ---------------------------------------
+type Leg
+    float mid      // 50% level of the finished leg
+    float ext      // the extreme that ended the leg (invalidation level)
+    int   dir      // 1 = leg ended on a swing HIGH, -1 = ended on a swing LOW
+    int   bar      // bar_index of that swing point
+var float p0Price = na      // previous confirmed swing point
+var int   p0Bar   = na
+var int   p0Time  = na
+var float p1Price = na      // most recent confirmed swing point
+var int   p1Bar   = na
+var int   p1Time  = na
+var int   p1Dir   = 0       // 1 = p1 is a swing high, -1 = swing low, 0 = none yet
+var int runExtTime = na
+var int runExtNextTime = na
+var float runExt  = na      // running extreme of the leg currently forming
+var float doneMid = na      // level of the most recent finished midpoint
+var line  liveLn = na       // the forming line (becomes the finished line on confirmation)
+var line  doneLn = na
+var label doneLb = na
+var line  zzLn   = na
+var array<line>  histLn = array.new<line>()
+var array<int> histMidEndTimes = array.new<int>()
+var array<int> histMidNextTimes = array.new<int>()
+var array<float> midStrengths = array.new<float>()
+var array<bool> midSelected = array.new<bool>()
+var array<label> histLb = array.new<label>()
+var array<line>  histZZ = array.new<line>()
+var line pivotLn = na
+var label pivotMark = na
+var array<line> pivotLines = array.new<line>()
+var array<int> pivotTimes = array.new<int>()
+var array<int> pivotNextTimes = array.new<int>()
+var array<int> pivotDirections = array.new<int>()
+var array<float> pivotStrengths = array.new<float>()
+var array<bool> pivotSelected = array.new<bool>()
+var array<label> pivotMarks = array.new<label>()
+var array<Leg> pend    = array.new<Leg>()
+var int        nHit    = 0
+var int        nMiss   = 0
+var int        sumBars = 0
+// --------------------------- Pivot detection ---------------------------------
+ph = ta.pivothigh(srcH, lenL, lenR)
+pl = ta.pivotlow(srcL, lenL, lenR)
+float pvPrice = na
+int   pvDir   = 0
+if not na(ph)
+    pvPrice := ph
+    pvDir   := 1
+else if not na(pl)
+    pvPrice := pl
+    pvDir   := -1
+bool newDone = false
+bool structuralSwingChanged = false
+if not na(pvPrice) and barstate.isconfirmed
+    int   pb = bar_index - lenR          // the bar the swing point actually sits on
+    float pv = pvPrice
+    int   d  = pvDir
+    bool  changed = false
+    if p1Dir == 0
+        // first swing point ever — nothing to measure against yet
+        p1Price := pv
+        p1Bar   := pb
+        p1Time  := time[lenR]
+        p1Dir   := d
+        changed := true
+    else if d == p1Dir
+        // same-direction pivot: only matters if it is a more extreme swing point,
+        // in which case the current swing point (and the last finished leg) move.
+        if (d == 1 and pv > p1Price) or (d == -1 and pv < p1Price)
+            p1Price := pv
+            p1Bar   := pb
+            p1Time  := time[lenR]
+            changed := true
+            if not na(doneLn) and not na(p0Price)
+                float m2 = (p0Price + p1Price) / 2
+                doneMid := m2
+                line.set_xy1(doneLn, p0Time, m2)
+                line.set_xy2(doneLn, midpointRightTime, m2)
+                if array.size(histMidEndTimes) > 0
+                    array.set(histMidEndTimes, array.size(histMidEndTimes) - 1, p1Time)
+                    array.set(histMidNextTimes, array.size(histMidNextTimes) - 1, time[lenR - 1])
+                    array.set(midStrengths, array.size(midStrengths) - 1, math.abs(p0Price - p1Price) / math.max(nz(priorityAtr, syminfo.mintick), syminfo.mintick))
+                    array.set(midSelected, array.size(midSelected) - 1, false)
+                if not na(doneLb)
+                    label.set_xy(doneLb, midpointRightTime, m2)
+                    label.set_text(doneLb, str.tostring(m2, format.mintick))
+            if showZZ and not na(zzLn)
+                line.set_xy2(zzLn, p1Time, p1Price)
+    else
+        // -- opposite swing point: the forming leg is finished --
+        float oldP = p1Price
+        int   oldB = p1Bar
+        int   oldT = p1Time
+        float m    = (oldP + pv) / 2      // exact midpoint of the completed leg
+        doneMid := m
+        newDone := true
+        if na(liveLn)
+            liveLn := line.new(oldT, m, time[lenR], m, xloc.bar_time)
+        line.set_xy1(liveLn, oldT, m)
+        line.set_xy2(liveLn, midpointRightTime, m)
+        line.set_color(liveLn, cDone)
+        line.set_width(liveLn, wDone)
+        line.set_style(liveLn, line.style_solid)
+        doneLn := liveLn
+        array.push(histLn, doneLn)
+        array.push(histMidEndTimes, time[lenR])
+        array.push(histMidNextTimes, time[lenR - 1])
+        array.push(midStrengths, math.abs(oldP - pv) / math.max(nz(priorityAtr, syminfo.mintick), syminfo.mintick))
+        array.push(midSelected, false)
+        liveLn := na
+        doneLb := na
+        if showPrice
+            doneLb := label.new(x = midpointRightTime, y = m, text = str.tostring(m, format.mintick),
+               xloc = xloc.bar_time, yloc = yloc.price, color = color.new(color.black, 100),
+               style = label.style_label_left, textcolor = cDone, size = size.small)
+            array.push(histLb, doneLb)
+        if showZZ
+            zzLn := line.new(oldT, oldP, time[lenR], pv, xloc.bar_time, color = cZZ, style = line.style_dashed, width = 1)
+            array.push(histZZ, zzLn)
+        // performance: was the 50% already tagged during the confirmation bars?
+        bool retroHit  = false
+        int  retroBars = 0
+        for i = lenR to 0
+            bool tagged = d == 1 ? low[i] <= m : high[i] >= m
+            if tagged
+                retroHit  := true
+                retroBars := lenR - i
+                break
+        if retroHit
+            nHit    := nHit + 1
+            sumBars := sumBars + retroBars
+        else
+            array.push(pend, Leg.new(m, pv, d, pb))
+        p0Price := oldP
+        p0Bar   := oldB
+        p0Time  := oldT
+        p1Price := pv
+        p1Bar   := pb
+        p1Time  := time[lenR]
+        p1Dir   := d
+        changed := true
+    // re-seed the running extreme for the new leg, scanning the bars that have
+    // already printed between the swing point and the confirmation bar
+    if changed
+        structuralSwingChanged := not na(p0Price)
+        // Draw the same accepted swing points used by the midpoint calculation.
+        // A more extreme same-direction pivot moves the latest pivot line/mark.
+        // An opposite pivot starts a new historical pivot level.
+        color pc = p1Dir == 1 ? pivotHighColor : pivotLowColor
+        if showPivots
+            if na(pivotLn) or newDone
+                pivotLn := line.new(p1Time, p1Price, pivotRightTime, p1Price,
+                    xloc = xloc.bar_time, extend = extend.none, color = pc, style = pivotStyle, width = pivotWidth)
+                array.push(pivotLines, pivotLn)
+                array.push(pivotTimes, p1Time)
+                array.push(pivotNextTimes, time[lenR - 1])
+                array.push(pivotDirections, p1Dir)
+                array.push(pivotStrengths, na(p0Price) ? 0.0 : math.abs(p0Price - p1Price) / math.max(nz(priorityAtr, syminfo.mintick), syminfo.mintick))
+                array.push(pivotSelected, false)
+            else
+                line.set_xy1(pivotLn, p1Time, p1Price)
+                line.set_xy2(pivotLn, pivotRightTime, p1Price)
+                line.set_color(pivotLn, pc)
+                array.set(pivotTimes, array.size(pivotTimes) - 1, p1Time)
+                array.set(pivotNextTimes, array.size(pivotNextTimes) - 1, time[lenR - 1])
+                array.set(pivotDirections, array.size(pivotDirections) - 1, p1Dir)
+                array.set(pivotStrengths, array.size(pivotStrengths) - 1, na(p0Price) ? 0.0 : math.abs(p0Price - p1Price) / math.max(nz(priorityAtr, syminfo.mintick), syminfo.mintick))
+                array.set(pivotSelected, array.size(pivotSelected) - 1, false)
+        if showPivotMarks
+            if na(pivotMark) or newDone
+                pivotMark := label.new(p1Time, p1Price, "", xloc = xloc.bar_time,
+                    yloc = yloc.price, style = label.style_circle, color = color.new(pc, 100 - pivotMarkerOpacity), size = size.tiny)
+                array.push(pivotMarks, pivotMark)
+            else
+                label.set_xy(pivotMark, p1Time, p1Price)
+                label.set_color(pivotMark, color.new(pc, 100 - pivotMarkerOpacity))
+        runExt := na
+        for i = 0 to lenR
+            float v = p1Dir == 1 ? srcL[i] : srcH[i]
+            if na(runExt) or (p1Dir == 1 ? v < runExt : v > runExt)
+                runExt := v
+                runExtTime := time[i]
+                runExtNextTime := i > 0 ? time[i - 1] : drawNextTime
+// ----------------- Forming leg: track extreme + draw live midpoint -----------
+if p1Dir != 0
+    float v = p1Dir == 1 ? srcL : srcH
+    if na(runExt) or (p1Dir == 1 ? v < runExt : v > runExt)
+        runExt := v
+        runExtTime := time
+        runExtNextTime := drawNextTime
+float liveMid = na
+if p1Dir != 0 and not na(runExt)
+    liveMid := (p1Price + runExt) / 2
+    if showLive
+        if na(liveLn)
+            liveLn := line.new(p1Time, liveMid, time, liveMid, xloc.bar_time,
+               color = cLive, style = liveStyle, width = wLive)
+        else
+            line.set_xy1(liveLn, p1Time, liveMid)
+            line.set_xy2(liveLn, time, liveMid)
+            line.set_color(liveLn, cLive)
+            line.set_style(liveLn, liveStyle)
+            line.set_width(liveLn, wLive)
+// ----------------------- Structural direction engine ------------------------
+// Bullish: monitor the starting low of the selected confirmed up swing.
+// Bearish: monitor the starting high of the selected confirmed down swing.
+// Opposite-direction pullbacks do not replace the protected swing.
+var int structureDir = 0
+var float refStart = na
+var float refEnd = na
+var int refStartTime = na
+var int refEndTime = na
+var bool refConfirmed = false
+var bool watchIssued = false
+var bool watchActive = false
+var int lastFlipTime = na
+bool bullWatch = false
+bool bearWatch = false
+bool bullFlip = false
+bool bearFlip = false
+
+if barstate.isconfirmed
+    // First evaluate the reference that was available BEFORE this bar.
+    // A newly confirmed pivot cannot erase a break of the previous reference.
+    if structureDir != 0
+        bool pivotBroken = structureDir == 1 ? close < refStart : close > refStart
+        if pivotBroken
+            bullFlip := structureDir == -1
+            bearFlip := structureDir == 1
+            structureDir := -structureDir
+            // The ending pivot of the broken swing becomes the new protected
+            // origin. Draw the reversal leg dashed until an endpoint confirms.
+            refStart := refEnd
+            refStartTime := refEndTime
+            refEnd := structureDir == 1 ? srcH : srcL
+            refEndTime := time
+            refConfirmed := false
+            watchIssued := false
+            watchActive := false
+            lastFlipTime := time
+
+    // Bootstrap from the first completed swing, with no reversal signal.
+    if structureDir == 0 and structuralSwingChanged
+        structureDir := p1Dir
+        refStart := p0Price
+        refEnd := p1Price
+        refStartTime := p0Time
+        refEndTime := p1Time
+        refConfirmed := true
+        watchIssued := false
+        watchActive := false
+    else if structuralSwingChanged and not bullFlip and not bearFlip and p1Dir == structureDir
+        bool newerEndpoint = p1Time > refEndTime
+        bool extendedEndpoint = structureDir == 1 ? p1Price > refEnd : p1Price < refEnd
+        // Use the newest confirmed matching-direction swing. Its start must
+        // not predate the protected origin; the endpoint may predate the flip
+        // because pivot confirmation arrives later than the pivot itself.
+        bool transitionReady = not refConfirmed and not na(lastFlipTime) and p1Time > refStartTime and p0Time >= refStartTime
+        bool continuationReady = refConfirmed and newerEndpoint and (referenceMode == "Latest confirmed swing" or extendedEndpoint) and p0Time >= refStartTime
+        bool candidateIntact = structureDir == 1 ? close >= p0Price : close <= p0Price
+        if (transitionReady or continuationReady) and candidateIntact
+            refStart := p0Price
+            refEnd := p1Price
+            refStartTime := p0Time
+            refEndTime := p1Time
+            refConfirmed := true
+            watchIssued := false
+            watchActive := false
+    // Evaluate AFTER reference installation so a touch/cross during the pivot
+    // confirmation delay produces a watch on the confirmation bar, not earlier.
+    // Pivot breaks have priority, so a gap through both levels prints one flip.
+    if structureDir != 0 and refConfirmed and not bullFlip and not bearFlip
+        float frozenMid = (refStart + refEnd) / 2
+        bool beyondMid = structureDir == 1 ? close < frozenMid : close > frozenMid
+        watchActive := beyondMid
+        if beyondMid and not watchIssued
+            bullWatch := structureDir == -1
+            bearWatch := structureDir == 1
+            watchIssued := true
+
+    // Updating a provisional endpoint is visual only; midpoint alerts remain
+    // disabled until the reversal swing has a confirmed endpoint.
+    if structureDir != 0 and not refConfirmed
+        float candidate = structureDir == 1 ? srcH : srcL
+        if structureDir == 1 ? candidate > refEnd : candidate < refEnd
+            refEnd := candidate
+            refEndTime := time
+
+// ------------------- Independent recent-pivot direction ---------------------
+// Track ALL confirmed high/low pivots independently, including those that the
+// alternating swing builder omits. A wick never changes recent-pivot direction.
+var float recentHigh = na
+var float recentLow = na
+var int recentHighTime = na
+var int recentLowTime = na
+var int recentDir = 0
+var int mildDirection = 0
+bool recentBullFlip = false
+bool recentBearFlip = false
+bool mildBullSignal = false
+bool mildBearSignal = false
+if barstate.isconfirmed
+    int priorRecentDir = recentDir
+    int priorMildDirection = mildDirection
+    // Evaluate the levels known on the preceding bar before replacing them
+    // with pivots confirmed now. Allow later recrosses of the same pivot.
+    bool gainedRecent = not na(recentHigh) and close > recentHigh and close[1] <= recentHigh
+    bool lostRecent = not na(recentLow) and close < recentLow and close[1] >= recentLow
+    int breakDirection = gainedRecent ? 1 : lostRecent ? -1 : 0
+    if gainedRecent and lostRecent
+        breakDirection := recentHighTime >= recentLowTime ? 1 : -1
+    if breakDirection != 0
+        recentDir := breakDirection
+    recentBullFlip := recentDir == 1 and priorRecentDir != 1
+    recentBearFlip := recentDir == -1 and priorRecentDir != -1
+
+    // A selected-swing reversal takes priority over early warnings on this bar.
+    // Otherwise an opposing recent break starts mild color. A recent break
+    // back with the selected trend cancels it. Merely recrossing a midpoint
+    // does not reset the mild state.
+    if bullFlip or bearFlip or structureDir == 0
+        mildDirection := 0
+    else if breakDirection != 0
+        mildDirection := breakDirection == structureDir ? 0 : breakDirection
+    mildBullSignal := mildDirection == 1 and priorMildDirection != 1
+    mildBearSignal := mildDirection == -1 and priorMildDirection != -1
+
+    // Do not backdate either the pivot's availability or any signal.
+    if not na(ph)
+        recentHigh := ph
+        recentHighTime := time[lenR]
+    if not na(pl)
+        recentLow := pl
+        recentLowTime := time[lenR]
+
+bool recentMode = directionMode == "Recent pivot"
+bool fourColorMode = directionMode == "Four-color early warning"
+bool displayedBullFlip = recentMode ? recentBullFlip : bullFlip
+bool displayedBearFlip = recentMode ? recentBearFlip : bearFlip
+// +2/-2 = full bullish/bearish, +1/-1 = mildly bullish/bearish, 0 = unknown.
+int colorState = recentMode ? recentDir * 2 : fourColorMode and mildDirection != 0 ? mildDirection : structureDir * 2
+color activeBarColor = colorState == 2 ? structureBull : colorState == -2 ? structureBear : colorState == 1 ? mildBullColor : colorState == -1 ? mildBearColor : na
+string colorStateText = colorState == 2 ? "Bullish" : colorState == -2 ? "Bearish" : colorState == 1 ? "Mildly bullish" : colorState == -1 ? "Mildly bearish" : "Waiting for pivot break"
+
+// Only the CURRENT reference swing is highlighted. Historical signal markers
+// remain at their actual detection bars; none use negative plot offsets.
+var line relevantLeg = na
+var line relevantStart = na
+var line relevantEnd = na
+var line relevantMid = na
+var label relevantStartLabel = na
+var label relevantEndLabel = na
+var label relevantMidLabel = na
+float referenceMid = structureDir != 0 ? (refStart + refEnd) / 2 : na
+if showStructure and structureDir != 0
+    color directionColor = structureDir == 1 ? structureBull : structureBear
+    color midpointColor = watchActive ? structureWatch : directionColor
+    int barDuration = int(nz(time_close - time, nz(time - time[1], 60000)))
+    int rightTime = time + math.max(barDuration, 1) * structureRight
+    string legStyle = refConfirmed ? line.style_solid : line.style_dashed
+    if na(relevantLeg)
+        relevantLeg := line.new(refStartTime, refStart, refEndTime, refEnd, xloc = xloc.bar_time)
+        relevantStart := line.new(refStartTime, refStart, rightTime, refStart, xloc = xloc.bar_time)
+        relevantEnd := line.new(refEndTime, refEnd, rightTime, refEnd, xloc = xloc.bar_time)
+        relevantMid := line.new(refStartTime, referenceMid, rightTime, referenceMid, xloc = xloc.bar_time)
+    line.set_xy1(relevantLeg, refStartTime, refStart)
+    line.set_xy2(relevantLeg, refEndTime, refEnd)
+    line.set_color(relevantLeg, directionColor)
+    line.set_width(relevantLeg, structureWidth)
+    line.set_style(relevantLeg, legStyle)
+    line.set_xy1(relevantStart, refStartTime, refStart)
+    line.set_xy2(relevantStart, rightTime, refStart)
+    line.set_color(relevantStart, directionColor)
+    line.set_style(relevantStart, line.style_dotted)
+    line.set_xy1(relevantEnd, refEndTime, refEnd)
+    line.set_xy2(relevantEnd, rightTime, refEnd)
+    line.set_color(relevantEnd, directionColor)
+    line.set_style(relevantEnd, line.style_dotted)
+    line.set_xy1(relevantMid, refStartTime, referenceMid)
+    line.set_xy2(relevantMid, rightTime, referenceMid)
+    line.set_color(relevantMid, color.new(midpointColor, refConfirmed ? 0 : 65))
+    line.set_style(relevantMid, line.style_dashed)
+    line.set_width(relevantMid, 2)
+    if showStructureLabels
+        if na(relevantStartLabel)
+            relevantStartLabel := label.new(rightTime, refStart, "", xloc = xloc.bar_time, style = label.style_label_left, size = size.tiny)
+            relevantEndLabel := label.new(rightTime, refEnd, "", xloc = xloc.bar_time, style = label.style_label_left, size = size.tiny)
+            relevantMidLabel := label.new(rightTime, referenceMid, "", xloc = xloc.bar_time, style = label.style_label_left, size = size.tiny)
+        label.set_xy(relevantStartLabel, rightTime, refStart)
+        label.set_text(relevantStartLabel, (structureDir == 1 ? "Lose pivot: " : "Gain pivot: ") + str.tostring(refStart, format.mintick))
+        label.set_color(relevantStartLabel, directionColor)
+        label.set_textcolor(relevantStartLabel, color.black)
+        label.set_xy(relevantEndLabel, rightTime, refEnd)
+        label.set_text(relevantEndLabel, (structureDir == 1 ? "Bull swing high" : "Bear swing low") + (refConfirmed ? "" : " (forming)"))
+        label.set_color(relevantEndLabel, directionColor)
+        label.set_textcolor(relevantEndLabel, color.black)
+        label.set_xy(relevantMidLabel, rightTime, referenceMid)
+        label.set_text(relevantMidLabel, (refConfirmed ? "Watch midpoint: " : "Forming midpoint: ") + str.tostring(referenceMid, format.mintick))
+        label.set_color(relevantMidLabel, midpointColor)
+        label.set_textcolor(relevantMidLabel, color.black)
+
+plotshape(showWatchSignals and bullWatch, "Bullish midpoint watch", shape.circle, location.belowbar, color = na, size = size.small, text = "W", textcolor = structureWatch)
+plotshape(showWatchSignals and bearWatch, "Bearish midpoint watch", shape.circle, location.abovebar, color = na, size = size.small, text = "W", textcolor = structureWatch)
+plotshape(showFlipSignals and displayedBullFlip, "Bullish pivot gained", shape.triangleup, location.belowbar, color = na, size = size.small, text = "B", textcolor = structureBull)
+plotshape(showFlipSignals and displayedBearFlip, "Bearish pivot lost", shape.triangledown, location.abovebar, color = na, size = size.small, text = "S", textcolor = structureBear)
+// Counts cover loaded chart history, independently of signal visibility toggles.
+var int bullishWatchCount = 0
+var int bearishWatchCount = 0
+var int bullishFlipCount = 0
+var int bearishFlipCount = 0
+if bullWatch
+    bullishWatchCount += 1
+if bearWatch
+    bearishWatchCount += 1
+if displayedBullFlip
+    bullishFlipCount += 1
+if displayedBearFlip
+    bearishFlipCount += 1
+var table signalStatus = table.new(position.bottom_left, 2, 9, border_width = 1)
+if showSignalStatus and barstate.islast
+    color panelBg = color.new(color.black, 15)
+    string stateText = structureDir == 0 ? "Waiting for pivots" : (structureDir == 1 ? "Bullish" : "Bearish") + (refConfirmed ? " / confirmed swing" : " / forming swing")
+    table.cell(signalStatus, 0, 0, "Structure", text_color = color.white, bgcolor = panelBg, text_size = size.small)
+    table.cell(signalStatus, 1, 0, stateText, text_color = color.white, bgcolor = panelBg, text_size = size.small)
+    table.cell(signalStatus, 0, 1, "Bull / bear W", text_color = color.white, bgcolor = panelBg, text_size = size.small)
+    table.cell(signalStatus, 1, 1, str.tostring(bullishWatchCount) + " / " + str.tostring(bearishWatchCount), text_color = structureWatch, bgcolor = panelBg, text_size = size.small)
+    table.cell(signalStatus, 0, 2, "B / S letters", text_color = color.white, bgcolor = panelBg, text_size = size.small)
+    table.cell(signalStatus, 1, 2, str.tostring(bullishFlipCount) + " / " + str.tostring(bearishFlipCount), text_color = color.white, bgcolor = panelBg, text_size = size.small)
+    table.cell(signalStatus, 0, 3, "Pivot to break", text_color = color.white, bgcolor = panelBg, text_size = size.small)
+    table.cell(signalStatus, 1, 3, na(refStart) ? "--" : str.tostring(refStart, format.mintick), text_color = color.white, bgcolor = panelBg, text_size = size.small)
+    table.cell(signalStatus, 0, 4, "Watch midpoint", text_color = color.white, bgcolor = panelBg, text_size = size.small)
+    table.cell(signalStatus, 1, 4, refConfirmed ? str.tostring(referenceMid, format.mintick) : "Waiting for confirmation", text_color = color.white, bgcolor = panelBg, text_size = size.small)
+    table.cell(signalStatus, 0, 5, "W / B-S display", text_color = color.white, bgcolor = panelBg, text_size = size.small)
+    table.cell(signalStatus, 1, 5, (showWatchSignals ? "On" : "Off") + " / " + (showFlipSignals ? "On" : "Off"), text_color = color.white, bgcolor = panelBg, text_size = size.small)
+
+    table.cell(signalStatus, 0, 6, "Color state", text_color = color.white, bgcolor = panelBg, text_size = size.small)
+    table.cell(signalStatus, 1, 6, colorStateText, text_color = na(activeBarColor) ? color.white : activeBarColor, bgcolor = panelBg, text_size = size.small)
+    table.cell(signalStatus, 0, 7, "Direction mode", text_color = color.white, bgcolor = panelBg, text_size = size.small)
+    table.cell(signalStatus, 1, 7, directionMode, text_color = color.white, bgcolor = panelBg, text_size = size.small)
+    table.cell(signalStatus, 0, 8, "Recent high / low", text_color = color.white, bgcolor = panelBg, text_size = size.small)
+    table.cell(signalStatus, 1, 8, (na(recentHigh) ? "--" : str.tostring(recentHigh, format.mintick)) + " / " + (na(recentLow) ? "--" : str.tostring(recentLow, format.mintick)), text_color = color.white, bgcolor = panelBg, text_size = size.small)
+
+barcolor(paintStructureBars ? activeBarColor : na)
+// Independent text-only labels: same four-state color as the bar-color engine.
+// Dots can remain visible when candle coloring is disabled. Closed bars only.
+var array<label> barColorDots = array.new<label>()
+bool fullDotState = math.abs(colorState) == 2
+bool mildDotState = math.abs(colorState) == 1
+bool drawColorDot = (fullDotState and showFullDots) or (mildDotState and showMildDots)
+if barstate.isconfirmed and drawColorDot
+    int dotTicks = fullDotState ? fullDotOffset : mildDotOffset
+    int dotSize = fullDotState ? fullDotSize : mildDotSize
+    string dotFontChoice = fullDotState ? fullDotFont : mildDotFont
+    string dotFont = dotFontChoice == "Monospace" ? font.family_monospace : font.family_default
+    float dotY = colorState > 0 ? low - dotTicks * syminfo.mintick : high + dotTicks * syminfo.mintick
+    // Delete before allocating to keep the shared label budget under 500.
+    if array.size(barColorDots) >= keepColorDots
+        label.delete(array.shift(barColorDots))
+    label dotLabel = label.new(x = time, y = dotY, text = "•", xloc = xloc.bar_time,
+        yloc = yloc.price, style = label.style_none, color = color.new(color.black, 100),
+        textcolor = activeBarColor, size = dotSize, textalign = text.align_center, text_font_family = dotFont)
+    array.push(barColorDots, dotLabel)
+
+plot(colorState, "Color state (+2 bull, +1 mild bull, -1 mild bear, -2 bear)", display = display.data_window)
+plot(recentHigh, "Most recent confirmed pivot high", display = display.data_window)
+plot(recentLow, "Most recent confirmed pivot low", display = display.data_window)
+plot(structureDir, "Structural direction (+1 bull / -1 bear)", display = display.data_window)
+plot(refStart, "Structural pivot to gain / lose", display = display.data_window)
+plot(refConfirmed ? referenceMid : na, "Confirmed reference midpoint", display = display.data_window)
+alertcondition(bullWatch, "Bullish midpoint watch", "MidPoint Mania: close above the bearish swing midpoint on {{ticker}} ({{interval}}).")
+alertcondition(bearWatch, "Bearish midpoint watch", "MidPoint Mania: close below the bullish swing midpoint on {{ticker}} ({{interval}}).")
+alertcondition(displayedBullFlip, "Bullish flip - pivot gained", "MidPoint Mania: pivot gained in selected direction mode; bullish flip on {{ticker}} ({{interval}}).")
+alertcondition(displayedBearFlip, "Bearish flip - pivot lost", "MidPoint Mania: pivot lost in selected direction mode; bearish flip on {{ticker}} ({{interval}}).")
+alertcondition(bullFlip or bearFlip, "Any structural flip", "MidPoint Mania: structural direction changed on {{ticker}} ({{interval}}).")
+alertcondition(bullWatch or bearWatch or displayedBullFlip or displayedBearFlip or (fourColorMode and (mildBullSignal or mildBearSignal)), "Any structure signal", "MidPoint Mania: midpoint watch, mild direction change, or pivot flip on {{ticker}} ({{interval}}).")
+
+alertcondition(fourColorMode and mildBullSignal, "Mildly bullish", "MidPoint Mania: recent high gained while selected swing remains bearish on {{ticker}} ({{interval}}).")
+alertcondition(fourColorMode and mildBearSignal, "Mildly bearish", "MidPoint Mania: recent low lost while selected swing remains bullish on {{ticker}} ({{interval}}).")
+alertcondition(displayedBullFlip or displayedBearFlip, "Any flip - selected direction mode", "MidPoint Mania: direction flipped under the selected mode on {{ticker}} ({{interval}}).")
+
+// ----------------------- Resolve open performance legs -----------------------
+if array.size(pend) > 0
+    for i = array.size(pend) - 1 to 0
+        Leg g = array.get(pend, i)
+        bool tagged  = g.dir == 1 ? low <= g.mid : high >= g.mid
+        bool broken  = g.dir == 1 ? high > g.ext : low < g.ext
+        if tagged
+            nHit    := nHit + 1
+            sumBars := sumBars + (bar_index - g.bar)
+            array.remove(pend, i)
+        else if broken
+            nMiss := nMiss + 1
+            array.remove(pend, i)
+// --------------------------- History housekeeping ----------------------------
+while array.size(pivotLines) > keepPivots
+    line.delete(array.shift(pivotLines))
+    array.shift(pivotTimes)
+    array.shift(pivotNextTimes)
+    array.shift(pivotDirections)
+    array.shift(pivotStrengths)
+    array.shift(pivotSelected)
+while array.size(pivotMarks) > keepPivots
+    label.delete(array.shift(pivotMarks))
+while array.size(histLn) > keepN
+    line.delete(array.shift(histLn))
+    array.shift(histMidEndTimes)
+    array.shift(histMidNextTimes)
+    array.shift(midStrengths)
+    array.shift(midSelected)
+while array.size(histLb) > keepN
+    label.delete(array.shift(histLb))
+while array.size(histZZ) > keepN
+    line.delete(array.shift(histZZ))
+// -------------------- Midpoint / pivot proximity display --------------------
+// Use ONLY saved timestamps for old drawings. No dynamic history lookup, no
+// implicit bar_index-to-time lookup, and no 9,999-bar drawing cutoff.
+if useMidProximity and barstate.islast
+    float nearDistance = midNearTicks * syminfo.mintick
+    if array.size(histLn) > 0
+        for midIndex = 0 to array.size(histLn) - 1
+            line midpointLine = array.get(histLn, midIndex)
+            float midpointPrice = line.get_y1(midpointLine)
+            int endpointTime = array.get(histMidEndTimes, midIndex)
+            int nextTime = array.get(histMidNextTimes, midIndex)
+            bool isNear = math.abs(close - midpointPrice) <= nearDistance
+            int rightTime = isNear ? time : nextTime
+            line.set_xy1(midpointLine, endpointTime, midpointPrice)
+            line.set_xy2(midpointLine, rightTime, midpointPrice)
+            line.set_color(midpointLine, isNear ? midNearColor : midFarColor)
+            line.set_width(midpointLine, isNear ? midNearWidth : midFarWidth)
+            if showPrice and midIndex < array.size(histLb)
+                label midpointLabel = array.get(histLb, midIndex)
+                label.set_xy(midpointLabel, rightTime, midpointPrice)
+                label.set_textcolor(midpointLabel, isNear ? midNearColor : midFarColor)
+    if showLive and not na(liveLn) and not na(liveMid) and not na(runExtTime)
+        bool liveIsNear = math.abs(close - liveMid) <= nearDistance
+        // A current-bar extreme uses the preceding interval for a visible mark.
+        int liveAnchor = runExtTime == time ? nz(time[1], time - drawStep) : runExtTime
+        int liveNext = runExtTime == time ? time : runExtNextTime
+        int liveRight = liveIsNear ? time : liveNext
+        line.set_xy1(liveLn, liveAnchor, liveMid)
+        line.set_xy2(liveLn, liveRight, liveMid)
+        line.set_color(liveLn, liveIsNear ? midNearColor : midFarColor)
+        line.set_width(liveLn, liveIsNear ? midNearWidth : midFarWidth)
+
+if usePivotProximity and showPivots and barstate.islast and array.size(pivotLines) > 0
+    float nearDistance = pivotNearTicks * syminfo.mintick
+    for pivotIndex = 0 to array.size(pivotLines) - 1
+        line pivotLine = array.get(pivotLines, pivotIndex)
+        float pivotPrice = line.get_y1(pivotLine)
+        int originTime = array.get(pivotTimes, pivotIndex)
+        int nextTime = array.get(pivotNextTimes, pivotIndex)
+        bool isHigh = array.get(pivotDirections, pivotIndex) == 1
+        bool isNear = math.abs(close - pivotPrice) <= nearDistance
+        color nearColor = isHigh ? pivotNearHighColor : pivotNearLowColor
+        color farColor = isHigh ? pivotFarHighColor : pivotFarLowColor
+        line.set_xy1(pivotLine, originTime, pivotPrice)
+        line.set_xy2(pivotLine, isNear ? time : nextTime, pivotPrice)
+        line.set_color(pivotLine, isNear ? nearColor : farColor)
+        line.set_width(pivotLine, isNear ? pivotNearWidth : pivotFarWidth)
+
+// -------------------------- Priority display pass ---------------------------
+// Runs after the original proximity pass, reusing existing historical lines.
+// Only two extra lines are allocated: independently confirmed recent high/low.
+// Worst-case simultaneous line count, including creation before pruning: 500.
+var line priorityHighLine = na
+var line priorityLowLine = na
+if barstate.islast and priorityMode != "All"
+    float window = priorityUnits == "ATR" ? math.max(nz(priorityAtr, syminfo.mintick), syminfo.mintick) * priorityAtrDistance : priorityTickDistance * syminfo.mintick
+    float cluster = priorityClusterTicks * syminfo.mintick
+    float sizeWeight = prioritySizeWeight / 100.0
+    array<float> occupied = array.new<float>()
+    if showStructure and structureDir != 0
+        array.push(occupied, refStart)
+        array.push(occupied, refEnd)
+        array.push(occupied, referenceMid)
+    // These raw recent pivots can differ from the alternating swing pivots.
+    // Give them their own drawings so selection never silently omits them.
+    if showPivots
+        if not na(recentHigh)
+            if na(priorityHighLine)
+                priorityHighLine := line.new(recentHighTime, recentHigh, time, recentHigh, xloc = xloc.bar_time)
+            line.set_xy1(priorityHighLine, recentHighTime, recentHigh)
+            line.set_xy2(priorityHighLine, time, recentHigh)
+            line.set_color(priorityHighLine, pivotHighColor)
+            line.set_width(priorityHighLine, priorityRecentWidth)
+            line.set_style(priorityHighLine, pivotStyle)
+            array.push(occupied, recentHigh)
+        if not na(recentLow)
+            if na(priorityLowLine)
+                priorityLowLine := line.new(recentLowTime, recentLow, time, recentLow, xloc = xloc.bar_time)
+            line.set_xy1(priorityLowLine, recentLowTime, recentLow)
+            line.set_xy2(priorityLowLine, time, recentLow)
+            line.set_color(priorityLowLine, pivotLowColor)
+            line.set_width(priorityLowLine, priorityRecentWidth)
+            line.set_style(priorityLowLine, pivotStyle)
+            array.push(occupied, recentLow)
+
+    int midCount = array.size(histLn)
+    int pivotCount = array.size(pivotLines)
+    int totalCount = midCount + pivotCount
+    array<float> scores = array.new<float>(totalCount, na)
+    array<float> prices = array.new<float>(totalCount, na)
+    // One combined candidate pool shares the above/below quotas across pivots
+    // and midpoints. Metadata selections from the prior update provide memory.
+    if totalCount > 0
+        for idx = 0 to totalCount - 1
+            bool isMid = idx < midCount
+            int item = isMid ? idx : idx - midCount
+            line drawing = isMid ? array.get(histLn, item) : array.get(pivotLines, item)
+            float level = line.get_y1(drawing)
+            float strength = isMid ? array.get(midStrengths, item) : array.get(pivotStrengths, item)
+            bool retained = isMid ? array.get(midSelected, item) : array.get(pivotSelected, item)
+            float distance = math.abs(close - level)
+            float exitWindow = window * (retained ? 1.0 + priorityExitPct / 100.0 : 1.0)
+            bool eligible = priorityMode == "Largest Swings" or (priorityMode == "Relevant + Nearby" and distance <= exitWindow)
+            if eligible
+                float score = priorityMode == "Largest Swings" ? math.log(1.0 + strength) : sizeWeight * math.log(1.0 + strength) + (1.0 - sizeWeight) * (1.0 - distance / window)
+                // Stability bonus applies only to Nearby, preserving pure size ranking.
+                score += retained and priorityMode == "Relevant + Nearby" ? 0.10 : 0.0
+                array.set(scores, idx, score)
+            array.set(prices, idx, level)
+            if isMid
+                array.set(midSelected, item, false)
+            else
+                array.set(pivotSelected, item, false)
+
+        int aboveCount = 0
+        int belowCount = 0
+        int slots = priorityAbove + priorityBelow
+        if slots > 0 and priorityMode != "Relevant Only"
+            for slot = 0 to slots - 1
+                int best = -1
+                float bestScore = na
+                for idx = 0 to totalCount - 1
+                    float score = array.get(scores, idx)
+                    if not na(score)
+                        float level = array.get(prices, idx)
+                        bool above = level >= close
+                        bool room = above ? aboveCount < priorityAbove : belowCount < priorityBelow
+                        bool overlaps = false
+                        if array.size(occupied) > 0
+                            for zone = 0 to array.size(occupied) - 1
+                                if math.abs(level - array.get(occupied, zone)) <= cluster
+                                    overlaps := true
+                                    break
+                        if not room or overlaps
+                            array.set(scores, idx, na)
+                        else if na(bestScore) or score > bestScore
+                            best := idx
+                            bestScore := score
+                if best == -1
+                    break
+                float chosenPrice = array.get(prices, best)
+                array.push(occupied, chosenPrice)
+                if chosenPrice >= close
+                    aboveCount += 1
+                else
+                    belowCount += 1
+                if best < midCount
+                    array.set(midSelected, best, true)
+                else
+                    array.set(pivotSelected, best - midCount, true)
+                array.set(scores, best, na)
+
+        // Non-selected levels stay stored for future selection; hide/shorten only.
+        for idx = 0 to totalCount - 1
+            bool isMid = idx < midCount
+            int item = isMid ? idx : idx - midCount
+            line drawing = isMid ? array.get(histLn, item) : array.get(pivotLines, item)
+            bool selected = isMid ? array.get(midSelected, item) : array.get(pivotSelected, item)
+            int origin = isMid ? array.get(histMidEndTimes, item) : array.get(pivotTimes, item)
+            int nextTime = isMid ? array.get(histMidNextTimes, item) : array.get(pivotNextTimes, item)
+            float level = array.get(prices, idx)
+            color semanticColor = isMid ? cDone : array.get(pivotDirections, item) == 1 ? pivotHighColor : pivotLowColor
+            color historicalColor = selected ? semanticColor : priorityRemainder == "Hide" ? na : color.new(semanticColor, priorityFaint)
+            line.set_xy1(drawing, origin, level)
+            line.set_xy2(drawing, selected ? time : nextTime, level)
+            line.set_color(drawing, historicalColor)
+            line.set_width(drawing, selected ? priorityWidth : 1)
+            if isMid and showPrice and item < array.size(histLb)
+                label lb = array.get(histLb, item)
+                label.set_xy(lb, selected ? time : nextTime, level)
+                label.set_textcolor(lb, selected ? semanticColor : na)
+    if not na(liveLn)
+        line.set_color(liveLn, na)
+
+// ------------------------------- Stats table ---------------------------------
+tblP = tblPos == "Top right" ? position.top_right : tblPos == "Top left" ? position.top_left :
+       tblPos == "Bottom right" ? position.bottom_right : position.bottom_left
+var table st = table.new(tblP, 2, 7, border_width = 1, border_color = color.new(color.gray, 70))
+if showStats and barstate.islast
+    int   total = nHit + nMiss
+    float rate  = total > 0 ? 100.0 * nHit / total : na
+    color bg    = color.new(color.black, 20)
+    color fg    = color.new(color.white, 0)
+    table.cell(st, 0, 0, "Midpoint Mania", text_color = fg, text_size = size.small, bgcolor = color.new(cDone, 35))
+    table.cell(st, 1, 0, "", bgcolor = color.new(cDone, 35))
+    table.merge_cells(st, 0, 0, 1, 0)
+    table.cell(st, 0, 1, "Legs finished", text_color = fg, text_size = size.small, bgcolor = bg)
+    table.cell(st, 1, 1, str.tostring(total + array.size(pend)), text_color = fg, text_size = size.small, bgcolor = bg)
+    table.cell(st, 0, 2, "Reached 50%", text_color = fg, text_size = size.small, bgcolor = bg)
+    table.cell(st, 1, 2, str.tostring(nHit), text_color = color.new(color.lime, 0), text_size = size.small, bgcolor = bg)
+    table.cell(st, 0, 3, "Extreme broken first", text_color = fg, text_size = size.small, bgcolor = bg)
+    table.cell(st, 1, 3, str.tostring(nMiss), text_color = color.new(color.red, 0), text_size = size.small, bgcolor = bg)
+    table.cell(st, 0, 4, "Hit rate", text_color = fg, text_size = size.small, bgcolor = bg)
+    table.cell(st, 1, 4, na(rate) ? "—" : str.tostring(rate, "#.#") + "%", text_color = fg, text_size = size.small, bgcolor = bg)
+    table.cell(st, 0, 5, "Avg bars to reach", text_color = fg, text_size = size.small, bgcolor = bg)
+    table.cell(st, 1, 5, nHit > 0 ? str.tostring(sumBars / nHit, "#.#") : "—", text_color = fg, text_size = size.small, bgcolor = bg)
+    table.cell(st, 0, 6, "Still open", text_color = fg, text_size = size.small, bgcolor = bg)
+    table.cell(st, 1, 6, str.tostring(array.size(pend)), text_color = fg, text_size = size.small, bgcolor = bg)
+// ------------------------- Plots (data window) + alerts ----------------------
+plot(liveMid, "Forming midpoint",  color = na, display = display.data_window)
+plot(doneMid, "Finished midpoint", color = na, display = display.data_window)
+alertcondition(newDone, "New swing midpoint set", "A swing leg finished — its 50% midpoint is now fixed.")
+alertcondition(not na(liveMid) and ta.cross(close, liveMid), "Price crossed forming midpoint", "Price crossed the forming swing midpoint.")
