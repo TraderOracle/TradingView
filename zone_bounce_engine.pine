@@ -1,6 +1,6 @@
 //@version=6
 // ═══════════════════════════════════════════════════════════════════════════
-//  Zone & Line Bounce Engine  v11
+//  TO Bounce Engine  v13.5
 //
 //  TWO ENGINES SHARING ONE SET OF LEVELS
 //
@@ -23,11 +23,64 @@
 //  + 14 alertconditions = 32. Marker shapes are shared across level
 //  families and the colour is computed per bar to stay inside it.
 // ═══════════════════════════════════════════════════════════════════════════
-indicator("TO Bounce Engine v11", "TO Bounce Engine", overlay = true,
+indicator("TO Bounce Engine", "TO Bounce Engine", overlay = true,
      max_bars_back = 300, max_boxes_count = 500, max_labels_count = 500,
      max_lines_count = 500)
 
-// ═══════════════════════════ 1 · LINES ═══════════════════════════
+// ═════════════════ 1 · PASTED LEVELS & ZONES ═════════════════
+// NOTE: input.text_area() has no height or rows parameter — TradingView fixes
+// the widget height. Keeping the default to a single line is the only lever
+// that affects it. Use Level 1/2/3 for one-offs so the block stays short.
+gP = "Pasted levels & zones"
+tipTxt = "Three formats, mixable, one entry per line.\n\n" +
+     "A) price or price range, then name:\n" +
+     "7714.00 - 7702.75 Extreme Short\n" +
+     "7606.75 Line in the Sand\n\n" +
+     "B) name/price pairs (commas):\n" +
+     "vix r1, 29402, VAH, 29488\n\n" +
+     "C) top/bottom pairs (commas):\n" +
+     "top,7747.88,bottom,7746.17\n\n" +
+     "Name-first also works, with a single price or a range:\n" +
+     "Extreme Short: 7714.00 - 7702.75\n" +
+     "Range Daily Max 24500\n\n" +
+     "A short single word before a ':' is a ticker tag and is dropped; " +
+     "anything longer or containing spaces is kept as the name. ';' works as " +
+     "a line break."
+useCust = input.bool(true, "Enable pasted levels", group = gP)
+txtA    = input.text_area("top,7747.88,bottom,7746.17,top,7765.05,bottom,7763.34",
+     "Paste block", tooltip = tipTxt, group = gP)
+lvl1 = input.string("", "Level 1", tooltip = tipTxt, group = gP)
+lvl2 = input.string("", "Level 2", tooltip = tipTxt, group = gP)
+lvl3 = input.string("", "Level 3", tooltip = tipTxt, group = gP)
+matchSym = input.bool(false, "Only use lines whose ticker tag matches this chart", group = gP)
+drawCust = input.bool(true, "Draw pasted levels", group = gP)
+cCust    = input.color(color.new(color.teal, 0),  "    Default line colour", group = gP)
+cCustBg  = input.color(color.new(color.teal, 85), "    Default zone fill",   group = gP)
+custSty  = input.string("Dotted", "    Line style", options = ["Solid", "Dashed", "Dotted"], group = gP,
+     tooltip = "Applies to single-price levels only. Zones are drawn borderless.")
+cTopBot  = input.color(color.new(#4FC3F7, 85), "top/bottom zone colour", group = gP,
+     tooltip = "Fill for any zone built from a top/bottom pair (format C). Borders are removed, so this is the whole appearance of the box.")
+showDbg  = input.bool(false, "Show parsed levels table", group = gP,
+     tooltip = "Lists exactly what the parser produced: the name in [brackets] so stray whitespace is visible, the price or range, and which colour rule matched. Use this when a level is coloured or named unexpectedly.")
+
+// ═══════════════ 2 · TRADERSMARTS PALETTE ═══════════════
+// Auto-detected: if any input field contains "Execution/Target" the paste is
+// treated as a TraderSmarts sheet and levels are coloured by name. Matching
+// is case-insensitive and by substring, so "Highest Odds Short FTU" still
+// picks up the Highest Odds Short colour.
+gTS    = "TraderSmarts colours"
+tsMode = input.string("Auto", "Apply palette", options = ["Auto", "Always", "Never"], group = gTS,
+     tooltip = "Auto keys off the text 'Execution/Target' appearing anywhere in the pasted levels.")
+cTsExS = input.color(color.new(#EF5350, 82), "Extreme Short",      group = gTS)
+cTsHoS = input.color(color.new(#FF7043, 82), "Highest Odds Short", group = gTS)
+cTsRgS = input.color(color.new(#FFB74D, 85), "Range Short",        group = gTS)
+cTsLis = input.color(color.new(#FFFFFF, 0),  "Line in the Sand",   group = gTS,
+     tooltip = "Usually a single price, so this is a line colour rather than a fill.")
+cTsRgL = input.color(color.new(#AED581, 85), "Range Long",         group = gTS)
+cTsHoL = input.color(color.new(#66BB6A, 82), "Highest Odds Long",  group = gTS)
+cTsExL = input.color(color.new(#26A69A, 82), "Extreme Long",       group = gTS)
+
+// ═══════════════════════════ 3 · LINES ═══════════════════════════
 gL = "Lines"
 shEma  = input.bool(true, "EMA 200",            group = gL, inline = "ema")
 cEma   = input.color(#E8E4D9, "",               group = gL, inline = "ema")
@@ -55,7 +108,7 @@ fvgTr  = input.int(75, "    FVG box transparency %", minval = 0, maxval = 100, g
 
 extRt  = input.int(3, "Extend levels right (bars)", minval = 0, group = gL)
 
-// ═══════════════════════ 2 · LINE TITLES ═══════════════════════
+// ═══════════════════════ 4 · LINE TITLES ═══════════════════════
 // Pine can only use the chart's system font or a monospace font — Arial is
 // not selectable — and text size is an enum, not a point value.
 gN      = "Line titles"
@@ -67,36 +120,7 @@ lblFnIn = input.string("Default", "Font", options = ["Default", "Monospace"], gr
 lblWtIn = input.string("Regular", "Weight", options = ["Regular", "Bold", "Italic"], group = gN)
 lblOff  = input.int(4, "Title offset right (bars)", minval = 0, group = gN)
 
-// ═════════════════ 3 · PASTED LEVELS & ZONES ═════════════════
-// NOTE: input.text_area() has no height or rows parameter — TradingView fixes
-// the widget height. Keeping the default to a single line is the only lever
-// that affects it. Use Level 1/2/3 for one-offs so the block stays short.
-gP = "Pasted levels & zones"
-tipTxt = "Three formats, mixable, one entry per line.\n\n" +
-     "A) price or price range, then name:\n" +
-     "7714.00 - 7702.75 Extreme Short\n" +
-     "7606.75 Line in the Sand\n\n" +
-     "B) name/price pairs (commas):\n" +
-     "vix r1, 29402, VAH, 29488\n\n" +
-     "C) top/bottom pairs (commas):\n" +
-     "top,7747.88,bottom,7746.17\n\n" +
-     "Name-first also works: 'Range Daily Max 24500' and " +
-     "'Range Daily Max: 24500' both parse. A short single word before a ':' " +
-     "is treated as a ticker tag and dropped; anything longer or containing " +
-     "spaces is kept as the name. ';' works as a line break."
-useCust = input.bool(true, "Enable pasted levels", group = gP)
-txtA    = input.text_area("top,7747.88,bottom,7746.17,top,7765.05,bottom,7763.34",
-     "Paste block", tooltip = tipTxt, group = gP)
-lvl1 = input.string("", "Level 1", tooltip = tipTxt, group = gP)
-lvl2 = input.string("", "Level 2", tooltip = tipTxt, group = gP)
-lvl3 = input.string("", "Level 3", tooltip = tipTxt, group = gP)
-matchSym = input.bool(false, "Only use lines whose ticker tag matches this chart", group = gP)
-drawCust = input.bool(true, "Draw pasted levels", group = gP)
-cCust    = input.color(color.new(color.teal, 20), "    Line / border", group = gP)
-cCustBg  = input.color(color.new(color.teal, 88), "    Zone fill", group = gP)
-custSty  = input.string("Dotted", "    Line style", options = ["Solid", "Dashed", "Dotted"], group = gP)
-
-// ═══════════════════ 4 · TIMEZONE & SESSIONS ═══════════════════
+// ═══════════════════ 5 · TIMEZONE & SESSIONS ═══════════════════
 gT = "Timezone & sessions"
 tz = input.string("America/Chicago", "Timezone", group = gT, options = [
      "America/Chicago", "America/New_York", "America/Denver", "America/Los_Angeles",
@@ -109,7 +133,7 @@ orSess   = input.session("0830-0930", "1H opening range", group = gT, tooltip = 
 asiaSess = input.session("1800-0300", "Asia session",     group = gT)
 lonSess  = input.session("0200-1030", "London session",   group = gT)
 
-// ══════════════════════════ 5 · RULES ══════════════════════════
+// ══════════════════════════ 6 · RULES ══════════════════════════
 gA       = "Approach"
 prevN    = input.int(2, "Approach candles", minval = 0, maxval = 10, group = gA,
      tooltip = "Candles before first contact that must be travelling toward the band. 0 disables.")
@@ -173,6 +197,9 @@ cFvgBoxS = color.new(cFvgDn, fvgTr)
 var array<string> pNames = array.new<string>()
 var array<float>  pTops  = array.new<float>()
 var array<float>  pBots  = array.new<float>()
+var array<int>    pSrc   = array.new<int>()     // 0 = named/plain, 1 = top/bottom pair
+var array<color>  pCols  = array.new<color>()
+var array<string> pRule  = array.new<string>()   // which colour rule matched, for the debug table
 
 // Pine functions cannot assign to globals, so the zone counter lives in a
 // one-element array — arrays pass by reference, so the count survives across
@@ -187,7 +214,8 @@ isBotKey(string k) =>
     kk = str.lower(str.trim(k))
     kk == "bottom" or kk == "bot" or kk == "b" or kk == "low" or kk == "lo"
 
-addParsed(array<string> outN, array<float> outT, array<float> outB, string nm, float a, float b) =>
+addParsed(array<string> outN, array<float> outT, array<float> outB, array<int> outS,
+     string nm, float a, float b, int src) =>
     base = str.length(str.trim(nm)) == 0 ? "LVL" : str.trim(nm)
     string fin = base
     int    k   = 2
@@ -197,6 +225,7 @@ addParsed(array<string> outN, array<float> outT, array<float> outB, string nm, f
     outN.push(fin)
     outT.push(math.max(a, b))
     outB.push(math.min(a, b))
+    outS.push(src)
     0
 
 // Join tokens from index ixA to ixB with single spaces, skipping blanks.
@@ -211,7 +240,8 @@ joinToks(array<string> toks, int ixA, int ixB) =>
                 out := str.length(out) == 0 ? tk : out + " " + tk
     out
 
-parseLevels(string src, array<string> outN, array<float> outT, array<float> outB, array<int> zSeq, bool matchTicker) =>
+parseLevels(string src, array<string> outN, array<float> outT, array<float> outB,
+     array<int> outS, array<int> zSeq, bool matchTicker) =>
     // Pending halves of a top/bottom pair, at function scope so a pair can
     // straddle a line break as well as sitting on one line.
     float pTop = na
@@ -232,9 +262,9 @@ parseLevels(string src, array<string> outN, array<float> outT, array<float> outB
                 // Split-based, never index arithmetic: str.pos + str.substring
                 // dropped the leading character of the payload whenever there
                 // was no space after the colon.
-                // A tag is a SHORT SINGLE TOKEN. "Range Daily Max: 24500" is a
-                // name, not a tag, so the colon is simply dissolved and the
-                // words are kept.
+                // A tag is a SHORT SINGLE TOKEN. "Extreme Short: 7714 - 7702"
+                // is a name, not a tag, so the colon is dissolved and the words
+                // are kept.
                 if str.contains(ln, ":")
                     cparts = str.split(ln, ":")
                     pre    = str.trim(cparts.get(0))
@@ -274,27 +304,28 @@ parseLevels(string src, array<string> outN, array<float> outT, array<float> outB
                             if not na(num)
                                 if isTopKey(buf)
                                     if not na(pTop)
-                                        addParsed(outN, outT, outB, "Level", pTop, pTop)
+                                        addParsed(outN, outT, outB, outS, "Level", pTop, pTop, 1)
                                     pTop := num
                                 else if isBotKey(buf)
                                     if not na(pBot)
-                                        addParsed(outN, outT, outB, "Level", pBot, pBot)
+                                        addParsed(outN, outT, outB, outS, "Level", pBot, pBot, 1)
                                     pBot := num
                                 else
-                                    addParsed(outN, outT, outB, buf, num, num)
+                                    addParsed(outN, outT, outB, outS, buf, num, num, 0)
                                 buf := ""
                                 if not na(pTop) and not na(pBot)
                                     zSeq.set(0, zSeq.get(0) + 1)
-                                    addParsed(outN, outT, outB, "Zone " + str.tostring(zSeq.get(0)), pTop, pBot)
+                                    addParsed(outN, outT, outB, outS,
+                                    "" + str.tostring(zSeq.get(0)), pTop, pBot, 1)
                                     pTop := na
                                     pBot := na
                             else if not na(rt)
-                                addParsed(outN, outT, outB, buf, rt, rb)
+                                addParsed(outN, outT, outB, outS, buf, rt, rb, 0)
                                 buf := ""
                             else
                                 buf := str.length(buf) == 0 ? tk : buf + " " + tk
 
-                // ── format A: "price [- price] name", or "name price" ──
+                // ── format A: "price [- price] name", or "name price [- price]" ──
                 else if use and str.length(payload) > 0
                     p    = str.replace_all(payload, "-", " - ")
                     toks = str.split(p, " ")
@@ -321,35 +352,123 @@ parseLevels(string src, array<string> outN, array<float> outT, array<float> outB
                                     n2 := v
 
                     if not na(n1)
-                        nm = joinToks(toks, nameStart, toks.size() - 1)
-                        addParsed(outN, outT, outB, nm, n1, na(n2) ? n1 : n2)
+                        addParsed(outN, outT, outB, outS,
+                             joinToks(toks, nameStart, toks.size() - 1), n1, na(n2) ? n1 : n2, 0)
                     else
-                        // No leading number — try "name ... price" instead, so
-                        // "Range Daily Max 24500" keeps its name.
-                        float tv   = na
-                        int   tIdx = -1
+                        // No leading number, so the name comes first. Walk back
+                        // from the end collecting up to two numbers, and accept
+                        // the second one only if a dash separated them — that
+                        // keeps "Pivot 3 7650" from being read as a 3–7650 range
+                        // while still parsing "Extreme Short: 7714.00 - 7702.75".
+                        float tB = na
+                        float tA = na
+                        bool  sawDash = false
+                        int   nameEnd = -1
                         for ti = toks.size() - 1 to 0
                             tk = str.trim(toks.get(ti))
-                            if str.length(tk) > 0 and na(tv)
-                                v = str.tonumber(tk)
-                                if not na(v)
-                                    tv   := v
-                                    tIdx := ti
-                        if not na(tv) and tIdx > 0
-                            addParsed(outN, outT, outB, joinToks(toks, 0, tIdx - 1), tv, tv)
+                            if str.length(tk) > 0
+                                if tk == "-"
+                                    if not na(tB) and na(tA)
+                                        sawDash := true
+                                    else
+                                        nameEnd := ti
+                                        break
+                                else
+                                    v = str.tonumber(tk)
+                                    if na(v)
+                                        nameEnd := ti
+                                        break
+                                    else if na(tB)
+                                        tB := v
+                                    else if sawDash and na(tA)
+                                        tA := v
+                                    else
+                                        nameEnd := ti
+                                        break
+                        if not na(tB) and nameEnd >= 0
+                            addParsed(outN, outT, outB, outS,
+                                 joinToks(toks, 0, nameEnd), na(tA) ? tB : tA, tB, 0)
 
     // An unpaired half is a lone price, not half a zone.
     if not na(pTop)
-        addParsed(outN, outT, outB, "Level", pTop, pTop)
+        addParsed(outN, outT, outB, outS, "Level", pTop, pTop, 1)
     if not na(pBot)
-        addParsed(outN, outT, outB, "Level", pBot, pBot)
+        addParsed(outN, outT, outB, outS, "Level", pBot, pBot, 1)
     0
 
+// ── TraderSmarts detection & colour assignment ──
+// Everything is matched against a normalised key: lowercased with spaces,
+// slashes, hyphens and underscores stripped. That way "Execution / Target",
+// "Execution-Target" and "execution/target" all detect, and level names are
+// matched on short stems rather than exact phrases so a character or two lost
+// in the paste does not silently drop the colour.
+tsKey(string s) =>
+    x = str.lower(s)
+    x := str.replace_all(x, " ", "")
+    x := str.replace_all(x, "/", "")
+    x := str.replace_all(x, "-", "")
+    x := str.replace_all(x, "_", "")
+    x
+
+tsFound = str.contains(tsKey(txtA), "executiontarget") or
+     str.contains(tsKey(lvl1), "executiontarget") or
+     str.contains(tsKey(lvl2), "executiontarget") or
+     str.contains(tsKey(lvl3), "executiontarget")
+tsOn = tsMode == "Always" or (tsMode == "Auto" and tsFound)
+
+// Returns [colour, rule]. An empty rule means nothing matched.
+tsColour(string nk) =>
+    isShort = str.contains(nk, "sho")
+    isLong  = str.contains(nk, "lon")
+    isExtr  = str.contains(nk, "extrem")
+    isOdds  = str.contains(nk, "odds") or str.contains(nk, "highest")
+    isRange = str.contains(nk, "rang")
+    isLis   = str.contains(nk, "inthes") or str.contains(nk, "sand")
+    color  c = na
+    string r = ""
+    if isLis
+        c := cTsLis
+        r := "Line in the Sand"
+    else if isExtr and isShort
+        c := cTsExS
+        r := "Extreme Short"
+    else if isExtr and isLong
+        c := cTsExL
+        r := "Extreme Long"
+    else if isOdds and isShort
+        c := cTsHoS
+        r := "Highest Odds Short"
+    else if isOdds and isLong
+        c := cTsHoL
+        r := "Highest Odds Long"
+    else if isRange and isShort
+        c := cTsRgS
+        r := "Range Short"
+    else if isRange and isLong
+        c := cTsRgL
+        r := "Range Long"
+    [c, r]
+
 if barstate.isfirst and useCust
-    parseLevels(txtA, pNames, pTops, pBots, zoneSeq, matchSym)
-    parseLevels(lvl1, pNames, pTops, pBots, zoneSeq, matchSym)
-    parseLevels(lvl2, pNames, pTops, pBots, zoneSeq, matchSym)
-    parseLevels(lvl3, pNames, pTops, pBots, zoneSeq, matchSym)
+    parseLevels(txtA, pNames, pTops, pBots, pSrc, zoneSeq, matchSym)
+    parseLevels(lvl1, pNames, pTops, pBots, pSrc, zoneSeq, matchSym)
+    parseLevels(lvl2, pNames, pTops, pBots, pSrc, zoneSeq, matchSym)
+    parseLevels(lvl3, pNames, pTops, pBots, pSrc, zoneSeq, matchSym)
+    if pNames.size() > 0
+        for i = 0 to pNames.size() - 1
+            isZone = pTops.get(i) != pBots.get(i)
+            color  c = isZone ? cCustBg : cCust
+            string r = isZone ? "default zone" : "default line"
+            if pSrc.get(i) == 1
+                c := cTopBot                    // top/bottom pair wins outright
+                r := "top/bottom"
+            else if tsOn
+                [c2, r2] = tsColour(tsKey(pNames.get(i)))
+                if str.length(r2) > 0
+                    c := c2
+                    r := r2
+            pCols.push(c)
+            pRule.push(r)
 
 abbrOf(string nm) =>
     str.length(nm) <= 6 ? nm : str.substring(nm, 0, 6)
@@ -611,17 +730,21 @@ drawLvl(lnAsL, asL, asX, cAs, shAs)
 drawLvl(lnLnH, lnH, lnX, cLn, shLn)
 drawLvl(lnLnL, lnL, lnX, cLn, shLn)
 
+// Zones are drawn BORDERLESS — border_width 0 everywhere a rectangle is a
+// zone. The border colour is still set to match the fill so that re-enabling
+// a width does not produce a mismatched outline.
 if barstate.isfirst and useCust and drawCust and pNames.size() > 0
     sty = custSty == "Solid" ? line.style_solid : custSty == "Dashed" ? line.style_dashed : line.style_dotted
     for i = 0 to pNames.size() - 1
         tp = pTops.get(i)
         bt = pBots.get(i)
+        cc = pCols.get(i)
         if tp == bt
             line.new(bar_index, tp, bar_index + 1, tp, xloc = xloc.bar_index,
-                 extend = extend.both, color = cCust, style = sty, width = 1)
+                 extend = extend.both, color = color.new(cc, 0), style = sty, width = 1)
         else
             box.new(time, tp, time + 1, bt, xloc = xloc.bar_time, extend = extend.both,
-                 border_color = cCust, border_style = sty, border_width = 1, bgcolor = cCustBg)
+                 border_color = cc, border_width = 0, bgcolor = cc)
 
 // ═══════════════════════ LINE TITLES ═══════════════════════
 // style_label_left anchors the text's LEFT edge at the point, so text sits to
@@ -655,14 +778,14 @@ var label tLnL = na
 var array<label> tCust = array.new<label>()
 
 if barstate.islast
-    tEma := titleLbl(tEma, "EMA " + str.tostring(emaLen), ema200, shEma, cEma)
-    tVwp := titleLbl(tVwp, "VWAP",        vwp, shVwp, cVwp)
-    tOrH := titleLbl(tOrH, "OR High",     orH, shOr,  cOr)
-    tOrL := titleLbl(tOrL, "OR Low",      orL, shOr,  cOr)
-    tAsH := titleLbl(tAsH, "Asia High",   asH, shAs,  cAs)
-    tAsL := titleLbl(tAsL, "Asia Low",    asL, shAs,  cAs)
-    tLnH := titleLbl(tLnH, "London High", lnH, shLn,  cLn)
-    tLnL := titleLbl(tLnL, "London Low",  lnL, shLn,  cLn)
+    tEma := titleLbl(tEma, "", ema200, shEma, cEma)
+    tVwp := titleLbl(tVwp, "",        vwp, shVwp, cVwp)
+    tOrH := titleLbl(tOrH, "",     orH, shOr,  cOr)
+    tOrL := titleLbl(tOrL, "",      orL, shOr,  cOr)
+    tAsH := titleLbl(tAsH, "",   asH, shAs,  cAs)
+    tAsL := titleLbl(tAsL, "",    asL, shAs,  cAs)
+    tLnH := titleLbl(tLnH, "", lnH, shLn,  cLn)
+    tLnL := titleLbl(tLnL, "",  lnL, shLn,  cLn)
     if tCust.size() > 0
         for i = 0 to tCust.size() - 1
             label.delete(tCust.get(i))
@@ -673,24 +796,26 @@ if barstate.islast
             bt  = pBots.get(i)
             txt = pNames.get(i) + (lblPx ? "  " + (tp == bt ? str.tostring(tp, format.mintick)
                  : str.tostring(bt, format.mintick) + "–" + str.tostring(tp, format.mintick)) : "")
-            tCust.push(label.new(bar_index + lblOff, tp, txt,
+            // Zone fills are deliberately transparent; force the title opaque
+            // or it would be unreadable.
+            tCust.push(label.new(bar_index + lblOff, tp, "",
                  style            = label.style_label_left,
                  color            = color.new(color.black, 100),
-                 textcolor        = cCust,
+                 textcolor        = color.new(pCols.get(i), 0),
                  size             = lblSz,
                  text_font_family = lblFn,
                  text_formatting  = lblWt,
                  textalign        = text.align_left))
 
 // ════════════════════════ BAND REGISTRY ════════════════════════
-var Band bEma = Band.new(name = "EMA 200",     abbr = "EMA", col = cEma)
-var Band bVwp = Band.new(name = "VWAP",        abbr = "VW",  col = cVwp)
-var Band bOrH = Band.new(name = "OR High",     abbr = "ORH", col = cOr)
-var Band bOrL = Band.new(name = "OR Low",      abbr = "ORL", col = cOr)
-var Band bAsH = Band.new(name = "Asia High",   abbr = "ASH", col = cAs)
-var Band bAsL = Band.new(name = "Asia Low",    abbr = "ASL", col = cAs)
-var Band bLnH = Band.new(name = "London High", abbr = "LNH", col = cLn)
-var Band bLnL = Band.new(name = "London Low",  abbr = "LNL", col = cLn)
+var Band bEma = Band.new(name = "EMA 200",     abbr = "", col = cEma)
+var Band bVwp = Band.new(name = "VWAP",        abbr = "",  col = cVwp)
+var Band bOrH = Band.new(name = "OR High",     abbr = "", col = cOr)
+var Band bOrL = Band.new(name = "OR Low",      abbr = "", col = cOr)
+var Band bAsH = Band.new(name = "Asia High",   abbr = "", col = cAs)
+var Band bAsL = Band.new(name = "Asia Low",    abbr = "", col = cAs)
+var Band bLnH = Band.new(name = "London High", abbr = "", col = cLn)
+var Band bLnL = Band.new(name = "London Low",  abbr = "", col = cLn)
 
 var array<Band> custBands = array.new<Band>()
 var array<Band> allBands  = array.new<Band>()
@@ -709,7 +834,7 @@ if barstate.isfirst
             tp = pTops.get(i)
             bt = pBots.get(i)
             bd = Band.new(name = pNames.get(i), abbr = abbrOf(pNames.get(i)),
-                 col = cCust, useFar = tp != bt, fTop = tp, fBot = bt)
+                 col = color.new(pCols.get(i), 0), useFar = tp != bt, fTop = tp, fBot = bt)
             custBands.push(bd)
             allBands.push(bd)
 
@@ -832,8 +957,7 @@ if useT5 and barstate.isconfirmed and not na(atrv)
             box bx = na
             if showFvg
                 bx := box.new(bar_index - 2, gTop, bar_index, gBot,
-                     border_color = color.new(dir == 1 ? cFvgUp : cFvgDn, 40),
-                     bgcolor = dir == 1 ? cFvgBoxB : cFvgBoxS)
+                     border_width = 0, bgcolor = dir == 1 ? cFvgBoxB : cFvgBoxS)
             setups.push(Setup.new(t.nm, dir, gTop, gBot, cp, bar_index, 0, 0, bx))
             touches.remove(best)
 
@@ -894,15 +1018,29 @@ if useT5 and barstate.isconfirmed and not na(atrv)
                 setups.remove(i)
 
 // ════════════════════════ AGGREGATE ════════════════════════
+// Pasted levels can each carry their own colour, so the marker colour is
+// captured from whichever band actually fired.
 cBncB = false
 cBncS = false
 cSwpB = false
 cSwpS = false
+color cBncBc = cCust
+color cBncSc = cCust
+color cSwpBc = cCust
+color cSwpSc = cCust
 for bd in custBands
-    cBncB := cBncB or bd.sig( 1, false)
-    cBncS := cBncS or bd.sig(-1, false)
-    cSwpB := cSwpB or bd.sig( 1, true)
-    cSwpS := cSwpS or bd.sig(-1, true)
+    if bd.sig(1, false)
+        cBncB  := true
+        cBncBc := bd.col
+    if bd.sig(-1, false)
+        cBncS  := true
+        cBncSc := bd.col
+    if bd.sig(1, true)
+        cSwpB  := true
+        cSwpBc := bd.col
+    if bd.sig(-1, true)
+        cSwpS  := true
+        cSwpSc := bd.col
 
 emaBncB = bEma.sig( 1, false)
 emaBncS = bEma.sig(-1, false)
@@ -936,8 +1074,8 @@ for bd in allBands
     tag  := joinTxt(tag,  bd.tagTxt(), " ")
 
 if lffcBull or lffcBear
-    note := joinTxt(note, "FVG continuation " + (lffcBull ? "long" : "short") + " off " + lffcName, "  |  ")
-    tag  := joinTxt(tag, "FVG" + (lffcBull ? "▲" : "▼"), " ")
+    note := joinTxt(note, "" + (lffcBull ? "long" : "short") + " off " + lffcName, "  |  ")
+    tag  := joinTxt(tag, "" + (lffcBull ? "▲" : "▼"), " ")
 
 anyBull = emaBncB or vwpBncB or orBncB or asBncB or lnBncB or cBncB or
      emaSwpB or vwpSwpB or orSwpB or asSwpB or lnSwpB or cSwpB or lffcBull
@@ -963,13 +1101,13 @@ lineBncSc = emaBncS ? cEmaDn : vwpBncS ? cVwpDn : orBncS ? cOr : asBncS ? cAs : 
 
 swpB  = emaSwpB or vwpSwpB or orSwpB or asSwpB or lnSwpB or cSwpB
 swpS  = emaSwpS or vwpSwpS or orSwpS or asSwpS or lnSwpS or cSwpS
-swpBc = emaSwpB ? cEmaUp : vwpSwpB ? cVwpUp : orSwpB ? cOr : asSwpB ? cAs : lnSwpB ? cLn : cCust
-swpSc = emaSwpS ? cEmaDn : vwpSwpS ? cVwpDn : orSwpS ? cOr : asSwpS ? cAs : lnSwpS ? cLn : cCust
+swpBc = emaSwpB ? cEmaUp : vwpSwpB ? cVwpUp : orSwpB ? cOr : asSwpB ? cAs : lnSwpB ? cLn : cSwpBc
+swpSc = emaSwpS ? cEmaDn : vwpSwpS ? cVwpDn : orSwpS ? cOr : asSwpS ? cAs : lnSwpS ? cLn : cSwpSc
 
 plotshape(lineBncB, "Line bounce up",   shape.triangleup,   location.belowbar, lineBncBc, size = size.tiny, offset = mkOff)
 plotshape(lineBncS, "Line bounce down", shape.triangledown, location.abovebar, lineBncSc, size = size.tiny, offset = mkOff)
-plotshape(cBncB,    "Zone bounce up",   shape.diamond,      location.belowbar, cCust,     size = size.tiny, offset = mkOff)
-plotshape(cBncS,    "Zone bounce down", shape.diamond,      location.abovebar, cCust,     size = size.tiny, offset = mkOff)
+plotshape(cBncB,    "Zone bounce up",   shape.diamond,      location.belowbar, cBncBc,    size = size.tiny, offset = mkOff)
+plotshape(cBncS,    "Zone bounce down", shape.diamond,      location.abovebar, cBncSc,    size = size.tiny, offset = mkOff)
 plotshape(swpB,     "Sweep up",         shape.xcross,       location.belowbar, swpBc,     size = size.tiny, offset = mkOff)
 plotshape(swpS,     "Sweep down",       shape.xcross,       location.abovebar, swpSc,     size = size.tiny, offset = mkOff)
 
@@ -1014,3 +1152,37 @@ alertcondition(sAny, "Any signal", "Confirmed bounce, sweep or FVG continuation"
 
 if sAny
     alert(syminfo.ticker + " " + timeframe.period + "  " + note, alert.freq_once_per_bar)
+
+// ════════════════════════ DEBUG TABLE ════════════════════════
+// Tables cost nothing against the plot budget. Names are wrapped in brackets
+// so leading or trailing whitespace, and any truncation, is visible.
+// Deleted and rebuilt rather than created once, same reason as the titles.
+var table dbg = na
+if showDbg and barstate.islast
+    if not na(dbg)
+        table.delete(dbg)
+    n    = pNames.size()
+    rows = math.min(n, 25)
+    dbg := table.new(position.bottom_right, 3, rows + 2, border_width = 1,
+         bgcolor = color.new(color.black, 15), frame_color = color.gray, frame_width = 1)
+    table.cell(dbg, 0, 0, "TraderSmarts: " + (tsOn ? "ON" : "off") + (tsFound ? " (detected)" : ""),
+         text_color = tsOn ? color.lime : color.gray, text_size = size.tiny, text_halign = text.align_left)
+    table.cell(dbg, 1, 0, "parsed: " + str.tostring(n),
+         text_color = color.gray, text_size = size.tiny)
+    table.cell(dbg, 2, 0, n > rows ? "showing first " + str.tostring(rows) : "",
+         text_color = color.gray, text_size = size.tiny)
+    table.cell(dbg, 0, 1, "name", text_color = color.silver, text_size = size.tiny, text_halign = text.align_left)
+    table.cell(dbg, 1, 1, "price", text_color = color.silver, text_size = size.tiny)
+    table.cell(dbg, 2, 1, "colour rule", text_color = color.silver, text_size = size.tiny)
+    if rows > 0
+        for i = 0 to rows - 1
+            tp = pTops.get(i)
+            bt = pBots.get(i)
+            table.cell(dbg, 0, i + 2, "[" + pNames.get(i) + "]",
+                 text_color = color.new(pCols.get(i), 0), text_size = size.tiny, text_halign = text.align_left)
+            table.cell(dbg, 1, i + 2, tp == bt ? str.tostring(tp, format.mintick)
+                 : str.tostring(bt, format.mintick) + "–" + str.tostring(tp, format.mintick),
+                 text_color = color.silver, text_size = size.tiny)
+            table.cell(dbg, 2, i + 2, pRule.get(i),
+                 text_color = str.startswith(pRule.get(i), "default") ? color.gray : color.new(pCols.get(i), 0),
+                 text_size = size.tiny, text_halign = text.align_left)
