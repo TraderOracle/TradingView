@@ -1,0 +1,137 @@
+//@version=6
+indicator("🏦 AI Trading Gang", overlay = true)
+
+// ══════════════════════════════════════════════════════════════
+//  20 VIRTUAL TRADERS — each runs one popular strategy and votes
+//  LONG (green) or SHORT (red) on every candle close.
+// ══════════════════════════════════════════════════════════════
+
+// ─── Inputs ───────────────────────────────────────────────────
+grpT = "Dashboard"
+posInput = input.string("Top Center", "Position",
+     options = ["Top Left","Top Center","Top Right","Middle Center","Bottom Left","Bottom Center","Bottom Right"], group = grpT)
+szInput  = input.string("Small", "Text size", options = ["Tiny","Small","Normal"], group = grpT)
+
+grpS = "Strategy settings"
+rsiLen     = input.int(14, "RSI length",  group = grpS)
+emaFastLen = input.int(9,  "Fast EMA",    group = grpS)
+emaSlowLen = input.int(21, "Slow EMA",    group = grpS)
+trendLen   = input.int(50, "Trend EMA",   group = grpS)
+
+// ─── Strategy decisions (true = LONG / green) ─────────────────
+// 1  RSI
+rsiBull = ta.rsi(close, rsiLen) > 50
+// 2  MACD
+[macdL, sigL, macdH] = ta.macd(close, 12, 26, 9)
+macdBull = macdL > sigL
+// 3  Moving-average cross
+maBull = ta.ema(close, emaFastLen) > ta.ema(close, emaSlowLen)
+// 4  Bollinger Bands
+[bbMid, bbUp, bbLo] = ta.bb(close, 20, 2.0)
+bbBull = close > bbMid
+// 5  EMA trend
+emaBull = close > ta.ema(close, trendLen)
+// 6  Stochastic
+stochBull = ta.stoch(close, high, low, 14) > 50
+// 7  Ichimoku cloud
+conv  = (ta.highest(high, 9)  + ta.lowest(low, 9))  / 2
+base  = (ta.highest(high, 26) + ta.lowest(low, 26)) / 2
+spanA = (conv + base) / 2
+spanB = (ta.highest(high, 52) + ta.lowest(low, 52)) / 2
+ichiBull = close > math.max(spanA, spanB)
+// 8  Supertrend
+[stLine, stDir] = ta.supertrend(3.0, 10)
+superBull = stDir < 0
+// 9  Momentum
+momBull = ta.mom(close, 10) > 0
+// 10 VWAP
+vwapBull = close > ta.vwap
+// 11 ADX / DMI
+[diP, diM, adxV] = ta.dmi(14, 14)
+adxBull = diP > diM
+// 12 Parabolic SAR
+sarBull = close > ta.sar(0.02, 0.02, 0.2)
+// 13 CCI
+cciBull = ta.cci(close, 20) > 0
+// 14 Williams %R
+wprBull = ta.wpr(14) > -50
+// 15 Donchian channel
+donBasis = (ta.highest(high, 20) + ta.lowest(low, 20)) / 2
+donBull  = close > donBasis
+// 16 Awesome Oscillator
+ao = ta.sma(hl2, 5) - ta.sma(hl2, 34)
+aoBull = ao > 0
+// 17 OBV
+obv = ta.obv
+obvBull = obv > ta.ema(obv, 20)
+// 18 Keltner channel
+keltBull = close > ta.ema(close, 20)
+// 19 Rate of Change
+rocBull = ta.roc(close, 9) > 0
+// 20 Heikin-Ashi
+var float haOpen = na
+haClose = (open + high + low + close) / 4
+haOpen := na(haOpen[1]) ? (open + close) / 2 : (haOpen[1] + haClose[1]) / 2
+haBull  = haClose > haOpen
+
+// ─── Roster: funny name + real strategy (tooltip) ─────────────
+var names = array.from(
+     "Overbought Ollie","MACDaddy","Crossfit Chris","Bandit Bollinger","Expo Ernie",
+     "Stochastic Steve","Cloud Nine Nate","Super Mario","Momo Marty","Vinny VWAP",
+     "Trendy Wendy","Parabolic Paula","Commodore CeeCee","Wild Bill","Donnie Breakout",
+     "Awesome Ozzy","OBV-Wan Kenobi","Keltner Kelly","Rockin' Roc","Heikin Hank")
+
+var strats = array.from(
+     "RSI (14) > 50","MACD line > signal","Fast EMA > Slow EMA","Price > Bollinger basis","Price > Trend EMA",
+     "Stochastic %K > 50","Price above Ichimoku cloud","Supertrend in uptrend","10-bar Momentum > 0","Price > VWAP",
+     "+DI > -DI (DMI/ADX)","Price > Parabolic SAR","CCI (20) > 0","Williams %R > -50","Price > Donchian midline",
+     "Awesome Oscillator > 0","OBV > its EMA(20)","Price > Keltner basis","Rate of Change > 0","Heikin-Ashi candle bullish")
+
+// decisions this bar, same order as names
+dec = array.from(
+     rsiBull, macdBull, maBull, bbBull, emaBull,
+     stochBull, ichiBull, superBull, momBull, vwapBull,
+     adxBull, sarBull, cciBull, wprBull, donBull,
+     aoBull, obvBull, keltBull, rocBull, haBull)
+
+// ─── Tally + mood ─────────────────────────────────────────────
+greens = 0
+for i = 0 to 19
+    greens += array.get(dec, i) ? 1 : 0
+reds = 20 - greens
+pct  = math.round(greens / 20 * 100)
+mood = greens >= 15 ? "🚀 EUPHORIC" : greens >= 12 ? "😀 BULLISH" : greens >= 9 ? "😐 MIXED" : greens >= 5 ? "😟 BEARISH" : "💀 PANIC"
+
+// ─── Style helpers ────────────────────────────────────────────
+tSize = szInput == "Tiny" ? size.tiny : szInput == "Normal" ? size.normal : size.small
+tPos  = posInput == "Top Left" ? position.top_left : posInput == "Top Right" ? position.top_right : posInput == "Middle Center" ? position.middle_center : posInput == "Bottom Left" ? position.bottom_left : posInput == "Bottom Center" ? position.bottom_center : posInput == "Bottom Right" ? position.bottom_right : position.top_center
+
+hdrBg  = color.new(#131722, 0)
+grnTxt = color.new(#26a69a, 0)
+redTxt = color.new(#ef5350, 0)
+
+// ─── Dashboard (5 wide x 4 traders → horizontal grid) ─────────
+var table t = table.new(tPos, 5, 6, border_width = 2, border_color = color.new(#2a2e39, 0))
+
+if barstate.islast
+    // header bar
+    // table.cell(t, 0, 0, "🏦 TRADING FLOOR", text_color = color.white, bgcolor = hdrBg, text_size = tSize, text_halign = text.align_left)
+    //table.cell(t, 1, 0, "", bgcolor = hdrBg)
+    //table.cell(t, 2, 0, "🟢 " + str.tostring(greens), text_color = grnTxt, bgcolor = hdrBg, text_size = tSize)
+    //table.cell(t, 3, 0, "🔴 " + str.tostring(reds),   text_color = redTxt, bgcolor = hdrBg, text_size = tSize)
+    //table.cell(t, 4, 0, mood, text_color = color.white, bgcolor = hdrBg, text_size = tSize)
+
+    // 20 traders
+    for i = 0 to 19
+        int r = int(math.floor(i / 5)) + 1
+        int c = i % 5
+        b  = array.get(dec, i)
+        sig = "" // b ? "🟢 LONG" : "🔴 SHORT"
+        bg  = b ? color.new(#26a69a, 82) : color.new(#ef5350, 82)
+        tc  = b ? grnTxt : redTxt
+        table.cell(t, c, r, array.get(names, i), text_color = tc, bgcolor = bg, text_formatting = text.format_bold, text_size = tSize, tooltip = array.get(strats, i))
+
+    // footer consensus
+    //table.cell(t, 0, 5, "📊 Consensus: " + str.tostring(greens) + "/20 LONG  (" + str.tostring(pct) + "%)", text_color = color.white, bgcolor = hdrBg, text_size = tSize, text_halign = text.align_left)
+    //for c = 1 to 4
+    //    table.cell(t, c, 5, "", bgcolor = hdrBg)
