@@ -1,0 +1,102 @@
+//@version=6
+// =============================================================================
+//  Band Expand.  Created by TraderOracle 9/20/2026
+//
+//  - 20-period, 2-SD Bollinger Bands, NO middle (basis) line.
+//  - Each band is colored independently by its own slope (rising vs falling).
+//  - Wait for the bands to contract into a small space (a squeeze), then fire
+//    when they begin expanding again (upper rising AND lower falling).
+//  - On that trigger, draw a rectangle over the squeeze "small space" and
+//    extend it 7 bars to the right.
+
+// Idea from this video: https://www.youtube.com/watch?v=EZ_L7zovyrw
+
+// =============================================================================
+indicator("Band Expand", shorttitle="Band Expand", overlay=true, max_boxes_count=500)
+
+// ─────────────────────────────────────────────────────────────
+// Inputs
+// ─────────────────────────────────────────────────────────────
+bbLen  = input.int(20, "BB Length", minval=1)
+bbMult = input.float(2.0, "BB StdDev", minval=0.1, step=0.1)
+src    = input.source(close, "Source")
+
+grpSqz = "Squeeze detection"
+sqzLook = input.int(120, "Squeeze rank lookback", minval=20, group=grpSqz, tooltip="Bars used to rank how tight the bands are (0 = tightest, 1 = widest).")
+sqzThr  = input.float(0.25, "Squeeze threshold", minval=0.01, maxval=1.0, step=0.05, group=grpSqz, tooltip="Bandwidth rank below this counts as 'contracted into a small space'.")
+
+grpBox = "Box"
+boxExtend = input.int(7, "Extend box (bars)", minval=1, group=grpBox)
+boxMode   = input.string("Squeeze band range", "Box height from", options=["Squeeze band range", "Bands at trigger"], group=grpBox, tooltip="What sets the top/bottom of the rectangle.")
+minGap    = input.int(7, "Min bars between boxes", minval=1, group=grpBox, tooltip="If triggers cluster in a row, only the first draws; later ones within this many bars are skipped.")
+
+grpCol = "Colors"
+colUp     = input.color(#26a69a, "Rising color", group=grpCol)
+colDown   = input.color(#ef5350, "Falling color", group=grpCol)
+boxCol    = input.color(color.new(color.purple, 62), "Box fill", group=grpCol)
+boxBorder = input.color(color.new(color.purple, 45), "Box border", group=grpCol)
+
+// ─────────────────────────────────────────────────────────────
+// Bollinger Bands (basis computed but NOT plotted)
+// ─────────────────────────────────────────────────────────────
+basis = ta.sma(src, bbLen)
+dev   = bbMult * ta.stdev(src, bbLen)
+upper = basis + dev
+lower = basis - dev
+
+// ─────────────────────────────────────────────────────────────
+// Bandwidth + squeeze rank
+// ─────────────────────────────────────────────────────────────
+bbw  = upper - lower
+loW  = ta.lowest(bbw, sqzLook)
+hiW  = ta.highest(bbw, sqzLook)
+rank = (bbw - loW) / math.max(hiW - loW, 1e-10)     // 0 = tightest, 1 = widest
+isSqueeze = rank < sqzThr
+
+// ─────────────────────────────────────────────────────────────
+// Track the tightest band range in the current squeeze episode,
+// then fire when the bands begin to separate (expansion).
+// ─────────────────────────────────────────────────────────────
+var bool  sawSqueeze = false
+var float sqzTop = na
+var float sqzBot = na
+var float minW   = na
+
+if isSqueeze
+    if not sawSqueeze
+        minW   := bbw
+        sqzTop := upper
+        sqzBot := lower
+    else if bbw < minW
+        minW   := bbw
+        sqzTop := upper
+        sqzBot := lower
+    sawSqueeze := true
+
+bothExpanding = upper > upper[1] and lower < lower[1]   // both sides going separate ways
+trigger = sawSqueeze and bothExpanding
+
+// Only the first of a run draws: skip triggers that land within minGap bars of the last box.
+var int lastBoxBar = na
+firstOfRun = na(lastBoxBar) or (bar_index - lastBoxBar) >= minGap
+drewBox = trigger and firstOfRun
+
+if trigger
+    sawSqueeze := false                                  // one box per squeeze episode
+if drewBox
+    float top = boxMode == "Bands at trigger" ? upper : sqzTop
+    float bot = boxMode == "Bands at trigger" ? lower : sqzBot
+    box.new(left=bar_index, top=top, right=bar_index + boxExtend, bottom=bot, bgcolor=boxCol, border_color=boxBorder, border_width=1)
+    lastBoxBar := bar_index
+
+// ─────────────────────────────────────────────────────────────
+// Bands — colored independently by each line's own slope
+// ─────────────────────────────────────────────────────────────
+upCol = upper >= upper[1] ? colUp : colDown
+loCol = lower >= lower[1] ? colUp : colDown
+plot(upper, "BB Upper", color=upCol, linewidth=2)
+plot(lower, "BB Lower", color=loCol, linewidth=2)
+
+// Marker + alert on the trigger bar
+plotshape(drewBox, "Expansion start", style=shape.triangleup, location=location.belowbar, color=color.new(color.purple, 0), size=size.tiny)
+alertcondition(drewBox, "Squeeze -> Expansion", "Bands contracted then began expanding.")
