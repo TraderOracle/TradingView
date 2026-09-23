@@ -1,0 +1,114 @@
+//@version=6
+indicator("Renko Line Retest", shorttitle="Renko Retest", overlay=true)
+
+// ───────────── Inputs ─────────────
+grpL = "Trend Line"
+maType   = input.string("EMA", "Line type", options=["EMA", "SMA", "WMA", "HMA", "RMA"], group=grpL)
+maLen    = input.int(50, "Line length", minval=1, group=grpL)
+maSrc    = input.source(close, "Line source", group=grpL)
+
+grpR = "Renko"
+autoBox  = input.bool(false, "Auto-detect box size from bricks", group=grpR)
+boxIn    = input.float(2.0, "Box size (traditional)", minval=0.0000001, group=grpR)
+
+grpS = "Retest Signal"
+moveBoxes     = input.int(4, "Trend move away from line (boxes)", minval=1, group=grpS,
+     tooltip="How far price must run away from the line before a pullback counts.")
+touchBoxes    = input.float(1.0, "Touch tolerance (boxes)", minval=0, step=0.5, group=grpS,
+     tooltip="Pullback counts as a touch when a brick gets within this many boxes of the line.")
+breakBoxes    = input.float(1.0, "Invalidate if closes through line by (boxes)", minval=0, step=0.5, group=grpS)
+confirmBricks = input.int(1, "Continuation bricks to confirm", minval=1, group=grpS)
+maxWait       = input.int(20, "Max bricks from touch to confirmation", minval=1, group=grpS)
+requireSlope  = input.bool(true, "Line must slope in trend direction", group=grpS)
+showLong      = input.bool(true, "Show bullish retests (dotted green)", group=grpS)
+showShort     = input.bool(true, "Show bearish retests (solid red)", group=grpS)
+
+// ───────────── Line ─────────────
+f_ma(src, len) =>
+    switch maType
+        "SMA" => ta.sma(src, len)
+        "WMA" => ta.wma(src, len)
+        "HMA" => ta.hma(src, len)
+        "RMA" => ta.rma(src, len)
+        => ta.ema(src, len)
+
+ma     = f_ma(maSrc, maLen)
+lineUp = ma >= nz(ma[1], ma)
+
+plot(lineUp ? ma : na,     "Line (up)",   color.lime, 2, plot.style_circles)
+plot(not lineUp ? ma : na, "Line (down)", color.red,  2, plot.style_linebr)
+
+// ───────────── Box size ─────────────
+box = autoBox ? nz(ta.median(math.abs(close - open), 50), boxIn) : boxIn
+
+upBrick = close > open
+dnBrick = close < open
+
+// ───────────── Bullish state machine ─────────────
+// 0 = waiting for trend move, 1 = extended (waiting for pullback), 2 = touched (waiting for continuation)
+var int lState = 0
+var int lTouch = na
+var int lCount = 0
+longSig = false
+upSlopeOK = not requireSlope or ma > ma[1]
+
+if not na(ma)
+    if lState == 0
+        if close > ma and upSlopeOK and high - ma >= moveBoxes * box
+            lState := 1
+    else if lState == 1
+        if close < ma - breakBoxes * box
+            lState := 0
+        else if low <= ma + touchBoxes * box
+            lState := 2
+            lTouch := bar_index
+            lCount := 0
+    else if lState == 2
+        if close < ma - breakBoxes * box or bar_index - lTouch > maxWait
+            lState := 0
+        else if upBrick
+            lCount += 1
+            if lCount >= confirmBricks and close > ma
+                longSig := true
+                lState := 0
+        else
+            lCount := 0
+
+// ───────────── Bearish state machine ─────────────
+var int sState = 0
+var int sTouch = na
+var int sCount = 0
+shortSig = false
+dnSlopeOK = not requireSlope or ma < ma[1]
+
+if not na(ma)
+    if sState == 0
+        if close < ma and dnSlopeOK and ma - low >= moveBoxes * box
+            sState := 1
+    else if sState == 1
+        if close > ma + breakBoxes * box
+            sState := 0
+        else if high >= ma - touchBoxes * box
+            sState := 2
+            sTouch := bar_index
+            sCount := 0
+    else if sState == 2
+        if close > ma + breakBoxes * box or bar_index - sTouch > maxWait
+            sState := 0
+        else if dnBrick
+            sCount += 1
+            if sCount >= confirmBricks and close < ma
+                shortSig := true
+                sState := 0
+        else
+            sCount := 0
+
+longSig  := longSig and showLong
+shortSig := shortSig and showShort
+
+// ───────────── Signals ─────────────
+plotshape(longSig,  "Bullish retest", shape.triangleup,   location.belowbar, color.lime, size=size.small, text="RT", textcolor=color.lime)
+plotshape(shortSig, "Bearish retest", shape.triangledown, location.abovebar, color.red,  size=size.small, text="RT", textcolor=color.red)
+
+alertcondition(longSig,  "Bullish line retest", "Renko: price retested the rising line and continued up")
+alertcondition(shortSig, "Bearish line retest", "Renko: price retested the falling line and continued down")
