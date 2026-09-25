@@ -1,6 +1,6 @@
 //@version=6
 // ═══════════════════════════════════════════════════════════════════════════
-//  TO Bounce Engine  v13.5
+//  TO Bounce Engine  v14
 //
 //  TWO ENGINES SHARING ONE SET OF LEVELS
 //
@@ -316,7 +316,7 @@ parseLevels(string src, array<string> outN, array<float> outT, array<float> outB
                                 if not na(pTop) and not na(pBot)
                                     zSeq.set(0, zSeq.get(0) + 1)
                                     addParsed(outN, outT, outB, outS,
-                                    "" + str.tostring(zSeq.get(0)), pTop, pBot, 1)
+                                    "Zone " + str.tostring(zSeq.get(0)), pTop, pBot, 1)
                                     pTop := na
                                     pBot := na
                             else if not na(rt)
@@ -778,14 +778,14 @@ var label tLnL = na
 var array<label> tCust = array.new<label>()
 
 if barstate.islast
-    tEma := titleLbl(tEma, "", ema200, shEma, cEma)
-    tVwp := titleLbl(tVwp, "",        vwp, shVwp, cVwp)
-    tOrH := titleLbl(tOrH, "",     orH, shOr,  cOr)
-    tOrL := titleLbl(tOrL, "",      orL, shOr,  cOr)
-    tAsH := titleLbl(tAsH, "",   asH, shAs,  cAs)
-    tAsL := titleLbl(tAsL, "",    asL, shAs,  cAs)
-    tLnH := titleLbl(tLnH, "", lnH, shLn,  cLn)
-    tLnL := titleLbl(tLnL, "",  lnL, shLn,  cLn)
+    tEma := titleLbl(tEma, "EMA " + str.tostring(emaLen), ema200, shEma, cEma)
+    tVwp := titleLbl(tVwp, "VWAP",        vwp, shVwp, cVwp)
+    tOrH := titleLbl(tOrH, "OR High",     orH, shOr,  cOr)
+    tOrL := titleLbl(tOrL, "OR Low",      orL, shOr,  cOr)
+    tAsH := titleLbl(tAsH, "Asia High",   asH, shAs,  cAs)
+    tAsL := titleLbl(tAsL, "Asia Low",    asL, shAs,  cAs)
+    tLnH := titleLbl(tLnH, "London High", lnH, shLn,  cLn)
+    tLnL := titleLbl(tLnL, "London Low",  lnL, shLn,  cLn)
     if tCust.size() > 0
         for i = 0 to tCust.size() - 1
             label.delete(tCust.get(i))
@@ -798,7 +798,7 @@ if barstate.islast
                  : str.tostring(bt, format.mintick) + "–" + str.tostring(tp, format.mintick)) : "")
             // Zone fills are deliberately transparent; force the title opaque
             // or it would be unreadable.
-            tCust.push(label.new(bar_index + lblOff, tp, "",
+            tCust.push(label.new(bar_index + lblOff, tp, txt,
                  style            = label.style_label_left,
                  color            = color.new(color.black, 100),
                  textcolor        = color.new(pCols.get(i), 0),
@@ -808,14 +808,14 @@ if barstate.islast
                  textalign        = text.align_left))
 
 // ════════════════════════ BAND REGISTRY ════════════════════════
-var Band bEma = Band.new(name = "EMA 200",     abbr = "", col = cEma)
-var Band bVwp = Band.new(name = "VWAP",        abbr = "",  col = cVwp)
-var Band bOrH = Band.new(name = "OR High",     abbr = "", col = cOr)
-var Band bOrL = Band.new(name = "OR Low",      abbr = "", col = cOr)
-var Band bAsH = Band.new(name = "Asia High",   abbr = "", col = cAs)
-var Band bAsL = Band.new(name = "Asia Low",    abbr = "", col = cAs)
-var Band bLnH = Band.new(name = "London High", abbr = "", col = cLn)
-var Band bLnL = Band.new(name = "London Low",  abbr = "", col = cLn)
+var Band bEma = Band.new(name = "EMA 200",     abbr = "EMA",  col = cEma)
+var Band bVwp = Band.new(name = "VWAP",        abbr = "VWAP", col = cVwp)
+var Band bOrH = Band.new(name = "OR High",     abbr = "ORH",  col = cOr)
+var Band bOrL = Band.new(name = "OR Low",      abbr = "ORL",  col = cOr)
+var Band bAsH = Band.new(name = "Asia High",   abbr = "AsH",  col = cAs)
+var Band bAsL = Band.new(name = "Asia Low",    abbr = "AsL",  col = cAs)
+var Band bLnH = Band.new(name = "London High", abbr = "LnH",  col = cLn)
+var Band bLnL = Band.new(name = "London Low",  abbr = "LnL",  col = cLn)
 
 var array<Band> custBands = array.new<Band>()
 var array<Band> allBands  = array.new<Band>()
@@ -1074,8 +1074,8 @@ for bd in allBands
     tag  := joinTxt(tag,  bd.tagTxt(), " ")
 
 if lffcBull or lffcBear
-    note := joinTxt(note, "" + (lffcBull ? "long" : "short") + " off " + lffcName, "  |  ")
-    tag  := joinTxt(tag, "" + (lffcBull ? "▲" : "▼"), " ")
+    note := joinTxt(note, "FVG " + (lffcBull ? "long" : "short") + " off " + lffcName, "  |  ")
+    tag  := joinTxt(tag, "FVG" + (lffcBull ? "▲" : "▼"), " ")
 
 anyBull = emaBncB or vwpBncB or orBncB or asBncB or lnBncB or cBncB or
      emaSwpB or vwpSwpB or orSwpB or asSwpB or lnSwpB or cSwpB or lffcBull
