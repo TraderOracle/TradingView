@@ -1,0 +1,1211 @@
+//@version=5
+indicator(title="Nebula3", shorttitle="Nebula v3", overlay=true, max_bars_back=1000, max_lines_count=500, max_labels_count=500, max_boxes_count=500, max_polylines_count=100)
+
+// NEBULA 3.0 build 29 - released by TraderOracle on Sep 28, 2026
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+
+// Nebula was inspired by Daviddtech's year end video on "best indicators" here: https://www.youtube.com/watch?v=zG7oRD_upt4
+// My thoughts were - why not combine them all into a pretty cloud, since two are EMAs?  Thus Nebula was born.
+// I then added all my TO Method reversal indicators, and added Aaron D's Wave theory idea
+// ( see Aaron D's channel here: https://www.youtube.com/watch?v=blg8GCxR80o )
+
+// @davidclarke6612 provided the idea for Rational Quadratic Kernel as a replacement for the 9/21 cross
+
+import TradersReality/Traders_Reality_Lib/2 as trLib
+
+const int vSqueeze = 4
+const int vTramp = 4
+const int vBands = 2
+const int vLuxRev = 3
+const int vEarlyRev = 2
+const int vDeadRev = 2
+const int vShark = 2
+const int upTrend = 1
+const int downTrend = 2
+
+xvc = input.bool(false, title="NOTE: Designed for 1m NQ. Uncheck body/wick/border in your Settings for this indicator to display properly")
+
+sCandleType = input.string(title="Candle Coloring: ", options=["None", "Vector", "Waddah", "Squeeze", "Volume Delta", "Trend Agreement", "Tidal Wave", "Signal Confluence", "RSI Heat", "Kernel Slope", "Relative Volume", "ADX Strength", "Heikin Ashi Trend", "Stretch from Mean", "Supertrend"], defval="Waddah", group="Visible Settings")
+Theme = input.string(title="Color Theme: ", options=["Standard", "Pinky and the Brain", "Color Blind", "Mellow Yellow", "Neon", "Cyberpunk", "Aurora", "Ocean", "Sunset", "Nord", "Dracula", "Tokyo Night", "Royal", "Ice and Fire", "Green Lantern", "Superman", "Wonder Woman", "Hulk", "Aquaman"], defval="Standard", group="Visible Settings")
+cloudType = input.string(title="Cloud Type: ", options=["None", "Simple", "Relative Strength", "Money Flow", "Commodity Channel"], defval="Simple", group="Visible Settings")
+cloudPalette = input.string(title="Cloud Colors: ", options=["Theme", "Aqua / Coral", "Emerald / Crimson", "Sky / Orchid", "Lime / Tangerine", "Gold / Violet", "Teal / Magenta", "Mint / Rose", "Cobalt / Amber", "Jade / Ruby", "Turquoise / Tomato", "Periwinkle / Peach", "Ice / Lava"], defval="Theme", group="Visible Settings")
+bDash = input.bool(true, "Show dashboard", group="Visible Settings")
+bSqzZones = input.bool(true, "Show squeeze zones", group="Visible Settings")
+bShowDiv = input.bool(true, "Show RSI divergences", group="Visible Settings")
+bLevels = input.bool(true, "Show session levels", group="Visible Settings")
+bShowHEMA = input.bool(false, "Show HEMA line", group="Visible Settings")
+bShowPlus = input.bool(false, "Show plus sign to add", group="Visible Settings")
+bShowBigPlus = input.bool(true, "Show bigger plus sign (Vodka Shot)", group="Visible Settings")
+bShow921 = input.bool(false, "Show 9/21 EMA cross", group="Visible Settings")
+bTrackBar = input.bool(false, "Show volume imbalances", group="Visible Settings", tooltip="A line at the open of a candle that gaps past the previous same-color candle's close. The line stays until price fills the gap.")
+
+dashPos = input.string("Top Right", "Position", options=["Top Right", "Top Center", "Top Left", "Middle Right", "Middle Left", "Bottom Right", "Bottom Center", "Bottom Left"], group="Dashboard")
+dashSize = input.string("Small", "Text Size", options=["Tiny", "Small", "Normal", "Large"], group="Dashboard")
+bDashLevels = input.bool(true, "Show session levels in dashboard", group="Dashboard")
+
+sqzZoneColor = input.color(color.new(color.blue, 85), "Squeeze zone color", group="Squeeze Zones")
+sqzMinLen = input.int(3, "Minimum squeeze length (bars)", minval=1, group="Squeeze Zones", tooltip="Squeezes shorter than this are not drawn.")
+bSqzRelease = input.bool(false, "Show squeeze release arrows", group="Squeeze Zones", tooltip="An arrow at the end of each squeeze zone showing which way momentum broke out.")
+
+bShowHiddenDiv = false // input.bool(false, "Show hidden divergences", group="RSI Divergence")
+bDivLines = input.bool(false, "Draw divergence lines on price", group="RSI Divergence")
+iDivTransp = input.int(50, "Divergence Transparency", minval=0, maxval=100, group="RSI Divergence", tooltip="Transparency of the divergence labels and lines. 0 = solid, 100 = invisible. Hidden divergences are drawn a bit fainter.")
+divRsiLen = input.int(14, "RSI Length", minval=1, group="RSI Divergence")
+lbL = input.int(5, "Pivot Lookback Left", minval=1, group="RSI Divergence")
+lbR = input.int(5, "Pivot Lookback Right", minval=1, group="RSI Divergence", tooltip="Divergences are confirmed this many bars after the pivot, and the marker is placed back on the pivot bar.")
+divRangeMin = input.int(5, "Min Bars Between Pivots", minval=1, group="RSI Divergence")
+divRangeMax = input.int(60, "Max Bars Between Pivots", minval=2, group="RSI Divergence")
+
+bLvlOR = input.bool(true, "Opening range", inline="or", group="Session Levels")
+orSess = input.session("0930-1030", "", inline="or", group="Session Levels", tooltip="New York time. Default is the first hour of the regular session.")
+bLvlLon = input.bool(true, "London", inline="lon", group="Session Levels")
+lonSess = input.session("0300-0800", "", inline="lon", group="Session Levels", tooltip="New York time.")
+bLvlAsia = input.bool(true, "Asia", inline="asia", group="Session Levels")
+asiaSess = input.session("1800-0300", "", inline="asia", group="Session Levels", tooltip="New York time.")
+bLvlYC = input.bool(true, "Yesterday's close", inline="yc", group="Session Levels")
+rthSess = input.session("0930-1600", "", inline="yc", group="Session Levels", tooltip="Regular session (New York time). Its last close is used as yesterday's close.")
+bLvlExt = input.bool(true, "Opening range extensions (1.5× / 2×)", group="Session Levels")
+bLvlForming = input.bool(true, "Shade ranges while they form", group="Session Levels")
+bLvlBreak = input.bool(true, "Mark opening range breakout", group="Session Levels")
+lvlMerge = input.int(8, "Merge tags within (ticks)", minval=0, group="Session Levels", tooltip="Levels closer than this share one tag.")
+lvlOffset = input.int(4, "Tag distance from last bar", minval=1, maxval=50, group="Session Levels")
+lvlTransp = input.int(45, "Level transparency", minval=0, maxval=100, group="Session Levels", tooltip="Unbroken levels use your theme colors at this transparency (highs in the bullish color, lows in the bearish color). A level turns full strength once price closes through it.")
+
+bEnhance1 = true // input.bool(true, "Enhance #1 if Buy/Sell signal nearby", group="Visible Settings")
+bShowProfit = true // input.bool(true, "Show take profit suggestions", group="Visible Settings")
+iColorSmooth = 3 // input.int(3, "Candle Color Smoothing (1 = off)", minval=1, group="Visible Settings", tooltip="Smooths the Waddah, RSI Heat, Kernel Slope, Relative Volume, ADX Strength and Stretch from Mean candle colors.")
+stFactor = 3 // input.float(3.0, "Supertrend Candles: Factor", minval=0.1, step=0.1, group="Visible Settings")
+stPeriod = 10 // input.int(10, "Supertrend Candles: ATR Period", minval=1, group="Visible Settings")
+
+adxSqueeze = 0 // input.int(0, title="ADX Threshold for Tidal Wave", group="Tidal Wave Settings", tooltip="Anything over 19 filters out low volume periods. Set to 11 as a default, feel free to increase to get less noise")
+iBarExtend = input.int(50, "Number of bars to extend line", maxval=500, minval=10, group="Tidal Wave Settings")
+lWidth = input.int(3, "Line Width", group="Tidal Wave Settings")
+lStyle = input.string(title="Line Style", options=["Solid", "Dotted", "Dashed"], defval="Dotted", group="Tidal Wave Settings")
+
+iProfit = input.int(5, "Minimum signals for take partial profit", minval=2, maxval=50, group="Advanced")
+iMaxProfit = input.int(7, "Minimum signals for take ALL profit", minval=3, maxval=50, group="Advanced")
+bShowQuad = input.bool(false, "Use quadratic equation for 9/21 cross", group="Advanced")
+iVolDeltaTop = 300 // input.int(300, title="Cumulative Volume Delta top end", group="Advanced")
+iSimpleCloud = input.int(80, title="Simple Cloud Transparency", minval=0, maxval=100, group="Advanced", tooltip="0 = solid, 100 = invisible. Used when Cloud Type is Simple.")
+iLowCloud = input.int(80, title="Weak Trend Transparency", minval=0, maxval=100, group="Advanced", tooltip="0 = solid, 100 = invisible. Used by the Relative Strength, Money Flow and Commodity Channel clouds when the trend is weak.")
+iHighCloud = input.int(50, title="Strong Trend Transparency", minval=0, maxval=100, group="Advanced", tooltip="0 = solid, 100 = invisible. Used by the Relative Strength, Money Flow and Commodity Channel clouds when the trend is strong.")
+
+ADX_Length = 2
+Weighting = 10
+MA_Length = 6
+
+adxlen = 14
+dilen = 14
+
+sensitivity = input.int(150, title="Sensitivity", group="WAE")
+fastLength = input.int(20, title="FastEMA Length", group="WAE")
+slowLength = input.int(40, title="SlowEMA Length", group="WAE")
+channelLength = input.int(20, title="BB Channel Length", group="WAE")
+multWAE = input.float(2.0, title="BB Stdev Multiplier", group="WAE")
+
+sqTolerance = input.int(2, title="Squeeze Tolerance (lower = more sensitive)", group="Relaxing Settings", tooltip="How many bars to look back on the squeeze indicator")
+adxSqueezeQ = input.int(21, title="ADX Threshold for TTM Squeeze", group="Relaxing Settings", tooltip="Anything over 19 filters out low volume periods. Set to 11 as a default, feel free to increase to get less noise")
+
+bApply25and75 = input(false, title="Apply 25/75 RSI rule", group="Shark Settings")
+
+dashTransp = input.int(20, "Background Transparency", minval=0, maxval=100, group="Dashboard", tooltip="0 = solid, 100 = invisible.")
+barChars = input.int(10, "Bar length (blocks)", minval=5, maxval=20, group="Dashboard")
+
+bHover = true // input.bool(false, "Signal details on hover", group="Squeeze Zones", tooltip="Draws the signals as labels. Hover over one to see what triggered it.")
+bSmartAlert = true // input.bool(true, "Enable 'Any Nebula signal' alert", group="Squeeze Zones", tooltip="Create an alert with the condition 'Any alert() function call' to get every Nebula signal from one alert.")
+
+watchSignalLookback = 35
+rsiLength = 32
+rsiBasisLength = 32
+rsiMultiplier = 2.0
+priceBasisLength = 20
+priceInnerMultiplier = 2.0
+atrPeriod = 30
+maPeriod = 10
+atrMult = 1.5
+rsiMaLength = 24
+
+rlength = 12
+DER_avg = 5
+vlookbk = 20
+
+wlengthBB = 20
+wmultBB = 2.5
+
+h = 21.0
+r = 8.0
+x_0 = 15
+
+alphaLength = 20
+gammaLength = 20
+
+iBBThreshold = 0.0015
+RSIThreshold = 25
+RSIDown = 72
+rsiLengthInput = 14
+lengthBB = 20
+multBB = 2.0
+
+color violetVectorColor = color.fuchsia
+color blueVectorColor = color.rgb(83, 144, 249)
+color regularCandleUpColor = color.new(#02a433, 99)
+color regularCandleDownColor = color.new(#a10101, 99)
+
+sStyle = lStyle == "Solid" ? line.style_solid : lStyle == "Dashed" ? line.style_dashed : line.style_dotted
+bExtend = lWidth == 500 ? extend.right : extend.none
+
+colorBigGreen = switch Theme
+    "Pinky and the Brain" => #00f5f1
+    "Color Blind" => #03fcf4
+    "Mellow Yellow" => #35defc
+    "Neon" => #39ff14
+    "Cyberpunk" => #00f0ff
+    "Aurora" => #64ffda
+    "Ocean" => #4dd0e1
+    "Sunset" => #ffc857
+    "Nord" => #a3be8c
+    "Dracula" => #50fa7b
+    "Tokyo Night" => #7aa2f7
+    "Royal" => #ffd700
+    "Ice and Fire" => #00bfff
+    "Green Lantern" => #00e04b
+    "Superman" => #1e88e5
+    "Wonder Woman" => #ffc400
+    "Hulk" => #76ff03
+    "Aquaman" => #1de9b6
+    => #00ff00
+colorBigRed = switch Theme
+    "Pinky and the Brain" => #fc03f8
+    "Color Blind" => #fca903
+    "Mellow Yellow" => #fcf11c
+    "Neon" => #ff073a
+    "Cyberpunk" => #ff2a6d
+    "Aurora" => #b388ff
+    "Ocean" => #ff8a65
+    "Sunset" => #e84855
+    "Nord" => #bf616a
+    "Dracula" => #ff79c6
+    "Tokyo Night" => #f7768e
+    "Royal" => #9d4edd
+    "Ice and Fire" => #ff4500
+    "Green Lantern" => #ffd600
+    "Superman" => #e53935
+    "Wonder Woman" => #d50000
+    "Hulk" => #aa00ff
+    "Aquaman" => #ff9100
+    => #ff0000
+
+cloudUp = switch cloudPalette
+    "Aqua / Coral" => #00d4c8
+    "Emerald / Crimson" => #2ecc71
+    "Sky / Orchid" => #4fc3f7
+    "Lime / Tangerine" => #c6ff00
+    "Gold / Violet" => #ffd54f
+    "Teal / Magenta" => #1de9b6
+    "Mint / Rose" => #69f0ae
+    "Cobalt / Amber" => #2979ff
+    "Jade / Ruby" => #00a86b
+    "Turquoise / Tomato" => #40e0d0
+    "Periwinkle / Peach" => #8c9eff
+    "Ice / Lava" => #80deea
+    => colorBigGreen
+cloudDn = switch cloudPalette
+    "Aqua / Coral" => #ff6f61
+    "Emerald / Crimson" => #e74c3c
+    "Sky / Orchid" => #ba68c8
+    "Lime / Tangerine" => #ff9100
+    "Gold / Violet" => #7c4dff
+    "Teal / Magenta" => #f50057
+    "Mint / Rose" => #ff80ab
+    "Cobalt / Amber" => #ffab00
+    "Jade / Ruby" => #e0115f
+    "Turquoise / Tomato" => #ff6347
+    "Periwinkle / Peach" => #ffab91
+    "Ice / Lava" => #ff3d00
+    => colorBigRed
+
+conf = barstate.isconfirmed
+color strongSellRed = color.rgb(color.r(colorBigRed) * 0.6, color.g(colorBigRed) * 0.6, color.b(colorBigRed) * 0.6)
+isRed = close < open
+isGreen = close > open
+chg = ta.change(close)
+ema9 = ta.ema(close, 9)
+ema21 = ta.ema(close, 21)
+
+dirmov(_len) =>
+    dmUp = ta.change(high)
+    dmDown = -ta.change(low)
+    plusDM = na(dmUp) ? na : (dmUp > dmDown and dmUp > 0 ? dmUp : 0)
+    minusDM = na(dmDown) ? na : (dmDown > dmUp and dmDown > 0 ? dmDown : 0)
+    truerange = ta.rma(ta.tr, _len)
+    plus = fixnan(100 * ta.rma(plusDM, _len) / truerange)
+    minus = fixnan(100 * ta.rma(minusDM, _len) / truerange)
+    [plus, minus]
+
+[diPlus, diMinus] = dirmov(dilen)
+diSum = diPlus + diMinus
+adxVal = 100 * ta.rma(math.abs(diPlus - diMinus) / (diSum == 0 ? 1 : diSum), adxlen)
+sigabove19 = adxVal > adxSqueeze
+
+upper_wick = close > open ? high - close : high - open
+lower_wick = close > open ? open - low : close - low
+spread = high - low
+percent_upper_wick = upper_wick / spread
+percent_lower_wick = lower_wick / spread
+percent_body_length = (spread - (upper_wick + lower_wick)) / spread
+wickShare = (percent_upper_wick + percent_lower_wick) / 2
+buying_volume = close > open ? (percent_body_length + wickShare) * volume : wickShare * volume
+selling_volume = close < open ? (percent_body_length + wickShare) * volume : wickShare * volume
+cumulative_volume_delta = ta.ema(buying_volume, 14) - ta.ema(selling_volume, 14)
+
+color cCVDColor = cumulative_volume_delta > 0 ? color.from_gradient(math.abs(cumulative_volume_delta), 0, iVolDeltaTop, color.new(colorBigGreen, 70), colorBigGreen) : cumulative_volume_delta < 0 ? color.from_gradient(math.abs(cumulative_volume_delta), 0, iVolDeltaTop, color.new(colorBigRed, 70), colorBigRed) : color.white
+
+ll3 = ta.lowest(low, 3)
+ll50 = ta.lowest(low, 50)
+hh3 = ta.highest(high, 3)
+hh50 = ta.highest(high, 50)
+buyDSR = close[1] < open[1] and isGreen and close > open[1] and (ll3 < ll50[1] or ll3 < ll50[2] or ll3 < ll50[3])
+sellDSR = close[1] > open[1] and isRed and close < open[1] and (hh3 > hh50[1] or hh3 > hh50[2] or hh3 > hh50[3])
+deadRev = buyDSR or sellDSR
+
+type trb
+    int bSC
+    int sSC
+
+var trb S = trb.new()
+
+if close < close[4]
+    S.bSC := S.bSC == 9 ? 1 : S.bSC + 1
+    S.sSC := 0
+else
+    S.sSC := S.sSC == 9 ? 1 : S.sSC + 1
+    S.bSC := 0
+
+luxRev = (S.bSC == 9 or (S.bSC[1] == 8 and S.sSC == 1) or S.sSC == 9 or (S.sSC[1] == 8 and S.bSC == 1)) and conf
+
+type fractal
+    float value
+    bool iscrossed
+
+var float upClose = na
+var float downClose = na
+var upperT = fractal.new()
+var lowerT = fractal.new()
+
+pT = 2
+dhT = math.sum(math.sign(high - high[1]), pT)
+dlT = math.sum(math.sign(low - low[1]), pT)
+bullf = dhT == -pT and dhT[pT] == pT and high[pT] == ta.highest(5)
+bearf = dlT == pT and dlT[pT] == -pT and low[pT] == ta.lowest(5)
+
+if bullf
+    upperT.value := high[pT]
+    upperT.iscrossed := false
+
+if ta.crossover(close, upperT.value) and not upperT.iscrossed
+    upClose := close
+
+if bearf
+    lowerT.value := low[pT]
+    lowerT.iscrossed := false
+
+if ta.crossunder(close, lowerT.value) and not lowerT.iscrossed
+    downClose := close
+
+rsi14 = ta.rsi(close, 14)
+mfi = ta.mfi(hlc3, 14)
+cci = (hlc3 - ta.sma(hlc3, 20)) / (0.015 * ta.dev(hlc3, 20))
+
+bCCI = cloudType == "Commodity Channel"
+bOsc = cloudType == "Relative Strength" or cloudType == "Money Flow" or bCCI
+float iSource = cloudType == "Relative Strength" ? rsi14 : cloudType == "Money Flow" ? mfi : bCCI ? cci : 0.0
+float MIN_CLOUD = bOsc ? 20 : 0
+float MID_CLOUD = bCCI ? -100 : bOsc ? 50 : 0
+float MAX_CLOUD = bCCI ? 100 : bOsc ? 80 : 0
+
+Bulls1 = 0.5 * (math.abs(high - high[1]) + (high - high[1]))
+Bears1 = 0.5 * (math.abs(low[1] - low) + (low[1] - low))
+Bears = Bulls1 >= Bears1 ? 0 : Bears1
+Bulls = Bulls1 <= Bears1 ? 0 : Bulls1
+TR = math.max(high - low, high - close[1])
+
+sPDI = 0.0
+sMDI = 0.0
+STR = high - low
+if bar_index > 0
+    sPDI := (Weighting * sPDI[1] + Bulls) / (Weighting + 1)
+    sMDI := (Weighting * sMDI[1] + Bears) / (Weighting + 1)
+    STR := (Weighting * STR[1] + TR) / (Weighting + 1)
+
+PDI = STR > 0 ? sPDI / STR : 0
+MDI = STR > 0 ? sMDI / STR : 0
+DX = (PDI + MDI) > 0 ? math.abs(PDI - MDI) / (PDI + MDI) : 0
+
+ADX = 0.0
+if bar_index > 0
+    ADX := (Weighting * ADX[1] + DX) / (Weighting + 1)
+
+ADXmin = math.min(1000000.0, ta.lowest(ADX, ADX_Length))
+ADXmax = math.max(-1.0, ta.highest(ADX, ADX_Length))
+Diff = ADXmax - ADXmin
+Const = Diff > 0 ? (ADX - ADXmin) / Diff : 0
+
+VarMA = close
+if bar_index > 0
+    VarMA := ((2 - Const) * VarMA[1] + Const * close) / 2
+
+FanVMA = ta.sma(VarMA, MA_Length)
+
+mg = 0.0
+mg := na(mg[1]) ? ta.ema(close, 14) : mg[1] + (close - mg[1]) / (14 * math.pow(close / mg[1], 4))
+
+calc_macd(source, fastLen, slowLen) =>
+    ta.ema(source, fastLen) - ta.ema(source, slowLen)
+
+basisWAE = ta.sma(close, channelLength)
+devWAE = multWAE * ta.stdev(close, channelLength)
+e1 = (basisWAE + devWAE) - (basisWAE - devWAE)
+t1 = (calc_macd(close, fastLength, slowLength) - calc_macd(close[1], fastLength, slowLength)) * sensitivity
+t1s = ta.ema(t1, iColorSmooth)
+e1s = ta.ema(e1, iColorSmooth)
+waeRatio = e1s > 0 ? t1s / e1s : 0.0
+float waeStrength = math.abs(waeRatio)
+color waeBase = waeRatio >= 0 ? colorBigGreen : colorBigRed
+
+color cBodyColor = color.from_gradient(waeStrength, 0, 2, color.new(waeBase, 90), waeBase)
+color cBorderColor = color.from_gradient(waeStrength, 0, 1, color.new(waeBase, 70), waeBase)
+color cWickColor = color.from_gradient(waeStrength, 0, 1, color.new(waeBase, 50), waeBase)
+
+basisBB = ta.sma(close, lengthBB)
+devBB = multBB * ta.stdev(close, lengthBB)
+upperBB = basisBB + devBB
+lowerBB = basisBB - devBB
+bbw = (upperBB - lowerBB) / basisBB
+
+upM = ta.rma(math.max(chg, 0), rsiLengthInput)
+downM = ta.rma(-math.min(chg, 0), rsiLengthInput)
+rsiM = downM == 0 ? 100 : upM == 0 ? 0 : 100 - (100 / (1 + upM / downM))
+
+trampDn = isRed and rsiM <= RSIThreshold and close < lowerBB and bbw > iBBThreshold
+trampUp = isGreen and rsiM >= RSIDown and close > upperBB and bbw > iBBThreshold
+
+weGoUp = isGreen and (trampDn[1] or trampDn[2] or trampDn[3] or trampDn[4] or trampDn[5]) and high > high[1] and conf
+weGoDown = isRed and (trampUp[1] or trampUp[2] or trampUp[3] or trampUp[4] or trampUp[5]) and low < low[1] and conf
+upThrust = weGoUp and not weGoUp[1] and not weGoUp[2] and not weGoUp[3] and not weGoUp[4]
+downThrust = weGoDown and not weGoDown[1] and not weGoDown[2] and not weGoDown[3] and not weGoDown[4]
+tramp = upThrust or downThrust
+
+var cGreen = 0
+var cRed = 0
+var pos = false
+var neg = false
+
+sqLen = 20
+multKC = 1.5
+sqBasis = ta.sma(close, sqLen)
+sqDev = multKC * ta.stdev(close, sqLen)
+upperBBsq = sqBasis + sqDev
+lowerBBsq = sqBasis - sqDev
+rangema = ta.sma(high - low, sqLen)
+upperKC = sqBasis + rangema * multKC
+lowerKC = sqBasis - rangema * multKC
+sqzOn = lowerBBsq > lowerKC and upperBBsq < upperKC
+
+avg1 = math.avg(ta.highest(high, sqLen), ta.lowest(low, sqLen))
+avg2 = math.avg(avg1, sqBasis)
+val = ta.linreg(close - avg2, sqLen, 0)
+valPrev = nz(val[1])
+
+pos := false
+neg := false
+
+if val < valPrev and val < 5 and not sqzOn
+    cRed += 1
+
+if val > valPrev and val > 5 and not sqzOn
+    cGreen += 1
+
+if val > valPrev and cRed > sqTolerance and val < 5 and not pos[1] and sigabove19
+    cRed := 0
+    pos := true
+
+if val < valPrev and cGreen > sqTolerance and val > 5 and not neg[1] and sigabove19
+    cGreen := 0
+    neg := true
+
+sqz = (pos or neg) and conf
+
+color cSQColor = color.white
+color cSQBorder = color.white
+
+if val > 0
+    if val > valPrev
+        cSQColor := color.from_gradient(math.abs(val), 0, 30, color.new(colorBigGreen, 50), colorBigGreen)
+        cSQBorder := colorBigGreen
+    else if val < valPrev
+        cSQColor := color.new(colorBigGreen, 70)
+        cSQBorder := color.new(color.black, 100)
+else
+    if val < valPrev
+        cSQColor := color.from_gradient(math.abs(val), 0, 30, color.new(colorBigRed, 50), colorBigRed)
+        cSQBorder := colorBigRed
+    else if val > valPrev
+        cSQColor := color.new(colorBigRed, 50)
+        cSQBorder := color.new(color.black, 100)
+
+[pvsraVolume, pvsraHigh, pvsraLow, pvsraClose, pvsraOpen] = request.security(syminfo.tickerid, '', [volume, high, low, close, open], barmerge.gaps_off, barmerge.lookahead_off)
+[pvsraColor, alertFlag, averageVolume, volumeSpread, highestVolumeSpread] = trLib.calcPvsra(pvsraVolume, pvsraHigh, pvsraLow, pvsraClose, pvsraOpen, colorBigRed, colorBigGreen, violetVectorColor, blueVectorColor, regularCandleDownColor, regularCandleUpColor)
+
+bGreenSignal = pvsraColor == colorBigGreen and (close == upClose or close[1] == upClose[1] or close[2] == upClose[2] or close[3] == upClose[3])
+bRedSignal = pvsraColor == colorBigRed and (close == downClose or close[1] == downClose[1] or close[2] == downClose[2] or close[3] == downClose[3])
+earlyRev = bGreenSignal or bRedSignal
+
+basis5 = ta.sma(rsiM, 30)
+dev5 = 2.0 * ta.stdev(rsiM, 30)
+bBelow25 = not bApply25and75 or rsiM < 26
+bAbove75 = not bApply25and75 or rsiM > 74
+shark = ((rsiM < basis5 - dev5 and bBelow25) or (rsiM > basis5 + dev5 and bAbove75)) and conf
+
+atrValue = ta.atr(atrPeriod)
+atrMaValue = ta.wma(close, maPeriod)
+upperAtrBand = atrMaValue + atrValue * atrMult
+lowerAtrBand = atrMaValue - atrValue * atrMult
+
+upU = ta.rma(math.max(chg, 0), rsiLength)
+downU = ta.rma(-math.min(chg, 0), rsiLength)
+rsiU = downU == 0 ? 100 : upU == 0 ? 0 : 100 - (100 / (1 + upU / downU))
+
+rsiBasis = ta.wma(rsiU, rsiBasisLength)
+rsiDeviation = ta.stdev(rsiU, rsiBasisLength)
+upperRsi = rsiBasis + rsiMultiplier * rsiDeviation
+lowerRsi = rsiBasis - rsiMultiplier * rsiDeviation
+rsiMaLine = ta.wma(rsiU, rsiMaLength)
+
+priceBasis = ta.sma(close, priceBasisLength)
+priceInnerDeviation = priceInnerMultiplier * ta.stdev(close, priceBasisLength)
+upperPriceInner = priceBasis + priceInnerDeviation
+lowerPriceInner = priceBasis - priceInnerDeviation
+
+priceCrossOverInner = ta.crossover(close, lowerPriceInner)
+priceCrossUnderInner = ta.crossunder(close, upperPriceInner)
+rsiCrossOverLower = ta.crossover(rsiU, lowerRsi)
+rsiCrossUnderUpper = ta.crossunder(rsiU, upperRsi)
+rsiCrossOverBasis = ta.crossover(rsiU, rsiBasis)
+rsiCrossUnderBasis = ta.crossunder(rsiU, rsiBasis)
+rsiCrossOverMa = ta.crossover(rsiU, rsiMaLine)
+rsiCrossUnderMa = ta.crossunder(rsiU, rsiMaLine)
+rsiCrossUnder75 = ta.crossunder(rsiU, 75)
+rsiCrossOver25 = ta.crossover(rsiU, 25)
+highUnderAtrLower = ta.crossunder(high, lowerAtrBand)
+lowOverAtrUpper = ta.crossover(low, upperAtrBand)
+
+buyWatched = conf and (priceCrossOverInner or rsiCrossOverLower or rsiCrossOver25 or highUnderAtrLower)
+sellWatched = conf and (priceCrossUnderInner or rsiCrossUnderUpper or rsiCrossUnder75 or lowOverAtrUpper)
+
+var int[] buyWatchArray = array.new_int(na)
+var int[] sellWatchArray = array.new_int(na)
+
+buyWatchArray.push(buyWatched ? 1 : na)
+sellWatchArray.push(sellWatched ? 1 : na)
+
+while buyWatchArray.size() > watchSignalLookback
+    buyWatchArray.shift()
+while sellWatchArray.size() > watchSignalLookback
+    sellWatchArray.shift()
+
+buySignals = buyWatchArray.sum() >= 1 and (rsiCrossOverBasis or rsiCrossOver25 or rsiCrossOverMa)
+sellSignals = sellWatchArray.sum() >= 1 and (rsiCrossUnderBasis or rsiCrossUnder75 or rsiCrossUnderMa)
+
+plotBuy = buySignals and conf and not buyWatched
+plotSell = not plotBuy and sellSignals and conf and not sellWatched
+
+if plotBuy or plotSell
+    buyWatchArray.clear()
+    sellWatchArray.clear()
+
+nzVolume = nz(volume)
+volAvgL = ta.sma(nzVolume, 70)
+volDev = (volAvgL + 1.618034 * ta.stdev(volAvgL, 70)) / volAvgL * 11 / 100
+volRel = nzVolume / volAvgL
+volSpike = volRel * .145898 > volDev
+
+vola = na(volume) ? 1 : ta.stoch(volume, volume, volume, vlookbk) / 100
+R = (ta.highest(2) - ta.lowest(2)) / 2
+rsr = math.max(math.min(chg / R, 1), -1)
+c = fixnan(rsr * vola)
+c_plus = math.max(c, 0)
+c_minus = -math.min(c, 0)
+avg_vola = ta.wma(vola, rlength)
+dem = ta.wma(c_plus, rlength) / avg_vola
+sup = ta.wma(c_minus, rlength) / avg_vola
+bo = fixnan(100 * ta.wma(nz(sup), DER_avg))
+bc = fixnan(100 * ta.wma(nz(dem), DER_avg))
+rising = ta.change(bc) > 0
+vaderUp = bc > bo and rising
+vaderDn = bc < bo and not rising
+
+LL = ta.wma(ta.wma(ta.wma(close, 7), 7), 7)
+
+upwards = LL > LL[1] and vaderUp and upU and isGreen and volSpike
+downwards = LL < LL[1] and vaderDn and isRed and volSpike
+
+pBuyVodka = upwards and not upwards[1] and not upwards[2] and not upwards[3] and not upwards[4]
+pSellVodka = downwards and not downwards[1] and not upwards[2] and not upwards[3] and not upwards[4]
+
+wbasisBB = ta.sma(close, wlengthBB)
+wdevBB = wmultBB * ta.stdev(close, wlengthBB)
+wupperBB = wbasisBB + wdevBB
+wlowerBB = wbasisBB - wdevBB
+bands = (low <= wlowerBB and close >= wlowerBB and isRed) or (high >= wupperBB and close < wupperBB and isGreen)
+
+var float[] kernelW = array.new_float()
+var float kernelWSum = 0.0
+if barstate.isfirst
+    for i = 0 to 1 + x_0
+        w = math.pow(1 + (math.pow(i, 2) / (math.pow(h, 2) * 2 * r)), -r)
+        kernelW.push(w)
+        kernelWSum += w
+
+float kernelSum = 0.0
+for i = 0 to 1 + x_0
+    kernelSum += close[i] * kernelW.get(i)
+yhat1 = kernelSum / kernelWSum
+
+divInRange(bool cond) =>
+    bars = ta.barssince(cond)
+    divRangeMin <= bars and bars <= divRangeMax
+
+rsiDiv = ta.rsi(close, divRsiLen)
+plFound = not na(ta.pivotlow(rsiDiv, lbL, lbR))
+phFound = not na(ta.pivothigh(rsiDiv, lbL, lbR))
+plInRange = divInRange(plFound[1])
+phInRange = divInRange(phFound[1])
+
+rsiPiv = rsiDiv[lbR]
+lowPiv = low[lbR]
+highPiv = high[lbR]
+pivBar = bar_index - lbR
+
+prevPlRsi = ta.valuewhen(plFound, rsiPiv, 1)
+prevPlLow = ta.valuewhen(plFound, lowPiv, 1)
+prevPlBar = ta.valuewhen(plFound, pivBar, 1)
+prevPhRsi = ta.valuewhen(phFound, rsiPiv, 1)
+prevPhHigh = ta.valuewhen(phFound, highPiv, 1)
+prevPhBar = ta.valuewhen(phFound, pivBar, 1)
+
+bullDiv = bShowDiv and plFound and plInRange and rsiPiv > prevPlRsi and lowPiv < prevPlLow
+bearDiv = bShowDiv and phFound and phInRange and rsiPiv < prevPhRsi and highPiv > prevPhHigh
+hiddenBullDiv = bShowDiv and bShowHiddenDiv and plFound and plInRange and rsiPiv < prevPlRsi and lowPiv > prevPlLow
+hiddenBearDiv = bShowDiv and bShowHiddenDiv and phFound and phInRange and rsiPiv > prevPhRsi and highPiv < prevPhHigh
+
+iDivTranspHidden = math.min(iDivTransp + 20, 100)
+color divBull = color.new(colorBigGreen, iDivTransp)
+color divBear = color.new(colorBigRed, iDivTransp)
+color divBullHidden = color.new(colorBigGreen, iDivTranspHidden)
+color divBearHidden = color.new(colorBigRed, iDivTranspHidden)
+
+lum(color c) =>
+    0.299 * color.r(c) + 0.587 * color.g(c) + 0.114 * color.b(c)
+
+divText(color base, int transp) =>
+    a = (100 - transp) / 100.0
+    a * lum(base) + (1 - a) * lum(chart.bg_color) > 140 ? color.black : color.white
+
+color divBullText = divText(colorBigGreen, iDivTransp)
+color divBearText = divText(colorBigRed, iDivTransp)
+color divBullHiddenText = divText(colorBigGreen, iDivTranspHidden)
+color divBearHiddenText = divText(colorBigRed, iDivTranspHidden)
+
+if bDivLines
+    if bullDiv
+        line.new(prevPlBar, prevPlLow, pivBar, lowPiv, color=divBull, width=1)
+    if bearDiv
+        line.new(prevPhBar, prevPhHigh, pivBar, highPiv, color=divBear, width=1)
+    if hiddenBullDiv
+        line.new(prevPlBar, prevPlLow, pivBar, lowPiv, color=divBullHidden, width=1, style=line.style_dashed)
+    if hiddenBearDiv
+        line.new(prevPhBar, prevPhHigh, pivBar, highPiv, color=divBearHidden, width=1, style=line.style_dashed)
+
+iTPSignalCount = (deadRev or deadRev[1] ? vDeadRev : 0) + (luxRev or luxRev[1] ? vLuxRev : 0) + (tramp or tramp[1] ? vTramp : 0) + (sqz or sqz[1] ? vSqueeze : 0) + (earlyRev or earlyRev[1] ? vEarlyRev : 0) + (shark or shark[1] ? vShark : 0) + (bands or bands[1] ? vBands : 0)
+
+var line[] viLines = array.new_line()
+var float[] viFill = array.new_float()
+var int[] viDir = array.new_int()
+var int waveState = na
+
+noOverlapRed = false
+noOverlapGreen = false
+brightGreen = false
+brightRed = false
+gapGreen = false
+gapRed = false
+
+if viLines.size() > 0
+    for i = viLines.size() - 1 to 0
+        bool viFilled = viDir.get(i) == 1 ? low <= viFill.get(i) : high >= viFill.get(i)
+        if viFilled
+            viLines.get(i).delete()
+            viLines.remove(i)
+            viFill.remove(i)
+            viDir.remove(i)
+
+addImbalance(float fillLevel, int dir, color col) =>
+    viLines.push(line.new(bar_index, open, bar_index + iBarExtend, open, color=col, width=lWidth, style=sStyle, extend=bExtend))
+    viFill.push(fillLevel)
+    viDir.push(dir)
+    if viLines.size() > 400
+        viLines.shift().delete()
+        viFill.shift()
+        viDir.shift()
+
+if isGreen and conf
+    for i = 1 to 200
+        if brightRed[i]
+            break
+        else if waveState == upTrend and isRed[i]
+            break
+        else if waveState == downTrend and open >= close[i] and isGreen[i]
+            noOverlapGreen := true
+            brightGreen := true
+            waveState := upTrend
+            break
+    if open >= close[1] and isGreen[1]
+        if bTrackBar and open > close[1]
+            addImbalance(close[1], 1, color.new(colorBigGreen, 40))
+        waveState := upTrend
+        brightGreen := true
+        gapGreen := true
+
+if isRed and conf
+    for i = 1 to 200
+        if brightGreen[i]
+            break
+        else if waveState == downTrend and isGreen[i]
+            break
+        else if waveState == upTrend and open <= close[i] and isRed[i]
+            noOverlapRed := true
+            brightRed := true
+            waveState := downTrend
+            break
+    if isRed[1] and open < close[1]
+        if bTrackBar
+            addImbalance(close[1], -1, color.new(colorBigRed, 40))
+        waveState := downTrend
+        brightRed := true
+        gapRed := true
+
+bBigBuy1 = plotBuy or plotBuy[1] or plotBuy[2] or plotBuy[3]
+bBigSell1 = plotSell or plotSell[1] or plotSell[2] or plotSell[3]
+
+alpha = 2.0 / (alphaLength + 1)
+gamma = 2.0 / (gammaLength + 1)
+bH = 0.
+hema = 0.
+hema := (1 - alpha) * (nz(hema[1]) + nz(bH[1], close)) + alpha * close
+bH := (1 - gamma) * nz(bH[1]) + gamma * (hema - nz(hema[1]))
+
+crossSrc = bShowQuad ? yhat1 : ema21
+bSkullUp = bShow921 and ta.crossover(ema9, crossSrc)
+bSkullDown = bShow921 and ta.crossunder(ema9, crossSrc)
+
+fanUp = FanVMA > mg
+color cColor = cloudType == "Simple" ? color.new(fanUp ? cloudUp : cloudDn, iSimpleCloud) : fanUp ? color.from_gradient(iSource, MID_CLOUD, MAX_CLOUD, color.new(cloudUp, iLowCloud), color.new(cloudUp, iHighCloud)) : color.from_gradient(iSource, MIN_CLOUD, MID_CLOUD, color.new(cloudDn, iLowCloud), color.new(cloudDn, iHighCloud))
+
+lineMD = plot(cloudType != "None" ? mg : na, color=color.new(color.blue, 100), title="McGinley Dynamic")
+FVMA = plot(cloudType != "None" ? FanVMA : na, color=color.new(color.white, 100), title="Bixord FVMA")
+fill(FVMA, lineMD, color=cColor, title="Cloud")
+
+wsPrev = waveState[1]
+waveBuy = noOverlapGreen and wsPrev == downTrend
+waveSell = noOverlapRed and wsPrev == upTrend
+buyBasic = not bBigBuy1 and waveBuy
+sellBasic = not bBigSell1 and waveSell
+buySuper = bBigBuy1 and waveBuy
+sellSuper = bBigSell1 and waveSell
+plusBuy = gapGreen and wsPrev == upTrend
+plusSell = gapRed and wsPrev == downTrend
+vodkaBuy = pBuyVodka and wsPrev == upTrend
+vodkaSell = pSellVodka and wsPrev == downTrend
+tpAll = iTPSignalCount >= iMaxProfit
+tpSome = iTPSignalCount >= iProfit
+
+plotchar(not bHover and buyBasic ? 1 : na, char="•", location=location.belowbar, color=colorBigGreen, size=size.small, title="Buy Signal")
+plotchar(not bHover and sellBasic ? 1 : na, char="•", location=location.abovebar, color=colorBigRed, size=size.small, title="Sell Signal")
+
+plotchar(not bHover and buySuper ? 1 : na, char="?", location=location.belowbar, color=colorBigGreen, size=size.large, title="Strong Buy Signal")
+plotchar(not bHover and sellSuper ? 1 : na, char="?", location=location.abovebar, color=strongSellRed, size=size.large, title="Strong Sell Signal")
+
+plotchar(not bHover and bShowPlus and plusBuy ? 1 : na, char="+", location=location.belowbar, color=colorBigGreen, size=size.small, title="Add Contract (Light)")
+plotchar(not bHover and bShowPlus and plusSell ? 1 : na, char="+", location=location.abovebar, color=colorBigRed, size=size.small, title="Add Contract (Light)")
+
+plotchar(not bHover and bShowBigPlus and vodkaBuy, char="?", location=location.belowbar, size=size.small, color=colorBigGreen, title="Add Contract (Strong)")
+plotchar(not bHover and bShowBigPlus and vodkaSell, char="?", location=location.abovebar, size=size.small, color=colorBigRed, title="Add Contract (Strong)")
+
+plotchar(not bHover and bShowProfit and tpAll and waveState == upTrend, char="?", location=location.abovebar, size=size.large, color=color.red, title="Take Partial Profit")
+plotchar(not bHover and bShowProfit and tpAll and waveState == downTrend, char="?", location=location.belowbar, size=size.large, color=color.red, title="Take Partial Profit")
+
+plotchar(not bHover and bShowProfit and tpSome and waveState == upTrend, char="?", location=location.abovebar, size=size.large, color=color.purple, title="Take Full Profit")
+plotchar(not bHover and bShowProfit and tpSome and waveState == downTrend, char="?", location=location.belowbar, size=size.large, color=color.purple, title="Take Full Profit")
+
+plotshape(bSkullDown, style=shape.triangledown, location=location.abovebar, size=size.tiny, color=color.new(color.yellow, 20), title="9/21 EMA Cross")
+plotshape(bSkullUp, style=shape.triangleup, location=location.belowbar, size=size.tiny, color=color.new(color.yellow, 20), title="9/21 EMA Cross")
+
+plot(bShowHEMA ? hema : na, title="HEMA", linewidth=1, color=color.new(color.fuchsia, 20))
+
+plotshape(not bHover and bullDiv, title="Bullish RSI Divergence", style=shape.labelup, location=location.belowbar, color=divBull, text="Div", textcolor=divBullText, size=size.tiny, offset=-lbR)
+plotshape(not bHover and bearDiv, title="Bearish RSI Divergence", style=shape.labeldown, location=location.abovebar, color=divBear, text="Div", textcolor=divBearText, size=size.tiny, offset=-lbR)
+plotshape(not bHover and hiddenBullDiv, title="Hidden Bullish RSI Divergence", style=shape.labelup, location=location.belowbar, color=divBullHidden, text="H", textcolor=divBullHiddenText, size=size.tiny, offset=-lbR)
+plotshape(not bHover and hiddenBearDiv, title="Hidden Bearish RSI Divergence", style=shape.labeldown, location=location.abovebar, color=divBearHidden, text="H", textcolor=divBearHiddenText, size=size.tiny, offset=-lbR)
+
+dirGrad(bool up, float strength, float lo, float hi) =>
+    color base = up ? colorBigGreen : colorBigRed
+    color.from_gradient(strength, lo, hi, color.new(base, 85), base)
+
+bullBar = close >= open
+
+color trendBase = fanUp ? colorBigGreen : colorBigRed
+color cTrendAgree = (fanUp == bullBar) ? trendBase : color.new(trendBase, 75)
+
+color waveBase = waveState == upTrend ? colorBigGreen : waveState == downTrend ? colorBigRed : color.gray
+bool waveSignalBar = buyBasic or sellBasic or buySuper or sellSuper or plusBuy or plusSell or vodkaBuy or vodkaSell
+color cTidal = waveSignalBar ? waveBase : color.new(waveBase, 55)
+
+color cConfluence = dirGrad(bullBar, iTPSignalCount, 0, iMaxProfit)
+
+rsiHeat = ta.ema(rsiM, iColorSmooth)
+color cRsiHeat = rsiHeat >= 50 ? color.from_gradient(rsiHeat, 50, 80, color.new(colorBigGreen, 85), colorBigGreen) : color.from_gradient(rsiHeat, 20, 50, colorBigRed, color.new(colorBigRed, 85))
+
+kSlope = ta.ema(nz((yhat1 - yhat1[1]) / atrValue), iColorSmooth)
+color cKernel = dirGrad(kSlope >= 0, math.abs(kSlope), 0, 0.3)
+
+relVolS = ta.ema(nz(volRel, 1), iColorSmooth)
+color cRelVol = dirGrad(bullBar, relVolS, 0.5, 2.5)
+
+adxS = ta.ema(adxVal, iColorSmooth)
+color cAdx = color.from_gradient(adxS, 15, 40, color.new(color.gray, 50), diPlus >= diMinus ? colorBigGreen : colorBigRed)
+
+haClose = ohlc4
+haOpen = float(na)
+haOpen := na(haOpen[1]) ? (open + close) / 2 : (haOpen[1] + haClose[1]) / 2
+haBody = nz((haClose - haOpen) / atrValue)
+color cHeikin = dirGrad(haBody >= 0, math.abs(haBody), 0, 0.6)
+
+zScore = ta.ema(nz((close - basisBB) / (devBB / multBB)), iColorSmooth)
+color cStretch = dirGrad(zScore >= 0, math.abs(zScore), 0, 2.5)
+
+[stLine, stDir] = ta.supertrend(stFactor, stPeriod)
+bool stUp = stDir < 0
+color cSupertrend = color.new(stUp ? colorBigGreen : colorBigRed, stUp == bullBar ? 0 : 50)
+
+color modeColor = switch sCandleType
+    "Trend Agreement" => cTrendAgree
+    "Tidal Wave" => cTidal
+    "Signal Confluence" => cConfluence
+    "RSI Heat" => cRsiHeat
+    "Kernel Slope" => cKernel
+    "Relative Volume" => cRelVol
+    "ADX Strength" => cAdx
+    "Heikin Ashi Trend" => cHeikin
+    "Stretch from Mean" => cStretch
+    "Supertrend" => cSupertrend
+    => na
+
+color candleBody = switch sCandleType
+    "Vector" => pvsraColor
+    "Volume Delta" => cCVDColor
+    "Waddah" => cBodyColor
+    "Squeeze" => cSQColor
+    => modeColor
+color candleWick = switch sCandleType
+    "Vector" => pvsraColor
+    "Volume Delta" => cCVDColor
+    "Waddah" => cWickColor
+    "Squeeze" => cSQColor
+    => modeColor
+color candleBorder = switch sCandleType
+    "Vector" => pvsraColor
+    "Volume Delta" => cCVDColor
+    "Waddah" => cBorderColor
+    "Squeeze" => cSQBorder
+    => modeColor
+
+plotcandle(sCandleType != "None" ? open : na, high, low, close, color=candleBody, wickcolor=candleWick, bordercolor=candleBorder, title="Nebula Candles")
+
+alertcondition(plotBuy or plotSell, "Ultimate Buy/Sell Signal", "Ultimate Buy/Sell Signal")
+alertcondition(buyBasic, "Buy Signal Basic", "Buy Signal Basic")
+alertcondition(sellBasic, "Sell Signal Basic", "Sell Signal Basic")
+alertcondition(buySuper, "Buy Signal Super", "Buy Signal Super")
+alertcondition(sellSuper, "Sell Signal Super", "Sell Signal Super")
+alertcondition(plusBuy or plusSell, "Small Plus Sign (Volume Imbalance)", "Small Plus Sign (Volume Imbalance)")
+alertcondition(vodkaBuy or vodkaSell, "Large Plus Sign (Vodka Shot)", "Large Plus Sign (Vodka Shot)")
+alertcondition(tpAll, "Take Partial Profit", "Take Partial Profit")
+alertcondition(tpSome, "Take FULL Profit", "Take FULL Profit")
+alertcondition(bSkullDown or bSkullUp, "9/21 EMA Cross", "9/21 EMA Cross")
+alertcondition(bullDiv, "Bullish RSI Divergence", "Bullish RSI Divergence")
+alertcondition(bearDiv, "Bearish RSI Divergence", "Bearish RSI Divergence")
+alertcondition(hiddenBullDiv or hiddenBearDiv, "Hidden RSI Divergence", "Hidden RSI Divergence")
+
+sigJoin(string cur, bool cond, string name) =>
+    cond ? (cur == "" ? name : cur + ", " + name) : cur
+
+bool sTpAll = bShowProfit and tpAll and not na(waveState)
+bool sTpSome = bShowProfit and tpSome and not tpAll and not na(waveState)
+
+string barSigs = ""
+barSigs := sigJoin(barSigs, buySuper, "Strong Buy (confluence " + str.tostring(iTPSignalCount) + ")")
+barSigs := sigJoin(barSigs, sellSuper, "Strong Sell (confluence " + str.tostring(iTPSignalCount) + ")")
+barSigs := sigJoin(barSigs, buyBasic, "Buy")
+barSigs := sigJoin(barSigs, sellBasic, "Sell")
+barSigs := sigJoin(barSigs, bShowBigPlus and vodkaBuy, "Add Long (Strong)")
+barSigs := sigJoin(barSigs, bShowBigPlus and vodkaSell, "Add Short (Strong)")
+barSigs := sigJoin(barSigs, bShowPlus and plusBuy, "Add Long")
+barSigs := sigJoin(barSigs, bShowPlus and plusSell, "Add Short")
+barSigs := sigJoin(barSigs, plotBuy, "Ultimate Buy")
+barSigs := sigJoin(barSigs, plotSell, "Ultimate Sell")
+barSigs := sigJoin(barSigs, bullDiv, "Bullish Divergence")
+barSigs := sigJoin(barSigs, bearDiv, "Bearish Divergence")
+barSigs := sigJoin(barSigs, hiddenBullDiv, "Hidden Bullish Divergence")
+barSigs := sigJoin(barSigs, hiddenBearDiv, "Hidden Bearish Divergence")
+barSigs := sigJoin(barSigs, sTpAll, "Take Profit ?")
+barSigs := sigJoin(barSigs, sTpSome, "Take Profit ?")
+barSigs := sigJoin(barSigs, bSkullUp, "9/21 Cross Up")
+barSigs := sigJoin(barSigs, bSkullDown, "9/21 Cross Down")
+
+if bSmartAlert and barSigs != ""
+    alert("Nebula: " + syminfo.ticker + " " + timeframe.period + " | " + barSigs + " @ " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)
+
+var array<chart.point> sqzTop = array.new<chart.point>()
+var array<chart.point> sqzBot = array.new<chart.point>()
+var polyline sqzPoly = na
+color sqzEdge = color.new(sqzZoneColor, math.max(0, color.t(sqzZoneColor) - 45))
+
+if bSqzZones
+    if sqzOn
+        if not sqzOn[1]
+            sqzTop.clear()
+            sqzBot.clear()
+            sqzPoly := na
+        sqzTop.push(chart.point.from_index(bar_index, upperBBsq))
+        sqzBot.push(chart.point.from_index(bar_index, lowerBBsq))
+        if sqzTop.size() >= sqzMinLen
+            array<chart.point> sqzPts = sqzTop.copy()
+            for i = sqzBot.size() - 1 to 0
+                sqzPts.push(sqzBot.get(i))
+            if not na(sqzPoly)
+                sqzPoly.delete()
+            sqzPoly := polyline.new(sqzPts, curved=true, closed=true, line_color=sqzEdge, fill_color=sqzZoneColor, line_width=1)
+    else if sqzOn[1] and bSqzRelease and sqzTop.size() >= sqzMinLen
+        bool relUp = val > 0
+        label.new(bar_index, relUp ? upperBBsq[1] : lowerBBsq[1], relUp ? "?" : "?", style=label.style_none, textcolor=relUp ? colorBigGreen : colorBigRed, size=size.huge, tooltip="Squeeze released after " + str.tostring(sqzTop.size()) + " bars. Momentum broke " + (relUp ? "up." : "down."))
+
+strongLabel(bool cond, bool below, color bg, color fg, string tip) =>
+    if cond
+        label.new(bar_index, close, " ", yloc=below ? yloc.belowbar : yloc.abovebar, style=below ? label.style_label_up : label.style_label_down, color=bg, textcolor=fg, size=size.small, tooltip=tip)
+
+hoverLabel(bool cond, int x, bool below, string txt, color col, string sz, string tip) =>
+    if cond
+        label.new(x, close, txt, yloc=below ? yloc.belowbar : yloc.abovebar, style=label.style_none, textcolor=col, size=sz, tooltip=tip)
+
+if bHover
+    string waveTxt = waveState == upTrend ? "Up" : waveState == downTrend ? "Down" : "none"
+    string ctx = "\n\nCloud: " + (fanUp ? "Up" : "Down") + "  |  Wave: " + waveTxt + "\nRSI " + str.tostring(rsiM, "#") + "  |  ADX " + str.tostring(adxVal, "#") + "  |  Confluence " + str.tostring(iTPSignalCount) + "/" + str.tostring(iMaxProfit)
+    string ultB = "\nUltimate Buy fired within the last 4 bars"
+    string ultS = "\nUltimate Sell fired within the last 4 bars"
+    hoverLabel(buyBasic, bar_index, true, "•", colorBigGreen, size.small, "BUY\nTidal Wave: new up-wave (green bar opening above a prior green close)" + ctx)
+    hoverLabel(sellBasic, bar_index, false, "•", colorBigRed, size.small, "SELL\nTidal Wave: new down-wave (red bar opening below a prior red close)" + ctx)
+    string strongNote = ""
+    strongLabel(buySuper, true, colorBigGreen, color.black, "STRONG BUY  ·  Confluence " + str.tostring(iTPSignalCount) + "\nTidal Wave: new up-wave" + ultB + strongNote + ctx)
+    strongLabel(sellSuper, false, strongSellRed, color.white, "STRONG SELL  ·  Confluence " + str.tostring(iTPSignalCount) + "\nTidal Wave: new down-wave" + ultS + strongNote + ctx)
+    hoverLabel(bShowPlus and plusBuy, bar_index, true, "+", colorBigGreen, size.small, "ADD LONG\nVolume imbalance: opened above the prior green close during an up-wave" + ctx)
+    hoverLabel(bShowPlus and plusSell, bar_index, false, "+", colorBigRed, size.small, "ADD SHORT\nVolume imbalance: opened below the prior red close during a down-wave" + ctx)
+    hoverLabel(bShowBigPlus and vodkaBuy, bar_index, true, "?", colorBigGreen, size.small, "ADD LONG (STRONG)\nVodka Shot: rising triple WMA, bullish energy ratio, volume spike, up-wave" + ctx)
+    hoverLabel(bShowBigPlus and vodkaSell, bar_index, false, "?", colorBigRed, size.small, "ADD SHORT (STRONG)\nVodka Shot: falling triple WMA, bearish energy ratio, volume spike, down-wave" + ctx)
+    if sTpAll or sTpSome
+        string tpWhy = ""
+        tpWhy := sigJoin(tpWhy, deadRev or deadRev[1], "Engulfing reversal at a 50-bar extreme")
+        tpWhy := sigJoin(tpWhy, luxRev or luxRev[1], "9-count exhaustion")
+        tpWhy := sigJoin(tpWhy, tramp or tramp[1], "Trampoline")
+        tpWhy := sigJoin(tpWhy, sqz or sqz[1], "Squeeze momentum turn")
+        tpWhy := sigJoin(tpWhy, earlyRev or earlyRev[1], "Early reversal (fractal break on a vector bar)")
+        tpWhy := sigJoin(tpWhy, shark or shark[1], "Shark (RSI outside its bands)")
+        tpWhy := sigJoin(tpWhy, bands or bands[1], "Bollinger wick rejection")
+        string tpTitle = sTpAll ? "TAKE PROFIT ?" : "TAKE PROFIT ?"
+        hoverLabel(true, bar_index, waveState == downTrend, sTpAll ? "?" : "?", sTpAll ? color.red : color.purple, size.large, tpTitle + "\nReversal signals: " + str.replace_all(tpWhy, ", ", "\n• ") + ctx)
+    string divCtx = "\nRSI " + str.tostring(prevPlRsi, "#") + " ? " + str.tostring(rsiPiv, "#")
+    string divCtxH = "\nRSI " + str.tostring(prevPhRsi, "#") + " ? " + str.tostring(rsiPiv, "#")
+    hoverLabel(bullDiv, pivBar, true, "Div", divBull, size.tiny, "BULLISH RSI DIVERGENCE\nPrice made a lower low, RSI made a higher low" + divCtx + ctx)
+    hoverLabel(bearDiv, pivBar, false, "Div", divBear, size.tiny, "BEARISH RSI DIVERGENCE\nPrice made a higher high, RSI made a lower high" + divCtxH + ctx)
+    hoverLabel(hiddenBullDiv, pivBar, true, "H", divBullHidden, size.tiny, "HIDDEN BULLISH DIVERGENCE\nPrice made a higher low, RSI made a lower low (trend continuation)" + divCtx + ctx)
+    hoverLabel(hiddenBearDiv, pivBar, false, "H", divBearHidden, size.tiny, "HIDDEN BEARISH DIVERGENCE\nPrice made a lower high, RSI made a higher high (trend continuation)" + divCtxH + ctx)
+
+type SessRange
+    float hi = na
+    float lo = na
+    int x1 = na
+    int xEnd = na
+    bool forming = false
+    bool done = false
+    bool hiBrk = false
+    bool loBrk = false
+
+const string LVL_TZ = "America/New_York"
+
+inSess(string s) =>
+    not na(time(timeframe.period, s, LVL_TZ))
+
+var SessRange rOR = SessRange.new()
+var SessRange rLon = SessRange.new()
+var SessRange rAsia = SessRange.new()
+
+bool inOR = inSess(orSess)
+bool inLon = inSess(lonSess)
+bool inAsia = inSess(asiaSess)
+bool inRTH = inSess(rthSess)
+bool newDay = ta.change(time("D")) != 0
+
+if newDay
+    if not rOR.forming
+        rOR.done := false
+    if not rLon.forming
+        rLon.done := false
+    if not rAsia.forming
+        rAsia.done := false
+
+trackRange(SessRange sr, bool inNow, bool inBefore) =>
+    if inNow and not inBefore
+        sr.hi := high
+        sr.lo := low
+        sr.x1 := bar_index
+        sr.xEnd := bar_index
+        sr.forming := true
+        sr.done := false
+        sr.hiBrk := false
+        sr.loBrk := false
+    else if inNow and sr.forming
+        sr.hi := math.max(sr.hi, high)
+        sr.lo := math.min(sr.lo, low)
+        sr.xEnd := bar_index
+    else if not inNow and sr.forming
+        sr.forming := false
+        sr.done := true
+    if sr.done and conf
+        if close > sr.hi
+            sr.hiBrk := true
+        if close < sr.lo
+            sr.loBrk := true
+
+trackRange(rOR, inOR, inOR[1])
+trackRange(rLon, inLon, inLon[1])
+trackRange(rAsia, inAsia, inAsia[1])
+
+var float ycVal = na
+var int ycX = na
+if inRTH[1] and not inRTH
+    ycVal := close[1]
+    ycX := bar_index
+
+var int orBrkDir = 0
+var int orBrkBar = na
+var int orBrkTime = na
+var float orPostHi = na
+var float orPostLo = na
+var array<float> orSizes = array.new<float>()
+var float orAvg = na
+
+if inOR and not inOR[1]
+    orBrkDir := 0
+    orBrkBar := na
+    orPostHi := na
+    orPostLo := na
+if inOR[1] and not inOR
+    orAvg := orSizes.size() > 0 ? orSizes.avg() : na
+    orSizes.push(rOR.hi - rOR.lo)
+    if orSizes.size() > 20
+        orSizes.shift()
+if rOR.done
+    orPostHi := na(orPostHi) ? high : math.max(orPostHi, high)
+    orPostLo := na(orPostLo) ? low : math.min(orPostLo, low)
+    if orBrkDir == 0 and conf
+        if close > rOR.hi
+            orBrkDir := 1
+            orBrkBar := bar_index
+            orBrkTime := time
+        else if close < rOR.lo
+            orBrkDir := -1
+            orBrkBar := bar_index
+            orBrkTime := time
+
+var array<line> lvlLines = array.new<line>()
+var array<label> lvlTags = array.new<label>()
+var array<box> lvlBoxes = array.new<box>()
+
+lvlColor(bool brk, bool isHigh) =>
+    color.new(isHigh ? colorBigGreen : colorBigRed, brk ? 10 : lvlTransp)
+
+addLevel(array<float> tp, array<string> tn, array<color> tc, float y, int x1, string name, color col, string st) =>
+    if not na(y)
+        lvlLines.push(line.new(x1, y, bar_index + lvlOffset, y, color=col, width=1, style=st))
+        tp.push(y)
+        tn.push(name)
+        tc.push(col)
+
+addRange(array<float> tp, array<string> tn, array<color> tc, SessRange sr, string nm, string st) =>
+    if sr.forming
+        if bLvlForming
+            lvlBoxes.push(box.new(sr.x1, sr.hi, bar_index, sr.lo, border_color=color.new(chart.fg_color, 75), border_width=1, border_style=line.style_dotted, bgcolor=color.new(chart.fg_color, 94)))
+    else if sr.done
+        addLevel(tp, tn, tc, sr.hi, sr.xEnd, nm + "H", lvlColor(sr.hiBrk, true), st)
+        addLevel(tp, tn, tc, sr.lo, sr.xEnd, nm + "L", lvlColor(sr.loBrk, false), st)
+
+string lvlUpTxt = "—"
+string lvlDnTxt = "—"
+
+if bLevels and barstate.islast
+    for ln in lvlLines
+        ln.delete()
+    lvlLines.clear()
+    for lb in lvlTags
+        lb.delete()
+    lvlTags.clear()
+    for bx in lvlBoxes
+        bx.delete()
+    lvlBoxes.clear()
+
+    array<float> tp = array.new<float>()
+    array<string> tn = array.new<string>()
+    array<color> tc = array.new<color>()
+
+    if bLvlAsia
+        addRange(tp, tn, tc, rAsia, "Asia", line.style_dotted)
+    if bLvlLon
+        addRange(tp, tn, tc, rLon, "Lon", line.style_dashed)
+    if bLvlOR
+        addRange(tp, tn, tc, rOR, "OR", line.style_solid)
+        if rOR.done and bLvlExt and orBrkDir != 0
+            float orRng = rOR.hi - rOR.lo
+            float ext1 = orBrkDir == 1 ? rOR.hi + 0.5 * orRng : rOR.lo - 0.5 * orRng
+            float ext2 = orBrkDir == 1 ? rOR.hi + orRng : rOR.lo - orRng
+            color ec = color.new(orBrkDir == 1 ? colorBigGreen : colorBigRed, 50)
+            addLevel(tp, tn, tc, ext1, bar_index - 6, "OR 1.5×", ec, line.style_dotted)
+            bool hitExt1 = orBrkDir == 1 ? orPostHi >= ext1 : orPostLo <= ext1
+            if hitExt1
+                addLevel(tp, tn, tc, ext2, bar_index - 6, "OR 2×", ec, line.style_dotted)
+        if bLvlBreak and rOR.done and orBrkDir != 0 and not na(orBrkBar)
+            lvlTags.push(label.new(orBrkBar, close, orBrkDir == 1 ? "?" : "?", yloc=orBrkDir == 1 ? yloc.belowbar : yloc.abovebar, style=label.style_none, textcolor=orBrkDir == 1 ? colorBigGreen : colorBigRed, size=size.small, tooltip="Opening range breakout " + (orBrkDir == 1 ? "up" : "down") + " at " + str.format_time(orBrkTime, "HH:mm", LVL_TZ)))
+    if bLvlYC and not na(ycVal)
+        addLevel(tp, tn, tc, ycVal, ycX, "Close", color.new(chart.fg_color, lvlTransp), line.style_dotted)
+
+    if tp.size() > 0
+        array<int> idx = tp.sort_indices()
+        float tol = lvlMerge * syminfo.mintick
+        int i = 0
+        while i < idx.size()
+            int k0 = idx.get(i)
+            float py = tp.get(k0)
+            string txt = tn.get(k0)
+            string tip = tn.get(k0) + "  " + str.tostring(py, format.mintick)
+            color tcol = tc.get(k0)
+            int j = i + 1
+            bool more = true
+            while more
+                if j < idx.size()
+                    if tp.get(idx.get(j)) - py <= tol
+                        txt += " · " + tn.get(idx.get(j))
+                        tip += "\n" + tn.get(idx.get(j)) + "  " + str.tostring(tp.get(idx.get(j)), format.mintick)
+                        j += 1
+                    else
+                        more := false
+                else
+                    more := false
+            lvlTags.push(label.new(bar_index + lvlOffset, py, txt, style=label.style_label_left, color=color.new(tcol, 82), textcolor=color.new(tcol, 0), size=size.small, tooltip=tip))
+            i := j
+
+        float bestUp = na
+        float bestDn = na
+        for k = 0 to tp.size() - 1
+            float d = tp.get(k) - close
+            if d > 0 and (na(bestUp) or d < bestUp)
+                bestUp := d
+                lvlUpTxt := tn.get(k) + "  +" + str.tostring(d, format.mintick)
+            if d < 0 and (na(bestDn) or -d < bestDn)
+                bestDn := -d
+                lvlDnTxt := tn.get(k) + "  -" + str.tostring(-d, format.mintick)
+
+tfLabel(string tf) =>
+    int sec = timeframe.in_seconds(tf)
+    sec < 60 ? str.tostring(sec) + "s" : sec < 3600 ? str.tostring(math.floor(sec / 60)) + "m" : sec < 86400 ? str.tostring(math.floor(sec / 3600)) + "h" : sec < 604800 ? str.tostring(math.floor(sec / 86400)) + "D" : tf
+
+posFrom(string p) =>
+    switch p
+        "Top Center" => position.top_center
+        "Top Left" => position.top_left
+        "Middle Right" => position.middle_right
+        "Middle Left" => position.middle_left
+        "Bottom Right" => position.bottom_right
+        "Bottom Center" => position.bottom_center
+        "Bottom Left" => position.bottom_left
+        => position.top_right
+
+dashPosition = posFrom(dashPos)
+
+dashTextSize = switch dashSize
+    "Tiny" => size.tiny
+    "Normal" => size.normal
+    "Large" => size.large
+    => size.small
+
+color dashBg = color.new(chart.bg_color, dashTransp)
+color dashHeadBg = color.new(chart.fg_color, math.min(100, 88 + dashTransp / 10))
+color dashKey = color.new(chart.fg_color, 35)
+color dashVal = chart.fg_color
+
+var table dash = bDash ? table.new(dashPosition, 2, 30, frame_width=1, frame_color=color.new(chart.fg_color, 80), border_width=0) : na
+
+dashRow(int row, string k, string v, color vc) =>
+    table.cell(dash, 0, row, k, text_color=dashKey, text_size=dashTextSize, text_halign=text.align_left, bgcolor=dashBg)
+    table.cell(dash, 1, row, v, text_color=vc, text_size=dashTextSize, text_halign=text.align_right, bgcolor=dashBg)
+    row + 1
+
+dashHead(int row, string k, string v) =>
+    table.cell(dash, 0, row, k, text_color=dashVal, text_size=dashTextSize, text_halign=text.align_left, bgcolor=dashHeadBg)
+    table.cell(dash, 1, row, v, text_color=dashKey, text_size=dashTextSize, text_halign=text.align_right, bgcolor=dashHeadBg)
+    row + 1
+
+upDown(bool up) =>
+    up ? "? Up" : "? Down"
+
+barColor(float pct) =>
+    pct < 50 ? color.from_gradient(pct, 0, 50, colorBigRed, color.gray) : color.from_gradient(pct, 50, 100, color.gray, colorBigGreen)
+
+barText(float pct) =>
+    int full = int(math.round(pct / 100.0 * barChars))
+    string bar = ""
+    for b = 1 to barChars
+        bar += b <= full ? "¦" : "¦"
+    bar
+
+if bDash and barstate.islast
+    table.clear(dash, 0, 0, 1, 29)
+    int row = 0
+    row := dashHead(row, "NEBULA", syminfo.ticker + " · " + tfLabel(timeframe.period))
+    row := dashRow(row, "Trend (cloud)", upDown(fanUp), fanUp ? colorBigGreen : colorBigRed)
+    row := dashRow(row, "Wave", na(waveState) ? "—" : upDown(waveState == upTrend), waveState == upTrend ? colorBigGreen : waveState == downTrend ? colorBigRed : dashVal)
+    float adxPct = math.min(100.0, adxVal * 2)
+    color adxCol = barColor(50 + (diPlus >= diMinus ? 1 : -1) * adxPct / 2)
+    row := dashRow(row, "ADX", barText(adxPct) + "  " + str.tostring(adxVal, "#"), adxCol)
+    table.cell_set_tooltip(dash, 1, row - 1, "ADX " + str.tostring(adxVal, "#") + (adxVal >= 25 ? " (strong trend)" : adxVal >= 20 ? " (trend building)" : " (choppy)") + ". Bar is full at 50. Color leans green when buyers lead (+DI) and red when sellers lead (-DI).")
+    row := dashRow(row, "RSI", barText(rsiM) + "  " + str.tostring(rsiM, "#"), barColor(rsiM))
+    table.cell_set_tooltip(dash, 1, row - 1, "RSI " + str.tostring(rsiM, "#") + (rsiM >= 70 ? " (overbought)" : rsiM <= 30 ? " (oversold)" : "") + ". Gray at 50, redder toward 0, greener toward 100.")
+    float confPct = math.min(100.0, 100.0 * iTPSignalCount / iMaxProfit)
+    color confTarget = waveState == upTrend ? colorBigRed : waveState == downTrend ? colorBigGreen : color.orange
+    row := dashRow(row, "Confluence", barText(confPct) + "  " + str.tostring(iTPSignalCount) + "/" + str.tostring(iMaxProfit), color.from_gradient(confPct, 0, 100, color.gray, confTarget))
+    table.cell_set_tooltip(dash, 1, row - 1, str.tostring(iTPSignalCount) + " of " + str.tostring(iMaxProfit) + " reversal points needed for Take Profit ?. Fills toward red in an up-wave (top risk) and green in a down-wave (bottom risk).")
+    if bDashLevels and bLevels
+        row := dashHead(row, "SESSION LEVELS", "")
+        float orSize = rOR.hi - rOR.lo
+        string orTxt = rOR.done ? str.tostring(orSize, format.mintick) + " pts" + (na(orAvg) or orAvg == 0 ? "" : " · " + str.tostring(orSize / orAvg, "#.#") + "× avg") : rOR.forming ? "Forming…" : "—"
+        row := dashRow(row, "Opening range", orTxt, dashVal)
+        string brkTxt = not rOR.done ? "—" : orBrkDir == 1 ? "? Up at " + str.format_time(orBrkTime, "HH:mm", LVL_TZ) : orBrkDir == -1 ? "? Down at " + str.format_time(orBrkTime, "HH:mm", LVL_TZ) : rOR.done ? "Inside" : "—"
+        row := dashRow(row, "OR break", brkTxt, not rOR.done ? dashVal : orBrkDir == 1 ? colorBigGreen : orBrkDir == -1 ? colorBigRed : dashVal)
+        row := dashRow(row, "Nearest above", lvlUpTxt, dashVal)
+        row := dashRow(row, "Nearest below", lvlDnTxt, dashVal)
