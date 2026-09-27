@@ -1,6 +1,16 @@
 //@version=5
 indicator(title="Nebula3", shorttitle="Nebula v3", overlay=true, max_bars_back=1000, max_lines_count=500, max_labels_count=500, max_boxes_count=500, max_polylines_count=100)
 
+// NEBULA 3.0 build 30 - released by TraderOracle on Sep 28, 2026
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+
+// Nebula was inspired by Daviddtech's year end video on "best indicators" here: https://www.youtube.com/watch?v=zG7oRD_upt4
+// My thoughts were - why not combine them all into a pretty cloud, since two are EMAs?  Thus Nebula was born.
+// I then added all my TO Method reversal indicators, and added Aaron D's Wave theory idea
+// ( see Aaron D's channel here: https://www.youtube.com/watch?v=blg8GCxR80o )
+
+// @davidclarke6612 provided the idea for Rational Quadratic Kernel as a replacement for the 9/21 cross
+
 import TradersReality/Traders_Reality_Lib/2 as trLib
 
 const int vSqueeze = 4
@@ -54,7 +64,7 @@ bLvlAsia = input.bool(true, "Asia", inline="asia", group="Session Levels")
 asiaSess = input.session("1800-0300", "", inline="asia", group="Session Levels", tooltip="New York time.")
 bLvlYC = input.bool(true, "Yesterday's close", inline="yc", group="Session Levels")
 rthSess = input.session("0930-1600", "", inline="yc", group="Session Levels", tooltip="Regular session (New York time). Its last close is used as yesterday's close.")
-bLvlExt = input.bool(true, "Opening range extensions (1.5× / 2×)", group="Session Levels")
+bLvlExt = input.bool(true, "Opening range extensions (1.5� / 2�)", group="Session Levels")
 bLvlForming = input.bool(true, "Shade ranges while they form", group="Session Levels")
 bLvlBreak = input.bool(true, "Mark opening range breakout", group="Session Levels")
 lvlMerge = input.int(8, "Merge tags within (ticks)", minval=0, group="Session Levels", tooltip="Levels closer than this share one tag.")
@@ -719,23 +729,23 @@ vodkaSell = pSellVodka and wsPrev == downTrend
 tpAll = iTPSignalCount >= iMaxProfit
 tpSome = iTPSignalCount >= iProfit
 
-plotchar(not bHover and buyBasic ? 1 : na, char="•", location=location.belowbar, color=colorBigGreen, size=size.small, title="Buy Signal")
-plotchar(not bHover and sellBasic ? 1 : na, char="•", location=location.abovebar, color=colorBigRed, size=size.small, title="Sell Signal")
+plotchar(not bHover and buyBasic ? 1 : na, char="�", location=location.belowbar, color=colorBigGreen, size=size.small, title="Buy Signal")
+plotchar(not bHover and sellBasic ? 1 : na, char="�", location=location.abovebar, color=colorBigRed, size=size.small, title="Sell Signal")
 
-plotchar(not bHover and buySuper ? 1 : na, char="➊", location=location.belowbar, color=colorBigGreen, size=size.large, title="Strong Buy Signal")
-plotchar(not bHover and sellSuper ? 1 : na, char="➊", location=location.abovebar, color=strongSellRed, size=size.large, title="Strong Sell Signal")
+plotchar(not bHover and buySuper ? 1 : na, char="?", location=location.belowbar, color=colorBigGreen, size=size.large, title="Strong Buy Signal")
+plotchar(not bHover and sellSuper ? 1 : na, char="?", location=location.abovebar, color=strongSellRed, size=size.large, title="Strong Sell Signal")
 
 plotchar(not bHover and bShowPlus and plusBuy ? 1 : na, char="+", location=location.belowbar, color=colorBigGreen, size=size.small, title="Add Contract (Light)")
 plotchar(not bHover and bShowPlus and plusSell ? 1 : na, char="+", location=location.abovebar, color=colorBigRed, size=size.small, title="Add Contract (Light)")
 
-plotchar(not bHover and bShowBigPlus and vodkaBuy, char="✚", location=location.belowbar, size=size.small, color=colorBigGreen, title="Add Contract (Strong)")
-plotchar(not bHover and bShowBigPlus and vodkaSell, char="✚", location=location.abovebar, size=size.small, color=colorBigRed, title="Add Contract (Strong)")
+plotchar(not bHover and bShowBigPlus and vodkaBuy, char="?", location=location.belowbar, size=size.small, color=colorBigGreen, title="Add Contract (Strong)")
+plotchar(not bHover and bShowBigPlus and vodkaSell, char="?", location=location.abovebar, size=size.small, color=colorBigRed, title="Add Contract (Strong)")
 
-plotchar(not bHover and bShowProfit and tpAll and waveState == upTrend, char="✔", location=location.abovebar, size=size.large, color=color.red, title="Take Partial Profit")
-plotchar(not bHover and bShowProfit and tpAll and waveState == downTrend, char="✔", location=location.belowbar, size=size.large, color=color.red, title="Take Partial Profit")
+plotchar(not bHover and bShowProfit and tpAll and waveState == upTrend, char="?", location=location.abovebar, size=size.large, color=color.red, title="Take Partial Profit")
+plotchar(not bHover and bShowProfit and tpAll and waveState == downTrend, char="?", location=location.belowbar, size=size.large, color=color.red, title="Take Partial Profit")
 
-plotchar(not bHover and bShowProfit and tpSome and waveState == upTrend, char="✓", location=location.abovebar, size=size.large, color=color.purple, title="Take Full Profit")
-plotchar(not bHover and bShowProfit and tpSome and waveState == downTrend, char="✓", location=location.belowbar, size=size.large, color=color.purple, title="Take Full Profit")
+plotchar(not bHover and bShowProfit and tpSome and waveState == upTrend, char="?", location=location.abovebar, size=size.large, color=color.purple, title="Take Full Profit")
+plotchar(not bHover and bShowProfit and tpSome and waveState == downTrend, char="?", location=location.belowbar, size=size.large, color=color.purple, title="Take Full Profit")
 
 plotshape(bSkullDown, style=shape.triangledown, location=location.abovebar, size=size.tiny, color=color.new(color.yellow, 20), title="9/21 EMA Cross")
 plotshape(bSkullUp, style=shape.triangleup, location=location.belowbar, size=size.tiny, color=color.new(color.yellow, 20), title="9/21 EMA Cross")
@@ -856,8 +866,8 @@ barSigs := sigJoin(barSigs, bullDiv, "Bullish Divergence")
 barSigs := sigJoin(barSigs, bearDiv, "Bearish Divergence")
 barSigs := sigJoin(barSigs, hiddenBullDiv, "Hidden Bullish Divergence")
 barSigs := sigJoin(barSigs, hiddenBearDiv, "Hidden Bearish Divergence")
-barSigs := sigJoin(barSigs, sTpAll, "Take Profit ✔")
-barSigs := sigJoin(barSigs, sTpSome, "Take Profit ✓")
+barSigs := sigJoin(barSigs, sTpAll, "Take Profit ?")
+barSigs := sigJoin(barSigs, sTpSome, "Take Profit ?")
 barSigs := sigJoin(barSigs, bSkullUp, "9/21 Cross Up")
 barSigs := sigJoin(barSigs, bSkullDown, "9/21 Cross Down")
 
@@ -886,7 +896,7 @@ if bSqzZones
             sqzPoly := polyline.new(sqzPts, curved=true, closed=true, line_color=sqzEdge, fill_color=sqzZoneColor, line_width=1)
     else if sqzOn[1] and bSqzRelease and sqzTop.size() >= sqzMinLen
         bool relUp = val > 0
-        label.new(bar_index, relUp ? upperBBsq[1] : lowerBBsq[1], relUp ? "⇡" : "⇣", style=label.style_none, textcolor=relUp ? colorBigGreen : colorBigRed, size=size.huge, tooltip="Squeeze released after " + str.tostring(sqzTop.size()) + " bars. Momentum broke " + (relUp ? "up." : "down."))
+        label.new(bar_index, relUp ? upperBBsq[1] : lowerBBsq[1], relUp ? "?" : "?", style=label.style_none, textcolor=relUp ? colorBigGreen : colorBigRed, size=size.huge, tooltip="Squeeze released after " + str.tostring(sqzTop.size()) + " bars. Momentum broke " + (relUp ? "up." : "down."))
 
 strongLabel(bool cond, bool below, color bg, color fg, string tip) =>
     if cond
@@ -901,15 +911,15 @@ if bHover
     string ctx = "\n\nCloud: " + (fanUp ? "Up" : "Down") + "  |  Wave: " + waveTxt + "\nRSI " + str.tostring(rsiM, "#") + "  |  ADX " + str.tostring(adxVal, "#") + "  |  Confluence " + str.tostring(iTPSignalCount) + "/" + str.tostring(iMaxProfit)
     string ultB = "\nUltimate Buy fired within the last 4 bars"
     string ultS = "\nUltimate Sell fired within the last 4 bars"
-    hoverLabel(buyBasic, bar_index, true, "•", colorBigGreen, size.small, "BUY\nTidal Wave: new up-wave (green bar opening above a prior green close)" + ctx)
-    hoverLabel(sellBasic, bar_index, false, "•", colorBigRed, size.small, "SELL\nTidal Wave: new down-wave (red bar opening below a prior red close)" + ctx)
+    hoverLabel(buyBasic, bar_index, true, "�", colorBigGreen, size.small, "BUY\nTidal Wave: new up-wave (green bar opening above a prior green close)" + ctx)
+    hoverLabel(sellBasic, bar_index, false, "�", colorBigRed, size.small, "SELL\nTidal Wave: new down-wave (red bar opening below a prior red close)" + ctx)
     string strongNote = ""
-    strongLabel(buySuper, true, colorBigGreen, color.black, "STRONG BUY  ·  Confluence " + str.tostring(iTPSignalCount) + "\nTidal Wave: new up-wave" + ultB + strongNote + ctx)
-    strongLabel(sellSuper, false, strongSellRed, color.white, "STRONG SELL  ·  Confluence " + str.tostring(iTPSignalCount) + "\nTidal Wave: new down-wave" + ultS + strongNote + ctx)
+    strongLabel(buySuper, true, colorBigGreen, color.black, "STRONG BUY  �  Confluence " + str.tostring(iTPSignalCount) + "\nTidal Wave: new up-wave" + ultB + strongNote + ctx)
+    strongLabel(sellSuper, false, strongSellRed, color.white, "STRONG SELL  �  Confluence " + str.tostring(iTPSignalCount) + "\nTidal Wave: new down-wave" + ultS + strongNote + ctx)
     hoverLabel(bShowPlus and plusBuy, bar_index, true, "+", colorBigGreen, size.small, "ADD LONG\nVolume imbalance: opened above the prior green close during an up-wave" + ctx)
     hoverLabel(bShowPlus and plusSell, bar_index, false, "+", colorBigRed, size.small, "ADD SHORT\nVolume imbalance: opened below the prior red close during a down-wave" + ctx)
-    hoverLabel(bShowBigPlus and vodkaBuy, bar_index, true, "✚", colorBigGreen, size.small, "ADD LONG (STRONG)\nVodka Shot: rising triple WMA, bullish energy ratio, volume spike, up-wave" + ctx)
-    hoverLabel(bShowBigPlus and vodkaSell, bar_index, false, "✚", colorBigRed, size.small, "ADD SHORT (STRONG)\nVodka Shot: falling triple WMA, bearish energy ratio, volume spike, down-wave" + ctx)
+    hoverLabel(bShowBigPlus and vodkaBuy, bar_index, true, "?", colorBigGreen, size.small, "ADD LONG (STRONG)\nVodka Shot: rising triple WMA, bullish energy ratio, volume spike, up-wave" + ctx)
+    hoverLabel(bShowBigPlus and vodkaSell, bar_index, false, "?", colorBigRed, size.small, "ADD SHORT (STRONG)\nVodka Shot: falling triple WMA, bearish energy ratio, volume spike, down-wave" + ctx)
     if sTpAll or sTpSome
         string tpWhy = ""
         tpWhy := sigJoin(tpWhy, deadRev or deadRev[1], "Engulfing reversal at a 50-bar extreme")
@@ -919,10 +929,10 @@ if bHover
         tpWhy := sigJoin(tpWhy, earlyRev or earlyRev[1], "Early reversal (fractal break on a vector bar)")
         tpWhy := sigJoin(tpWhy, shark or shark[1], "Shark (RSI outside its bands)")
         tpWhy := sigJoin(tpWhy, bands or bands[1], "Bollinger wick rejection")
-        string tpTitle = sTpAll ? "TAKE PROFIT ✔" : "TAKE PROFIT ✓"
-        hoverLabel(true, bar_index, waveState == downTrend, sTpAll ? "✔" : "✓", sTpAll ? color.red : color.purple, size.large, tpTitle + "\nReversal signals: " + str.replace_all(tpWhy, ", ", "\n• ") + ctx)
-    string divCtx = "\nRSI " + str.tostring(prevPlRsi, "#") + " → " + str.tostring(rsiPiv, "#")
-    string divCtxH = "\nRSI " + str.tostring(prevPhRsi, "#") + " → " + str.tostring(rsiPiv, "#")
+        string tpTitle = sTpAll ? "TAKE PROFIT ?" : "TAKE PROFIT ?"
+        hoverLabel(true, bar_index, waveState == downTrend, sTpAll ? "?" : "?", sTpAll ? color.red : color.purple, size.large, tpTitle + "\nReversal signals: " + str.replace_all(tpWhy, ", ", "\n� ") + ctx)
+    string divCtx = "\nRSI " + str.tostring(prevPlRsi, "#") + " ? " + str.tostring(rsiPiv, "#")
+    string divCtxH = "\nRSI " + str.tostring(prevPhRsi, "#") + " ? " + str.tostring(rsiPiv, "#")
     hoverLabel(bullDiv, pivBar, true, "Div", divBull, size.tiny, "BULLISH RSI DIVERGENCE\nPrice made a lower low, RSI made a higher low" + divCtx + ctx)
     hoverLabel(bearDiv, pivBar, false, "Div", divBear, size.tiny, "BEARISH RSI DIVERGENCE\nPrice made a higher high, RSI made a lower high" + divCtxH + ctx)
     hoverLabel(hiddenBullDiv, pivBar, true, "H", divBullHidden, size.tiny, "HIDDEN BULLISH DIVERGENCE\nPrice made a higher low, RSI made a lower low (trend continuation)" + divCtx + ctx)
@@ -1047,8 +1057,8 @@ addRange(array<float> tp, array<string> tn, array<color> tc, SessRange sr, strin
         addLevel(tp, tn, tc, sr.hi, sr.xEnd, nm + "H", lvlColor(sr.hiBrk, true), st)
         addLevel(tp, tn, tc, sr.lo, sr.xEnd, nm + "L", lvlColor(sr.loBrk, false), st)
 
-string lvlUpTxt = "—"
-string lvlDnTxt = "—"
+string lvlUpTxt = "�"
+string lvlDnTxt = "�"
 
 if bLevels and barstate.islast
     for ln in lvlLines
@@ -1076,12 +1086,12 @@ if bLevels and barstate.islast
             float ext1 = orBrkDir == 1 ? rOR.hi + 0.5 * orRng : rOR.lo - 0.5 * orRng
             float ext2 = orBrkDir == 1 ? rOR.hi + orRng : rOR.lo - orRng
             color ec = color.new(orBrkDir == 1 ? colorBigGreen : colorBigRed, 50)
-            addLevel(tp, tn, tc, ext1, bar_index - 6, "OR 1.5×", ec, line.style_dotted)
+            addLevel(tp, tn, tc, ext1, bar_index - 6, "OR 1.5�", ec, line.style_dotted)
             bool hitExt1 = orBrkDir == 1 ? orPostHi >= ext1 : orPostLo <= ext1
             if hitExt1
-                addLevel(tp, tn, tc, ext2, bar_index - 6, "OR 2×", ec, line.style_dotted)
+                addLevel(tp, tn, tc, ext2, bar_index - 6, "OR 2�", ec, line.style_dotted)
         if bLvlBreak and rOR.done and orBrkDir != 0 and not na(orBrkBar)
-            lvlTags.push(label.new(orBrkBar, close, orBrkDir == 1 ? "▲" : "▼", yloc=orBrkDir == 1 ? yloc.belowbar : yloc.abovebar, style=label.style_none, textcolor=orBrkDir == 1 ? colorBigGreen : colorBigRed, size=size.small, tooltip="Opening range breakout " + (orBrkDir == 1 ? "up" : "down") + " at " + str.format_time(orBrkTime, "HH:mm", LVL_TZ)))
+            lvlTags.push(label.new(orBrkBar, close, orBrkDir == 1 ? "?" : "?", yloc=orBrkDir == 1 ? yloc.belowbar : yloc.abovebar, style=label.style_none, textcolor=orBrkDir == 1 ? colorBigGreen : colorBigRed, size=size.small, tooltip="Opening range breakout " + (orBrkDir == 1 ? "up" : "down") + " at " + str.format_time(orBrkTime, "HH:mm", LVL_TZ)))
     if bLvlYC and not na(ycVal)
         addLevel(tp, tn, tc, ycVal, ycX, "Close", color.new(chart.fg_color, lvlTransp), line.style_dotted)
 
@@ -1100,7 +1110,7 @@ if bLevels and barstate.islast
             while more
                 if j < idx.size()
                     if tp.get(idx.get(j)) - py <= tol
-                        txt += " · " + tn.get(idx.get(j))
+                        txt += " � " + tn.get(idx.get(j))
                         tip += "\n" + tn.get(idx.get(j)) + "  " + str.tostring(tp.get(idx.get(j)), format.mintick)
                         j += 1
                     else
@@ -1119,7 +1129,7 @@ if bLevels and barstate.islast
                 lvlUpTxt := tn.get(k) + "  +" + str.tostring(d, format.mintick)
             if d < 0 and (na(bestDn) or -d < bestDn)
                 bestDn := -d
-                lvlDnTxt := tn.get(k) + "  −" + str.tostring(-d, format.mintick)
+                lvlDnTxt := tn.get(k) + "  -" + str.tostring(-d, format.mintick)
 
 tfLabel(string tf) =>
     int sec = timeframe.in_seconds(tf)
@@ -1162,7 +1172,7 @@ dashHead(int row, string k, string v) =>
     row + 1
 
 upDown(bool up) =>
-    up ? "▲ Up" : "▼ Down"
+    up ? "? Up" : "? Down"
 
 barColor(float pct) =>
     pct < 50 ? color.from_gradient(pct, 0, 50, colorBigRed, color.gray) : color.from_gradient(pct, 50, 100, color.gray, colorBigGreen)
@@ -1171,15 +1181,15 @@ barText(float pct) =>
     int full = int(math.round(pct / 100.0 * barChars))
     string bar = ""
     for b = 1 to barChars
-        bar += b <= full ? "█" : "░"
+        bar += b <= full ? "�" : "�"
     bar
 
 if bDash and barstate.islast
     table.clear(dash, 0, 0, 1, 29)
     int row = 0
-    row := dashHead(row, "NEBULA", syminfo.ticker + " · " + tfLabel(timeframe.period))
+    row := dashHead(row, "NEBULA", syminfo.ticker + " � " + tfLabel(timeframe.period))
     row := dashRow(row, "Trend (cloud)", upDown(fanUp), fanUp ? colorBigGreen : colorBigRed)
-    row := dashRow(row, "Wave", na(waveState) ? "—" : upDown(waveState == upTrend), waveState == upTrend ? colorBigGreen : waveState == downTrend ? colorBigRed : dashVal)
+    row := dashRow(row, "Wave", na(waveState) ? "�" : upDown(waveState == upTrend), waveState == upTrend ? colorBigGreen : waveState == downTrend ? colorBigRed : dashVal)
     float adxPct = math.min(100.0, adxVal * 2)
     color adxCol = barColor(50 + (diPlus >= diMinus ? 1 : -1) * adxPct / 2)
     row := dashRow(row, "ADX", barText(adxPct) + "  " + str.tostring(adxVal, "#"), adxCol)
@@ -1189,13 +1199,13 @@ if bDash and barstate.islast
     float confPct = math.min(100.0, 100.0 * iTPSignalCount / iMaxProfit)
     color confTarget = waveState == upTrend ? colorBigRed : waveState == downTrend ? colorBigGreen : color.orange
     row := dashRow(row, "Confluence", barText(confPct) + "  " + str.tostring(iTPSignalCount) + "/" + str.tostring(iMaxProfit), color.from_gradient(confPct, 0, 100, color.gray, confTarget))
-    table.cell_set_tooltip(dash, 1, row - 1, str.tostring(iTPSignalCount) + " of " + str.tostring(iMaxProfit) + " reversal points needed for Take Profit ✔. Fills toward red in an up-wave (top risk) and green in a down-wave (bottom risk).")
+    table.cell_set_tooltip(dash, 1, row - 1, str.tostring(iTPSignalCount) + " of " + str.tostring(iMaxProfit) + " reversal points needed for Take Profit ?. Fills toward red in an up-wave (top risk) and green in a down-wave (bottom risk).")
     if bDashLevels and bLevels
         row := dashHead(row, "SESSION LEVELS", "")
         float orSize = rOR.hi - rOR.lo
-        string orTxt = rOR.done ? str.tostring(orSize, format.mintick) + " pts" + (na(orAvg) or orAvg == 0 ? "" : " · " + str.tostring(orSize / orAvg, "#.#") + "× avg") : rOR.forming ? "Forming…" : "—"
+        string orTxt = rOR.done ? str.tostring(orSize, format.mintick) + " pts" + (na(orAvg) or orAvg == 0 ? "" : " � " + str.tostring(orSize / orAvg, "#.#") + "� avg") : rOR.forming ? "Forming�" : "�"
         row := dashRow(row, "Opening range", orTxt, dashVal)
-        string brkTxt = not rOR.done ? "—" : orBrkDir == 1 ? "▲ Up at " + str.format_time(orBrkTime, "HH:mm", LVL_TZ) : orBrkDir == -1 ? "▼ Down at " + str.format_time(orBrkTime, "HH:mm", LVL_TZ) : rOR.done ? "Inside" : "—"
+        string brkTxt = not rOR.done ? "�" : orBrkDir == 1 ? "? Up at " + str.format_time(orBrkTime, "HH:mm", LVL_TZ) : orBrkDir == -1 ? "? Down at " + str.format_time(orBrkTime, "HH:mm", LVL_TZ) : rOR.done ? "Inside" : "�"
         row := dashRow(row, "OR break", brkTxt, not rOR.done ? dashVal : orBrkDir == 1 ? colorBigGreen : orBrkDir == -1 ? colorBigRed : dashVal)
         row := dashRow(row, "Nearest above", lvlUpTxt, dashVal)
         row := dashRow(row, "Nearest below", lvlDnTxt, dashVal)
